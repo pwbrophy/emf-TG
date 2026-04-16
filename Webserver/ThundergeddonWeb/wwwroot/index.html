@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Thundergeddon</title>
+  <script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0d14;
+      --surface:  #1a1a28;
+      --border:   #2e2e50;
+      --accent:   #ff4d1c;
+      --accent2:  #ff8c00;
+      --text:     #e8e8f0;
+      --muted:    #6b6b90;
+      --green:    #2a7a2a;
+      --hp-fill:  #22cc55;
+      --hp-low:   #ee3333;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 16px;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    /* ── Shared screen container ── */
+    .screen {
+      display: none;
+      position: absolute;
+      inset: 0;
+    }
+    .screen.active { display: block; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 1 — JOIN
+    ═══════════════════════════════════════════════════ */
+    #screen-join {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100%;
+      padding: 24px 20px;
+      text-align: center;
+    }
+    #screen-join.active { display: flex; }
+
+    h1 {
+      font-size: 2.4rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 6px;
+    }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 40px; }
+
+    .join-box { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 14px; }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1.1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    button.primary {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button.primary:active { opacity: 0.8; }
+    button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+    .status.error { color: #e05050; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 2 — LOBBY
+    ═══════════════════════════════════════════════════ */
+    #screen-lobby {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100%;
+      padding: 24px 20px;
+      text-align: center;
+    }
+    #screen-lobby.active { display: flex; }
+
+    .lobby-header { margin-bottom: 32px; }
+    .lobby-header h2 { font-size: 1.6rem; font-weight: 800; margin-bottom: 6px; }
+    .lobby-header p  { color: var(--muted); font-size: 0.9rem; }
+
+    .player-list {
+      width: 100%;
+      max-width: 360px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .player-list-header {
+      padding: 10px 16px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    .player-row {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 1rem;
+    }
+    .player-row:last-child { border-bottom: none; }
+    .player-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 12px; flex-shrink: 0; }
+    .player-name-self { font-weight: 700; color: var(--accent2); }
+    .empty-state { padding: 20px 16px; color: var(--muted); font-size: 0.9rem; }
+
+    .waiting-anim {
+      display: inline-block;
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 3 — PLAYING
+    ═══════════════════════════════════════════════════ */
+    #screen-playing {
+      background: #000;
+    }
+
+    /* Camera stream fills the whole screen */
+    #stream {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    #stream-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+      background: #000;
+      pointer-events: none;
+    }
+
+    /* ── HP bar ── */
+    #hp-bar-wrap {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 28px;
+      background: rgba(0,0,0,0.6);
+      z-index: 10;
+    }
+    #hp-bar-fill {
+      height: 100%;
+      background: var(--hp-fill);
+      transition: width 0.3s ease, background 0.3s ease;
+      width: 100%;
+    }
+    #hp-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+
+    /* ── Timer ── */
+    #timer-label {
+      position: absolute;
+      top: 34px; left: 50%; transform: translateX(-50%);
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+    }
+
+    /* ── Robot callsign ── */
+    #robot-label {
+      position: absolute;
+      top: 34px; left: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.75);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+    }
+
+    /* ── Controls overlay (full screen so children can use vh/vw) ── */
+    #controls {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none; /* children opt-in */
+    }
+
+    /* ── Joystick (bottom-left, 5% inset) ── */
+    #joystick-base {
+      position: absolute;
+      left: 5vw;
+      bottom: 10vh;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.3);
+      pointer-events: all;
+      touch-action: none;
+    }
+    #joystick-thumb {
+      position: absolute;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.55);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: background 0.1s;
+    }
+
+    /* ── Turret control (bottom-right, 5% inset) ── */
+    #turret-base {
+      position: absolute;
+      right: 5vw;
+      bottom: calc(10vh + 22px);
+      width: 260px;
+      height: 44px;
+      border-radius: 22px;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.3);
+      pointer-events: all;
+      touch-action: none;
+    }
+    #turret-thumb {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.55);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: left 0.05s;
+    }
+    #turret-label {
+      position: absolute;
+      right: 5vw;
+      bottom: 10vh;
+      width: 260px;
+      text-align: center;
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* ── Rotate notice (portrait mode) ── */
+    #rotate-notice {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: var(--bg);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      text-align: center;
+      padding: 24px;
+    }
+    /* Only enforce landscape on the playing screen */
+    @media (orientation: portrait) {
+      body.game-active #rotate-notice { display: flex; }
+    }
+    #rotate-notice svg { opacity: 0.6; animation: rotateHint 2s ease-in-out infinite; }
+    @keyframes rotateHint {
+      0%, 100% { transform: rotate(0deg); }
+      50%       { transform: rotate(90deg); }
+    }
+    #rotate-notice p { color: var(--muted); font-size: 1rem; }
+
+    /* ── Fire button ── */
+    #fire-btn {
+      position: absolute;
+      left: 50%;
+      bottom: 10vh;
+      transform: translateX(-50%);
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 38% 38%, #ff6b3d, #cc1100);
+      border: 2px solid rgba(255,120,60,0.6);
+      box-shadow: 0 0 10px rgba(255,60,0,0.5);
+      pointer-events: all;
+      touch-action: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: opacity 0.15s, transform 0.08s;
+    }
+    #fire-btn:active       { transform: translateX(-50%) scale(0.92); }
+    #fire-btn.cooldown     { opacity: 0.4; pointer-events: none; }
+    #fire-btn-text         { color: #fff; font-size: 0.75rem; font-weight: 900; letter-spacing: 0.05em; text-align: center; pointer-events: none; }
+    #fire-countdown        { display: none; font-size: 1.1rem; font-weight: 900; }
+    #fire-countdown.active { display: block; }
+    #fire-word             { display: block; }
+    #fire-word.hidden      { display: none; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 4 — DEAD overlay (sits on top of playing)
+    ═══════════════════════════════════════════════════ */
+    #screen-dead {
+      background: rgba(0,0,0,0.75);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    #screen-dead.active { display: flex; }
+    #screen-dead h2 {
+      font-size: 3rem;
+      font-weight: 900;
+      color: #ff2222;
+      text-shadow: 0 0 30px rgba(255,0,0,0.6);
+      letter-spacing: 0.05em;
+    }
+    #screen-dead p { color: var(--muted); margin-top: 12px; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 5 — GAME OVER
+    ═══════════════════════════════════════════════════ */
+    #screen-gameover {
+      background: rgba(0,0,0,0.85);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 60;
+      text-align: center;
+      padding: 24px;
+    }
+    #screen-gameover.active { display: flex; }
+    #screen-gameover h2 { font-size: 2.2rem; font-weight: 900; margin-bottom: 8px; color: var(--accent2); }
+    #screen-gameover p  { color: var(--muted); margin-bottom: 32px; }
+    #play-again-btn { max-width: 240px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Rotate notice (portrait only) ──────────────────────────────── -->
+<div id="rotate-notice">
+  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="5" y="2" width="14" height="20" rx="2"/>
+    <path d="M12 18h.01"/>
+  </svg>
+  <p>Rotate your device to landscape</p>
+</div>
+
+<!-- ── Screen 1: Join ──────────────────────────────────────────────── -->
+<div id="screen-join" class="screen active">
+  <h1>THUNDERGEDDON</h1>
+  <p class="subtitle">RC tank battle</p>
+  <div class="join-box">
+    <input id="name-input" type="text" placeholder="Enter your name"
+           maxlength="20" autocomplete="off" spellcheck="false" />
+    <button class="primary" id="join-btn" onclick="joinLobby()">JOIN</button>
+    <div id="join-status" class="status"></div>
+  </div>
+</div>
+
+<!-- ── Screen 2: Lobby ─────────────────────────────────────────────── -->
+<div id="screen-lobby" class="screen">
+  <div class="lobby-header">
+    <div class="waiting-anim"></div>
+    <h2>LOBBY</h2>
+    <p>Waiting for the game to start…</p>
+  </div>
+  <div class="player-list">
+    <div class="player-list-header">Players</div>
+    <div id="player-list-body"><div class="empty-state">No players yet</div></div>
+  </div>
+</div>
+
+<!-- ── Screen 3: Playing ───────────────────────────────────────────── -->
+<div id="screen-playing" class="screen">
+  <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
+  <div id="stream-placeholder" style="display:none">No video stream</div>
+
+  <!-- HP bar -->
+  <div id="hp-bar-wrap">
+    <div id="hp-bar-fill"></div>
+    <div id="hp-text">HP</div>
+  </div>
+
+  <!-- Timer & robot label -->
+  <div id="timer-label">3:00</div>
+  <div id="robot-label"></div>
+
+  <!-- Fullscreen button -->
+  <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"
+    style="position:absolute;top:34px;right:10px;z-index:15;background:rgba(0,0,0,0.45);
+           border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 7px;
+           color:rgba(255,255,255,0.8);font-size:0.75rem;cursor:pointer;line-height:1;">⛶</button>
+
+  <!-- Controls -->
+  <div id="controls">
+    <!-- Joystick -->
+    <div id="joystick-base">
+      <div id="joystick-thumb"></div>
+    </div>
+
+    <!-- Fire button -->
+    <div id="fire-btn" onpointerdown="onFire()">
+      <div id="fire-btn-text">
+        <span id="fire-word">FIRE</span>
+        <span id="fire-countdown"></span>
+      </div>
+    </div>
+
+    <!-- Turret -->
+    <div id="turret-base">
+      <div id="turret-thumb"></div>
+    </div>
+    <div id="turret-label">TURRET</div>
+  </div>
+</div>
+
+<!-- ── Screen 4: Dead (overlay) ───────────────────────────────────── -->
+<div id="screen-dead" class="screen">
+  <h2>YOU ARE DEAD</h2>
+  <p>Waiting for the game to end…</p>
+</div>
+
+<!-- ── Screen 5: Game over ─────────────────────────────────────────── -->
+<div id="screen-gameover" class="screen">
+  <h2 id="winner-text">GAME OVER</h2>
+  <p id="reason-text"></p>
+  <button class="primary" id="play-again-btn" onclick="playAgain()">PLAY AGAIN</button>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════
+let myName      = '';
+let connection  = null;
+let isDead      = false;
+
+let maxHp       = 100;
+let currentHp   = 100;
+
+// Joystick
+let joystickActive = false;
+let joyOriginX  = 0, joyOriginY = 0;
+let joyL = 0, joyR = 0;
+const JOY_RADIUS = 104; // max thumb travel in px (joystick base radius - thumb radius/2)
+const DRIVE_HZ   = 20;  // max sends per second
+let lastDriveSend = 0;
+
+// Turret
+let turretActive = false;
+let turretOriginX = 0;
+let turretSpeed = 0;
+const TURRET_HALF = 90; // px of travel for full speed
+
+// Fire cooldown
+const FIRE_COOLDOWN_MS = 3000;
+let fireCooldownUntil  = 0;
+let fireCooldownTimer  = null;
+
+// ════════════════════════════════════════════════════════
+// Screen management
+// ════════════════════════════════════════════════════════
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  // Landscape lock only applies during gameplay
+  document.body.classList.toggle('game-active', id === 'screen-playing');
+}
+
+function returnToJoin(message) {
+  isDead = false;
+  joyL = joyR = turretSpeed = 0;
+  joystickActive = false;
+  turretActive   = false;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  clearInterval(fireCooldownTimer);
+  document.getElementById('stream').src = '';
+  showScreen('screen-join');
+  if (message) setStatus(message, true);
+}
+
+// ════════════════════════════════════════════════════════
+// SignalR
+// ════════════════════════════════════════════════════════
+function buildConnection() {
+  const conn = new signalR.HubConnectionBuilder()
+    .withUrl('/gamehub')
+    .withAutomaticReconnect([0, 2000, 5000, 10000])
+    .build();
+
+  conn.on('LobbyUpdate',  players  => renderPlayerList(players));
+  conn.on('GameStarted',  data     => onGameStarted(data));
+  conn.on('StateUpdate',  data     => onStateUpdate(data));
+  conn.on('YouAreDead',   ()       => onYouAreDead());
+  conn.on('GameOver',     data     => onGameOver(data));
+
+  conn.onreconnecting(() => setStatus('Reconnecting…', false));
+  conn.onreconnected(async () => {
+    setStatus('', false);
+    await conn.invoke('JoinLobby', myName).catch(console.error);
+  });
+  conn.onclose(() => returnToJoin('Server connection lost. Please rejoin.'));
+
+  return conn;
+}
+
+// ════════════════════════════════════════════════════════
+// Join flow
+// ════════════════════════════════════════════════════════
+async function joinLobby() {
+  const input = document.getElementById('name-input');
+  const name  = input.value.trim();
+
+  if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
+
+  const btn = document.getElementById('join-btn');
+  btn.disabled = true;
+  setStatus('Connecting…', false);
+
+  try {
+    connection = buildConnection();
+    await connection.start();
+    myName = name;
+    await connection.invoke('JoinLobby', name);
+    showScreen('screen-lobby');
+  } catch (err) {
+    setStatus('Could not connect: ' + err.message, true);
+    btn.disabled = false;
+  }
+}
+
+function setStatus(msg, isError) {
+  const el = document.getElementById('join-status');
+  el.textContent = msg;
+  el.className   = 'status' + (isError ? ' error' : '');
+}
+
+// ════════════════════════════════════════════════════════
+// Lobby
+// ════════════════════════════════════════════════════════
+function renderPlayerList(players) {
+  const body = document.getElementById('player-list-body');
+  if (!players || players.length === 0) {
+    body.innerHTML = '<div class="empty-state">No players yet</div>';
+    return;
+  }
+  body.innerHTML = players.map(name => {
+    const isSelf = name === myName;
+    return `<div class="player-row">
+      <div class="player-dot"></div>
+      <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════
+// Game events
+// ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// Fullscreen + orientation
+// ════════════════════════════════════════════════════════
+function enterFullscreenLandscape() {
+  const el = document.documentElement;
+  if (el.requestFullscreen)            el.requestFullscreen().catch(() => {});
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    enterFullscreenLandscape();
+  }
+}
+
+function onGameStarted(data) {
+  maxHp     = data.maxHp || 100;
+  currentHp = data.hp    || maxHp;
+  isDead    = false;
+
+  enterFullscreenLandscape();
+
+  document.getElementById('robot-label').textContent = data.callsign || '';
+
+  if (data.videoUrl) {
+    const img = document.getElementById('stream');
+    img.style.display = '';
+    img.src = data.videoUrl;
+    document.getElementById('stream-placeholder').style.display = 'none';
+  }
+
+  updateHpBar();
+  showScreen('screen-playing');
+  startGameLoop();
+}
+
+function onStateUpdate(data) {
+  if (data.hp !== undefined) {
+    currentHp = data.hp;
+    maxHp     = data.maxHp || maxHp;
+    updateHpBar();
+  }
+  if (data.timer !== undefined) {
+    updateTimer(data.timer);
+  }
+}
+
+function onYouAreDead() {
+  isDead = true;
+  document.getElementById('screen-dead').classList.add('active');
+  // Playing screen stays underneath; controls are hidden by the dead overlay
+}
+
+function onGameOver(data) {
+  const teamName = data.winnerTeam || 'Unknown';
+  const reason   = data.reason || '';
+
+  document.getElementById('winner-text').textContent = teamName + ' WINS!';
+  document.getElementById('reason-text').textContent =
+    reason === 'elimination' ? 'by elimination' :
+    reason === 'time'        ? 'by time (most tanks alive)' : reason;
+
+  showScreen('screen-gameover');
+}
+
+function playAgain() {
+  returnToJoin('');
+}
+
+// ════════════════════════════════════════════════════════
+// HP bar
+// ════════════════════════════════════════════════════════
+function updateHpBar() {
+  const pct  = Math.max(0, Math.min(100, (currentHp / maxHp) * 100));
+  const fill = document.getElementById('hp-bar-fill');
+  const text = document.getElementById('hp-text');
+  fill.style.width      = pct + '%';
+  fill.style.background = pct > 40 ? 'var(--hp-fill)' : 'var(--hp-low)';
+  text.textContent      = currentHp + ' / ' + maxHp;
+}
+
+function updateTimer(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  document.getElementById('timer-label').textContent =
+    m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+// ════════════════════════════════════════════════════════
+// Game loop (rAF — drive sends)
+// ════════════════════════════════════════════════════════
+let rafId = null;
+
+function startGameLoop() {
+  if (rafId) cancelAnimationFrame(rafId);
+  gameLoop();
+}
+
+function gameLoop(ts) {
+  rafId = requestAnimationFrame(gameLoop);
+  if (isDead) return;
+
+  // Drive at up to DRIVE_HZ
+  const now = performance.now();
+  if (now - lastDriveSend >= 1000 / DRIVE_HZ) {
+    lastDriveSend = now;
+    if (connection && joystickActive) {
+      connection.invoke('SendDrive', roundF(joyL), roundF(joyR)).catch(() => {});
+    }
+  }
+}
+
+const roundF = v => Math.round(v * 1000) / 1000;
+
+// ════════════════════════════════════════════════════════
+// Joystick
+// ════════════════════════════════════════════════════════
+const joyBase  = document.getElementById('joystick-base');
+const joyThumb = document.getElementById('joystick-thumb');
+
+joyBase.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  joyBase.setPointerCapture(e.pointerId);
+  const rect  = joyBase.getBoundingClientRect();
+  joyOriginX  = rect.left + rect.width  / 2;
+  joyOriginY  = rect.top  + rect.height / 2;
+  joystickActive = true;
+  updateJoy(e.clientX, e.clientY);
+});
+
+joyBase.addEventListener('pointermove', e => {
+  if (!joystickActive) return;
+  updateJoy(e.clientX, e.clientY);
+});
+
+joyBase.addEventListener('pointerup',     releaseJoy);
+joyBase.addEventListener('pointercancel', releaseJoy);
+
+function releaseJoy(e) {
+  joystickActive = false;
+  joyL = joyR = 0;
+  joyThumb.style.transform = 'translate(-50%, -50%)';
+  if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+}
+
+function updateJoy(cx, cy) {
+  let dx = cx - joyOriginX;
+  let dy = cy - joyOriginY;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  if (dist > JOY_RADIUS) {
+    dx = dx / dist * JOY_RADIUS;
+    dy = dy / dist * JOY_RADIUS;
+  }
+
+  joyThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+  // Normalise to [-1, 1]. dy is inverted (up = negative on screen).
+  const nx =  dx / JOY_RADIUS;
+  const ny = -dy / JOY_RADIUS;
+
+  joyL = clamp(ny + nx, -1, 1);
+  joyR = clamp(ny - nx, -1, 1);
+}
+
+// ════════════════════════════════════════════════════════
+// Turret control
+// ════════════════════════════════════════════════════════
+const turBase  = document.getElementById('turret-base');
+const turThumb = document.getElementById('turret-thumb');
+
+turBase.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  turBase.setPointerCapture(e.pointerId);
+  const rect    = turBase.getBoundingClientRect();
+  turretOriginX = rect.left + rect.width / 2;
+  turretActive  = true;
+  updateTurret(e.clientX);
+});
+
+turBase.addEventListener('pointermove', e => {
+  if (!turretActive) return;
+  updateTurret(e.clientX);
+});
+
+turBase.addEventListener('pointerup',     releaseTurret);
+turBase.addEventListener('pointercancel', releaseTurret);
+
+function releaseTurret(e) {
+  turretActive = false;
+  turretSpeed  = 0;
+  turThumb.style.left = '50%';
+  if (connection) connection.invoke('SendTurret', 0.0).catch(() => {});
+}
+
+function updateTurret(cx) {
+  const raw = cx - turretOriginX;
+  const clamped = clamp(raw, -TURRET_HALF, TURRET_HALF);
+  turretSpeed = clamped / TURRET_HALF;
+
+  const rect   = turBase.getBoundingClientRect();
+  const pct    = ((clamped + TURRET_HALF) / (TURRET_HALF * 2)) * 100;
+  turThumb.style.left = pct + '%';
+
+  if (connection) connection.invoke('SendTurret', roundF(turretSpeed)).catch(() => {});
+}
+
+// ════════════════════════════════════════════════════════
+// Fire button
+// ════════════════════════════════════════════════════════
+function onFire() {
+  if (isDead) return;
+  const now = Date.now();
+  if (now < fireCooldownUntil) return;
+
+  fireCooldownUntil = now + FIRE_COOLDOWN_MS;
+  if (connection) connection.invoke('Fire').catch(() => {});
+
+  startFireCooldownUI();
+}
+
+function startFireCooldownUI() {
+  const btn      = document.getElementById('fire-btn');
+  const wordEl   = document.getElementById('fire-word');
+  const countEl  = document.getElementById('fire-countdown');
+
+  btn.classList.add('cooldown');
+  wordEl.classList.add('hidden');
+  countEl.classList.add('active');
+
+  clearInterval(fireCooldownTimer);
+  fireCooldownTimer = setInterval(() => {
+    const remaining = Math.max(0, fireCooldownUntil - Date.now());
+    countEl.textContent = (remaining / 1000).toFixed(1);
+
+    if (remaining <= 0) {
+      clearInterval(fireCooldownTimer);
+      btn.classList.remove('cooldown');
+      wordEl.classList.remove('hidden');
+      countEl.classList.remove('active');
+      countEl.textContent = '';
+    }
+  }, 100);
+}
+
+// ════════════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════════════
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Submit on Enter ────────────────────────────────────
+document.getElementById('name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') joinLobby();
+});
+
+// ── Persist player name across sessions ────────────────
+(function () {
+  const input = document.getElementById('name-input');
+  const saved = localStorage.getItem('tg_player_name');
+  if (saved) input.value = saved;
+  input.addEventListener('input', () => {
+    localStorage.setItem('tg_player_name', input.value);
+  });
+})();
+</script>
+</body>
+</html>

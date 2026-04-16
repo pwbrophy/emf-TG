@@ -1,0 +1,29 @@
+# ── Unity generated / cache folders ─────────────────────
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+MemoryCaptures/
+Recordings/
+
+# ── Unity auto-generated VS solution / project files ────
+*.csproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+
+# ── JetBrains Rider ──────────────────────────────────────
+.idea/
+*.sln.iml
+
+# ── Asset Store / imported packages (bulky, regenerable) ─
+# Assets/AssetStoreTools*      # uncomment if you use the Asset Store uploader
+
+# ── Crash / profiler output ──────────────────────────────
+crashlytics-build.properties
+sysinfo.txt

@@ -1,0 +1,21 @@
+# ── Claude Code local config ─────────────────────────────
+.claude/
+
+# ── OS / editor ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.suo
+*.user
+.vs/
+.vscode/settings.json
+
+# ── Secrets (never commit) ───────────────────────────────
+**/secrets.h
+
+# ── Reference / scratch code (not part of the project) ──
+Reference_Code/
+
+# ── Python / misc build artefacts ────────────────────────
+__pycache__/
+*.pyc
