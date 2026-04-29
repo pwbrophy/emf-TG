@@ -1,160 +1,378 @@
-// IrController.h — IR transmit and directional receive.
+// IrController.h — IR transmit (slot-scheduled bursts) and directional receive.
 //
-// TX: 38 kHz carrier on GPIO39 (left barrel) and GPIO40 (right barrel) via LEDC.
-//     Both fire simultaneously; the carrier is what TSOP receivers detect.
+// TX: 38 kHz carrier on GPIO39 (left barrel) and GPIO40 (right barrel) via LEDC ch4+5.
+//     Burst sequence driven by scheduleFireSlot() + updateFire().
+//     LEDC channels are set up once per slot and torn down when the slot ends —
+//     no repeated ledcSetup calls during bursts; duty is toggled with ledcWrite.
 //
-// RX: 8-direction TSOP receivers on PCA9555 Port 0, read via I2C.
-//     Bits are active-LOW (0 = IR detected).  IrController reads Port 0 through
-//     a pointer to MotorController_PCA9555 so both share the single I2C bus.
+// RX: 8-direction TSOP receivers on PCA9555 Port 0, read via I2C (active-LOW).
+//     Subwindow classification driven by scheduleListenSlot() + updateListen().
 //
-// Sequence (matches Unity ShootingController protocol):
-//   1. Unity sends ir_emit_prepare  → startEmit()  + reply ir_emit_ready
-//   2. Unity sends ir_listen_and_report ms:N → startListen(N)
-//   3. update() called each loop tick; accumulates hits, closes window at t+N ms
-//   4. isListenDone() → takeResult() → send ir_result {hit, dir} to Unity
-//   5. Unity sends ir_emit_stop → stopEmit()
+// Time model:
+//   Unity sends time_sync {ut} → robot stores g_unityTimeOffset = ut - millis().
+//   All slot times from Unity are Unity-ms; convert: localMs = unityMs - offset.
 //
-// Direction priority on multiple simultaneous hits: rear-facing receivers are
-// reported first (S > SW > SE > others) because they carry the highest damage
-// multiplier in game logic and are the most "interesting" result.
+// All time comparisons use (int32_t)(now - target) >= 0 for millis() wraparound safety.
 
 #pragma once
 #include <Arduino.h>
 #include "MotorController_PCA9555.h"
 
 // ---- IR LED pins (turret board) ----
-static constexpr int     IR_TX1_PIN    = 39;    // left barrel IR LED
-static constexpr int     IR_TX2_PIN    = 40;    // right barrel IR LED
-
-// ---- LEDC channels for IR carrier (avoid camera's channel 0) ----
-// Camera XCLK uses LEDC_CHANNEL_0 / LEDC_TIMER_0.
-// IR TX uses channels 4 & 5 on TIMER_1.
+static constexpr int     IR_TX1_PIN    = 39;
+static constexpr int     IR_TX2_PIN    = 40;
 static constexpr uint8_t IR_LEDC_CH1   = 4;
 static constexpr uint8_t IR_LEDC_CH2   = 5;
-static constexpr uint32_t IR_FREQ_HZ   = 38000; // TSOP carrier frequency
-static constexpr uint8_t IR_LEDC_BITS  = 8;     // 50% duty = 128/256
+static constexpr uint32_t IR_FREQ_HZ   = 38000;
+static constexpr uint8_t IR_LEDC_BITS  = 8;    // 50% duty = 128/256
 
-// PCA9555 Port 0 bit index → compass string
-// Matches the physical layout on the hull board (bit 0 = N, clockwise).
+// PCA9555 Port 0 bit index → compass string (bit 0=N, clockwise)
 static const char* const IR_DIR_NAMES[8] = {
     "N", "NE", "E", "SE", "S", "SW", "W", "NW"
 };
 
+// ---- Legacy result (kept for ir_listen_and_report compatibility) ----
 struct IrResult {
-    bool   hit;  // true if any receiver fired during the listen window
-    String dir;  // compass direction of the most significant hit
+    bool   hit;
+    String dir;
+};
+
+// ---- New slot result ----
+// b1Mask / b2Mask: 8-bit bitmasks, bit N = 1 if that direction's receiver
+// detected the burst on any repetition (ORed across reps).
+struct IrSlotResult {
+    int     slotId;
+    uint8_t b1Mask;
+    uint8_t b2Mask;
 };
 
 class IrController
 {
 public:
-    // Store reference to motor controller for shared PCA9555 access.
     void begin(MotorController_PCA9555& pca)
     {
         _pca = &pca;
-        pinMode(IR_TX1_PIN, OUTPUT);
-        digitalWrite(IR_TX1_PIN, LOW);
-        pinMode(IR_TX2_PIN, OUTPUT);
-        digitalWrite(IR_TX2_PIN, LOW);
+        pinMode(IR_TX1_PIN, OUTPUT); digitalWrite(IR_TX1_PIN, LOW);
+        pinMode(IR_TX2_PIN, OUTPUT); digitalWrite(IR_TX2_PIN, LOW);
         Serial.println("[IR] ready (TX GPIO39+40, RX PCA9555 port0)");
     }
 
-    // Start 38 kHz carrier on both IR LED pins simultaneously.
-    // Explicit channel assignment avoids conflicting with camera's LEDC channel 0.
+    // =========================================================
+    // Legacy emit API — kept so onWsClose() can call stopEmit()
+    // =========================================================
+
     void startEmit()
     {
         if (_emitting) return;
-        // ledcSetup + ledcAttachPin: compatible with both Arduino ESP32 2.x and 3.x
         ledcSetup(IR_LEDC_CH1, IR_FREQ_HZ, IR_LEDC_BITS);
         ledcSetup(IR_LEDC_CH2, IR_FREQ_HZ, IR_LEDC_BITS);
         ledcAttachPin(IR_TX1_PIN, IR_LEDC_CH1);
         ledcAttachPin(IR_TX2_PIN, IR_LEDC_CH2);
-        uint32_t duty = (1u << IR_LEDC_BITS) / 2; // 50%
-        ledcWrite(IR_LEDC_CH1, duty);
-        ledcWrite(IR_LEDC_CH2, duty);
+        ledcWrite(IR_LEDC_CH1, 128);
+        ledcWrite(IR_LEDC_CH2, 128);
         _emitting = true;
-        Serial.println("[IR] emit ON (38 kHz)");
     }
 
-    // Stop carrier; leave pins LOW so LEDs are off.
+    // Stops all IR emission; also resets the fire slot state machine so
+    // onWsClose() safely aborts any in-progress slot.
     void stopEmit()
     {
-        if (!_emitting) return;
-        ledcDetachPin(IR_TX1_PIN);
-        ledcDetachPin(IR_TX2_PIN);
-        pinMode(IR_TX1_PIN, OUTPUT); digitalWrite(IR_TX1_PIN, LOW);
-        pinMode(IR_TX2_PIN, OUTPUT); digitalWrite(IR_TX2_PIN, LOW);
-        _emitting = false;
-        Serial.println("[IR] emit OFF");
+        _forceLedsOff();
+        _emitting   = false;
+        _fireActive = false;
+        _firePhase  = FirePhase::Idle;
     }
 
-    bool isEmitting() const { return _emitting; }
+    // True while a legacy emit or a fire slot is active.
+    bool isEmitting() const { return _emitting || _fireActive; }
 
-    // Open a hit-detection window of windowMs milliseconds.
-    // Clears the accumulated hit mask from any previous window.
+    // =========================================================
+    // Legacy listen API — kept for ir_listen_and_report
+    // =========================================================
+
     void startListen(uint32_t windowMs)
     {
         _hitMask     = 0;
         _listening   = true;
         _resultReady = false;
         _listenEnd   = millis() + windowMs;
-        Serial.printf("[IR] listen %u ms\n", windowMs);
+        Serial.printf("[IR] legacy listen %u ms\n", windowMs);
     }
 
-    // Call every loop tick.  While a window is open, reads PCA9555 Port 0
-    // and ORs any triggered receivers into _hitMask.  Closes the window
-    // and sets _resultReady when time expires.
+    // Called every loop tick; accumulates hits, closes window at timeout.
     void update(uint32_t now)
     {
         if (!_listening) return;
-
-        // Port 0 is active-LOW; invert so 1 = hit.
         uint8_t port0 = _pca->readPort0();
         _hitMask |= (~port0 & 0xFF);
-
         if ((int32_t)(now - _listenEnd) >= 0) {
             _listening   = false;
             _resultReady = true;
-            Serial.printf("[IR] window closed, hitMask=0x%02X\n", _hitMask);
+            Serial.printf("[IR] legacy window closed hitMask=0x%02X\n", _hitMask);
         }
     }
 
-    // True once the listen window has expired and a result is ready to send.
     bool isListenDone() const { return _resultReady; }
 
-    // Consume the result (clears isListenDone).  Always call this once
-    // isListenDone() is true, even if the socket is closed, to reset state.
-    //
-    // Direction priority: S > SW > SE > others (rear-facing = 3× damage in
-    // game logic, so reporting the rear direction is the most useful outcome
-    // when multiple receivers fire at once).
     IrResult takeResult()
     {
         _resultReady = false;
-
-        if (_hitMask == 0) {
-            return { false, "" };
-        }
-
-        // Bit indices: N=0, NE=1, E=2, SE=3, S=4, SW=5, W=6, NW=7
+        if (_hitMask == 0) return { false, "" };
         String dir;
-        if      (_hitMask & (1u << 4)) dir = "S";  // highest priority
+        if      (_hitMask & (1u << 4)) dir = "S";
         else if (_hitMask & (1u << 5)) dir = "SW";
         else if (_hitMask & (1u << 3)) dir = "SE";
         else {
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 8; i++)
                 if (_hitMask & (1u << i)) { dir = IR_DIR_NAMES[i]; break; }
-            }
         }
-
         return { true, dir };
     }
 
+    // =========================================================
+    // NEW: Fire slot (this robot is the shooter)
+    // =========================================================
+    // slotStartLocal: local millis() value at which burst1 of rep0 begins.
+    // Timing layout per repetition:
+    //   [0 .. b1Dur)              burst1 ON
+    //   [b1Dur .. b1Dur+gap12)    pause (AGC reset)
+    //   [b1Dur+gap12 .. +b2Dur)   burst2 ON
+    //   [+b2Dur .. +repGap)       pause before next rep
+
+    void scheduleFireSlot(int slotId, int32_t slotStartLocal,
+                          int b1Dur, int gap12, int b2Dur, int repGap, int reps)
+    {
+        _fireSlotId  = slotId;
+        _fireStart   = (uint32_t)slotStartLocal;
+        _fb1Dur      = b1Dur;
+        _fgap12      = gap12;
+        _fb2Dur      = b2Dur;
+        _frepGap     = repGap;
+        _fReps       = reps;
+        _fRepsDone   = 0;
+        _firePhase   = FirePhase::WaitingForStart;
+        _fireActive  = true;
+        // Set up LEDC channels once for the whole slot; toggled via ledcWrite.
+        ledcSetup(IR_LEDC_CH1, IR_FREQ_HZ, IR_LEDC_BITS);
+        ledcSetup(IR_LEDC_CH2, IR_FREQ_HZ, IR_LEDC_BITS);
+        ledcAttachPin(IR_TX1_PIN, IR_LEDC_CH1);
+        ledcAttachPin(IR_TX2_PIN, IR_LEDC_CH2);
+        ledcWrite(IR_LEDC_CH1, 0);
+        ledcWrite(IR_LEDC_CH2, 0);
+        Serial.printf("[IR] fire slot %d scheduled localStart=%u\n", slotId, _fireStart);
+    }
+
+    // Call every loop tick; drives burst on/off transitions autonomously.
+    void updateFire(uint32_t now)
+    {
+        if (!_fireActive) return;
+
+        switch (_firePhase)
+        {
+        case FirePhase::WaitingForStart:
+            if ((int32_t)(now - _fireStart) >= 0) {
+                _fRepsDone = 0;
+                _fRepStart = _fireStart;
+                _firePhase = FirePhase::Burst1;
+                _ledOn();
+                Serial.printf("[IR] fire slot %d rep0 burst1 ON\n", _fireSlotId);
+            }
+            break;
+
+        case FirePhase::Burst1:
+            if ((int32_t)(now - (_fRepStart + (uint32_t)_fb1Dur)) >= 0) {
+                _ledOff();
+                _firePhase = FirePhase::Gap12;
+            }
+            break;
+
+        case FirePhase::Gap12:
+            if ((int32_t)(now - (_fRepStart + (uint32_t)(_fb1Dur + _fgap12))) >= 0) {
+                _ledOn();
+                _firePhase = FirePhase::Burst2;
+            }
+            break;
+
+        case FirePhase::Burst2:
+            if ((int32_t)(now - (_fRepStart + (uint32_t)(_fb1Dur + _fgap12 + _fb2Dur))) >= 0) {
+                _ledOff();
+                _fRepsDone++;
+                if (_fRepsDone >= _fReps) {
+                    _endFireSlot();
+                } else {
+                    uint32_t perRep = (uint32_t)(_fb1Dur + _fgap12 + _fb2Dur + _frepGap);
+                    _fRepStart += perRep;
+                    _firePhase  = FirePhase::Burst1;
+                    _ledOn();
+                    Serial.printf("[IR] fire slot %d rep%d burst1 ON\n",
+                                  _fireSlotId, _fRepsDone);
+                }
+            }
+            break;
+
+        default: break;
+        }
+    }
+
+    // =========================================================
+    // NEW: Listen slot (all non-shooting robots)
+    // =========================================================
+    // Classifies PCA9555 Port 0 reads into b1Mask vs b2Mask per burst subwindow.
+    // ORs results across all repetitions so each direction's b1/b2 is true if
+    // that burst was detected on ANY repetition.
+
+    void scheduleListenSlot(int slotId, int32_t slotStartLocal,
+                            int b1Dur, int gap12, int b2Dur, int repGap, int reps)
+    {
+        _listenSlotId = slotId;
+        _listenStart  = (uint32_t)slotStartLocal;
+        _lb1Dur       = b1Dur;
+        _lgap12       = gap12;
+        _lb2Dur       = b2Dur;
+        _lrepGap      = repGap;
+        _lReps        = reps;
+        _lRepsDone    = 0;
+        _lb1Mask      = 0;
+        _lb2Mask      = 0;
+        _listenPhase  = ListenPhase::WaitingForStart;
+        _slotDone     = false;
+        Serial.printf("[IR] listen slot %d scheduled localStart=%u\n", slotId, _listenStart);
+    }
+
+    // Call every loop tick; classifies detections into burst subwindows.
+    void updateListen(uint32_t now)
+    {
+        if (_listenPhase == ListenPhase::Idle) return;
+
+        uint32_t perRep = (uint32_t)(_lb1Dur + _lgap12 + _lb2Dur + _lrepGap);
+
+        switch (_listenPhase)
+        {
+        case ListenPhase::WaitingForStart:
+            if ((int32_t)(now - _listenStart) >= 0) {
+                _lRepsDone = 0;
+                _lRepStart = _listenStart;
+                _listenPhase = ListenPhase::Burst1Window;
+            }
+            break;
+
+        case ListenPhase::Burst1Window:
+            {
+                uint8_t port0 = _pca->readPort0();
+                _lb1Mask |= (~port0 & 0xFF);
+                if ((int32_t)(now - (_lRepStart + (uint32_t)_lb1Dur)) >= 0)
+                    _listenPhase = ListenPhase::Gap12;
+            }
+            break;
+
+        case ListenPhase::Gap12:
+            if ((int32_t)(now - (_lRepStart + (uint32_t)(_lb1Dur + _lgap12))) >= 0)
+                _listenPhase = ListenPhase::Burst2Window;
+            break;
+
+        case ListenPhase::Burst2Window:
+            {
+                uint8_t port0 = _pca->readPort0();
+                _lb2Mask |= (~port0 & 0xFF);
+                if ((int32_t)(now - (_lRepStart + (uint32_t)(_lb1Dur + _lgap12 + _lb2Dur))) >= 0) {
+                    _lRepsDone++;
+                    if (_lRepsDone >= _lReps) {
+                        _listenPhase = ListenPhase::Idle;
+                        _slotDone    = true;
+                        Serial.printf("[IR] listen slot %d done b1=0x%02X b2=0x%02X\n",
+                                      _listenSlotId, _lb1Mask, _lb2Mask);
+                    } else {
+                        _lRepStart  += perRep;
+                        _listenPhase = ListenPhase::Burst1Window;
+                    }
+                }
+            }
+            break;
+
+        default: break;
+        }
+    }
+
+    bool isSlotDone() const { return _slotDone; }
+
+    IrSlotResult takeSlotResult()
+    {
+        _slotDone = false;
+        IrSlotResult r;
+        r.slotId  = _listenSlotId;
+        r.b1Mask  = _lb1Mask;
+        r.b2Mask  = _lb2Mask;
+        return r;
+    }
+
 private:
-    MotorController_PCA9555* _pca         = nullptr;
-    bool     _emitting    = false;
+    MotorController_PCA9555* _pca = nullptr;
+
+    // ---- Legacy emit state ----
+    bool _emitting = false;
+
+    // ---- Legacy listen state ----
     bool     _listening   = false;
     bool     _resultReady = false;
     uint32_t _listenEnd   = 0;
-    uint8_t  _hitMask     = 0;  // accumulated receivers that fired (inverted Port 0)
+    uint8_t  _hitMask     = 0;
+
+    // ---- Fire slot state machine ----
+    enum class FirePhase : uint8_t {
+        Idle, WaitingForStart, Burst1, Gap12, Burst2
+    };
+    bool      _fireActive = false;
+    FirePhase _firePhase  = FirePhase::Idle;
+    int       _fireSlotId = 0;
+    uint32_t  _fireStart  = 0;
+    uint32_t  _fRepStart  = 0;
+    int       _fb1Dur     = 0;
+    int       _fgap12     = 0;
+    int       _fb2Dur     = 0;
+    int       _frepGap    = 0;
+    int       _fReps      = 0;
+    int       _fRepsDone  = 0;
+
+    // ---- Listen slot state machine ----
+    enum class ListenPhase : uint8_t {
+        Idle, WaitingForStart, Burst1Window, Gap12, Burst2Window
+    };
+    ListenPhase _listenPhase  = ListenPhase::Idle;
+    bool        _slotDone     = false;
+    int         _listenSlotId = 0;
+    uint32_t    _listenStart  = 0;
+    uint32_t    _lRepStart    = 0;
+    int         _lb1Dur       = 0;
+    int         _lgap12       = 0;
+    int         _lb2Dur       = 0;
+    int         _lrepGap      = 0;
+    int         _lReps        = 0;
+    int         _lRepsDone    = 0;
+    uint8_t     _lb1Mask      = 0;
+    uint8_t     _lb2Mask      = 0;
+
+    // ---- Helpers ----
+    void _ledOn()  { ledcWrite(IR_LEDC_CH1, 128); ledcWrite(IR_LEDC_CH2, 128); }
+    void _ledOff() { ledcWrite(IR_LEDC_CH1, 0);   ledcWrite(IR_LEDC_CH2, 0);   }
+
+    void _forceLedsOff()
+    {
+        // Detach and force pins LOW regardless of whether channels were attached.
+        ledcDetachPin(IR_TX1_PIN);
+        ledcDetachPin(IR_TX2_PIN);
+        pinMode(IR_TX1_PIN, OUTPUT); digitalWrite(IR_TX1_PIN, LOW);
+        pinMode(IR_TX2_PIN, OUTPUT); digitalWrite(IR_TX2_PIN, LOW);
+    }
+
+    void _endFireSlot()
+    {
+        _ledOff();
+        ledcDetachPin(IR_TX1_PIN);
+        ledcDetachPin(IR_TX2_PIN);
+        pinMode(IR_TX1_PIN, OUTPUT); digitalWrite(IR_TX1_PIN, LOW);
+        pinMode(IR_TX2_PIN, OUTPUT); digitalWrite(IR_TX2_PIN, LOW);
+        _fireActive = false;
+        _firePhase  = FirePhase::Idle;
+        Serial.printf("[IR] fire slot %d done\n", _fireSlotId);
+    }
 };

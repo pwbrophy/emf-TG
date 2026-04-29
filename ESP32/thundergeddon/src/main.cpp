@@ -77,6 +77,12 @@ static int      g_wsPort  = 8080;
 static String   g_wsPath  = "/esp32";
 static bool     g_wsOpen  = false;
 
+// Offset between Unity clock (ms) and local millis(). Set by time_sync command.
+// To convert a Unity timestamp to local millis: localMs = unityMs - g_unityTimeOffset
+static int32_t  g_unityTimeOffset = 0;
+// Edge-detect for fire slot completion (to re-enable motors after slot ends)
+static bool     g_fireSlotActive  = false;
+
 static uint32_t g_lastAnnounce   = 0;
 static uint32_t g_lastHeartbeat  = 0;
 static uint32_t g_lastMotorTick  = 0;
@@ -435,6 +441,45 @@ static void handleWsText(const String& s)
         ir.startListen((uint32_t)(ms > 0 ? ms : 100));
         return;
     }
+
+    // ---- Clock sync ----
+    if (strcmp(cmd, "time_sync") == 0) {
+        int32_t ut = (int32_t)(doc["ut"] | 0);
+        g_unityTimeOffset = ut - (int32_t)millis();
+        Serial.printf("[IR] time_sync ut=%d offset=%d\n", ut, g_unityTimeOffset);
+        return;
+    }
+
+    // ---- IR fire slot (this robot is the shooter) ----
+    if (strcmp(cmd, "ir_fire_slot") == 0) {
+        int     slotId      = doc["slot_id"]   | 0;
+        int32_t slotStartUt = (int32_t)(doc["slot_start"] | 0);
+        int     b1Dur       = doc["b1_dur"]    | 10;
+        int     gap12       = doc["b1_b2_gap"] | 25;
+        int     b2Dur       = doc["b2_dur"]    | 10;
+        int     repGap      = doc["rep_gap"]   | 25;
+        int     reps        = doc["reps"]      | 2;
+        int32_t slotStartLocal = slotStartUt - g_unityTimeOffset;
+        motors.enable(false);
+        ir.scheduleFireSlot(slotId, slotStartLocal, b1Dur, gap12, b2Dur, repGap, reps);
+        Serial.printf("[IR] ir_fire_slot slot=%d localStart=%d\n", slotId, slotStartLocal);
+        return;
+    }
+
+    // ---- IR listen slot (this robot is a listener) ----
+    if (strcmp(cmd, "ir_listen_slot") == 0) {
+        int     slotId      = doc["slot_id"]   | 0;
+        int32_t slotStartUt = (int32_t)(doc["slot_start"] | 0);
+        int     b1Dur       = doc["b1_dur"]    | 10;
+        int     gap12       = doc["b1_b2_gap"] | 25;
+        int     b2Dur       = doc["b2_dur"]    | 10;
+        int     repGap      = doc["rep_gap"]   | 25;
+        int     reps        = doc["reps"]      | 2;
+        int32_t slotStartLocal = slotStartUt - g_unityTimeOffset;
+        ir.scheduleListenSlot(slotId, slotStartLocal, b1Dur, gap12, b2Dur, repGap, reps);
+        Serial.printf("[IR] ir_listen_slot slot=%d localStart=%d\n", slotId, slotStartLocal);
+        return;
+    }
 }
 
 // ---- WebSocket — connect (blocking until handshake completes or fails) ----
@@ -566,17 +611,43 @@ void loop()
     updateBuzzer(now);
     updateBuzzerFireEffect(now);
 
-    // ---- IR listen window ----
-    ir.update(now); // no-op when not listening
+    // ---- IR: legacy listen window (ir_listen_and_report) ----
+    ir.update(now);
     if (ir.isListenDone()) {
-        IrResult res = ir.takeResult(); // always consume to clear the flag
+        IrResult res = ir.takeResult();
         if (g_wsOpen) {
             String resp = String("{\"cmd\":\"ir_result\",\"hit\":") +
                           (res.hit ? "1" : "0") +
                           ",\"dir\":\"" + res.dir + "\"}";
             ws.send(resp);
-            Serial.print("[IR] result: "); Serial.println(resp);
+            Serial.print("[IR] legacy result: "); Serial.println(resp);
         }
+    }
+
+    // ---- IR: fire slot (shooter bursts) ----
+    ir.updateFire(now);
+    {
+        bool fireNowActive = ir.isEmitting();
+        if (g_fireSlotActive && !fireNowActive) {
+            motors.enable(true);
+            Serial.println("[IR] fire slot complete, motors re-enabled");
+        }
+        g_fireSlotActive = fireNowActive;
+    }
+
+    // ---- IR: listen slot (non-shooter detection) ----
+    ir.updateListen(now);
+    if (ir.isSlotDone()) {
+        IrSlotResult sr = ir.takeSlotResult();
+        if (g_wsOpen) {
+            String resp = String("{\"cmd\":\"ir_slot_result\",\"slot_id\":") +
+                          String(sr.slotId) +
+                          ",\"b1\":" + String(sr.b1Mask) +
+                          ",\"b2\":" + String(sr.b2Mask) + "}";
+            ws.send(resp);
+            Serial.print("[IR] slot result: "); Serial.println(resp);
+        }
+        motors.enable(true);
     }
 
     // ---- Wi-Fi health check ----

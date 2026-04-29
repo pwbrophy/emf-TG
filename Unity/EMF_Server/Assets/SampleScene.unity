@@ -8528,6 +8528,7 @@ GameObject:
   - component: {fileID: 1515607755}
   - component: {fileID: 1515607754}
   - component: {fileID: 1515607758}
+  - component: {fileID: 1515607759}
   m_Layer: 0
   m_Name: Servers
   m_TagString: Untagged
@@ -8611,6 +8612,25 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerWebSocketServer
   Port: 8081
   WsPath: /players
+--- !u!114 &1515607759
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1515607753}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13c9bd3d30f94baf86a3c977395fca3c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::IrSlotScheduler
+  slotFutureMs: 150
+  b1DurMs: 10
+  gap12Ms: 25
+  b2DurMs: 10
+  repGapMs: 25
+  reps: 2
+  resultBufferSeconds: 0.5
 --- !u!1 &1522682912
 GameObject:
   m_ObjectHideFlags: 0
