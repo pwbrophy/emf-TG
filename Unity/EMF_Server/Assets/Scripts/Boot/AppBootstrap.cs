@@ -50,5 +50,8 @@ public class AppBootstrap : MonoBehaviour
                                    ?? gameObject.AddComponent<MatchTimer>();
 
         Debug.Log("[AppBootstrap] GameSettings + MatchTimer ready");
+
+        ServiceLocator.CapturePoints = new CapturePointService();
+        Debug.Log("[AppBootstrap] CapturePointService ready");
     }
 }

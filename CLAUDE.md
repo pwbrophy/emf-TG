@@ -4,6 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Repository
+
+GitHub: **https://github.com/pwbrophy/emf-TG** (branch: `master`)
+
+---
+
 ## Working with Claude Code — Required Practices
 
 ### Unity: always use Coplay MCP

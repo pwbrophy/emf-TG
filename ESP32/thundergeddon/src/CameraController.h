@@ -23,7 +23,7 @@ class CameraController
 public:
     CameraController()
       : _started(false)
-      , _frameSize(FRAMESIZE_VGA) // 640×480; reduce to FRAMESIZE_QVGA if bandwidth is tight
+      , _frameSize(FRAMESIZE_HVGA) // 480×320
       , _jpegQuality(10)          // 0=best quality, 63=smallest file; 10 is a good balance
     {
         memset(&_cfg, 0, sizeof(_cfg));

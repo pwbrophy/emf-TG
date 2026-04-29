@@ -20,4 +20,10 @@ public sealed class GameState
     // Match result — set when EndGame is called
     public int  WinnerAllianceIndex = -1;   // -1 = not yet decided
     public string EndReason         = "";   // "elimination" | "time" | "manual"
+
+    // Capture points: index 0=North, 1=Centre, 2=South. Owner = alliance index, -1 = uncaptured.
+    public int[] CapturePointOwners = { -1, -1, -1 };
+
+    // Team points tug-of-war
+    public int[] TeamPoints = { 0, 0 };
 }

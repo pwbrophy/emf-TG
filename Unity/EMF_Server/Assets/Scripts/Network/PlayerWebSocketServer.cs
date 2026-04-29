@@ -53,6 +53,7 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     // Throttle state broadcasts to ~1 Hz
     private float _lastStateUpdate = 0f;
+    private float _lastCaptureTick = 0f;
 
     // ── Events (consumed by UI components) ───────────────────────────────────────
 
@@ -77,7 +78,10 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         // Game phase changes
         if (ServiceLocator.GameFlow != null)
-            ServiceLocator.GameFlow.OnPhaseChanged += OnPhaseChanged;
+        {
+            ServiceLocator.GameFlow.OnPhaseChanged  += OnPhaseChanged;
+            ServiceLocator.GameFlow.OnPausedChanged += OnPausedChanged;
+        }
 
         // HP / death / win events
         if (ServiceLocator.Game != null)
@@ -86,6 +90,19 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Game.OnRobotDied  += OnRobotDied;
             ServiceLocator.Game.OnGameWon    += OnGameWon;
         }
+
+        // RFID tag scans
+        if (ServiceLocator.RobotServer != null)
+            ServiceLocator.RobotServer.OnRfidTag += OnRfidTag;
+
+        // Capture points & match timer tick
+        if (ServiceLocator.CapturePoints != null)
+        {
+            ServiceLocator.CapturePoints.OnPointCaptured    += OnCapturePointCaptured;
+            ServiceLocator.CapturePoints.OnTeamPointsChanged += OnTeamPointsChanged;
+        }
+        if (ServiceLocator.MatchTimer != null)
+            ServiceLocator.MatchTimer.OnTick += OnMatchTimerTick;
     }
 
     private void OnDestroy()
@@ -94,7 +111,10 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Players.OnChanged -= OnPlayersChanged;
 
         if (ServiceLocator.GameFlow != null)
-            ServiceLocator.GameFlow.OnPhaseChanged -= OnPhaseChanged;
+        {
+            ServiceLocator.GameFlow.OnPhaseChanged  -= OnPhaseChanged;
+            ServiceLocator.GameFlow.OnPausedChanged -= OnPausedChanged;
+        }
 
         if (ServiceLocator.Game != null)
         {
@@ -102,6 +122,17 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Game.OnRobotDied -= OnRobotDied;
             ServiceLocator.Game.OnGameWon   -= OnGameWon;
         }
+
+        if (ServiceLocator.RobotServer != null)
+            ServiceLocator.RobotServer.OnRfidTag -= OnRfidTag;
+
+        if (ServiceLocator.CapturePoints != null)
+        {
+            ServiceLocator.CapturePoints.OnPointCaptured    -= OnCapturePointCaptured;
+            ServiceLocator.CapturePoints.OnTeamPointsChanged -= OnTeamPointsChanged;
+        }
+        if (ServiceLocator.MatchTimer != null)
+            ServiceLocator.MatchTimer.OnTick -= OnMatchTimerTick;
 
         if (ServiceLocator.PlayerServer == this)
             ServiceLocator.PlayerServer = null;
@@ -138,11 +169,12 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         PumpMain();
 
-        // Push state updates (timer) to all players at ~1 Hz
+        // Push state updates (timer) to all players and display at ~1 Hz
         if (_started && Time.time - _lastStateUpdate >= 1.0f)
         {
             _lastStateUpdate = Time.time;
             BroadcastStateUpdates();
+            BroadcastDisplayUpdate();
         }
     }
 
@@ -341,6 +373,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             SendGameStartedToAll();
         else if (phase == GamePhase.Ended)
             SendGameOver();
+        BroadcastDisplayUpdate();
     }
 
     void OnHpChanged(string robotId, int newHp)
@@ -381,7 +414,85 @@ public class PlayerWebSocketServer : MonoBehaviour
         Debug.Log("[PlayerWS] Sent game_over: " + teamName + " (" + reason + ")");
     }
 
+    void OnRfidTag(string robotId, string uid)
+    {
+        // Try to capture a point with this tag (fires OnPointCaptured if it succeeds)
+        ServiceLocator.CapturePoints?.TryCapture(robotId, uid);
+
+        // Find the connection assigned to this robot and forward the tag UID
+        foreach (var kvp in _connToPlayer)
+        {
+            string connId    = kvp.Key;
+            string playerName = kvp.Value;
+            if (PlayerToRobot(playerName) != robotId) continue;
+
+            string json = "{\"cmd\":\"rfid_tag\"" +
+                          ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
+                          ",\"uid\":\""           + EscapeJson(uid)   + "\"}";
+            BroadcastRaw(json);
+            Debug.Log($"[PlayerWS] rfid_tag uid={uid} -> {playerName}");
+            return;
+        }
+        // No player assigned to this robot — log anyway so it shows in console
+        Debug.Log($"[PlayerWS] rfid_tag uid={uid} from {robotId} (no assigned player)");
+    }
+
+    void OnPausedChanged(bool paused)
+    {
+        var robotServer = ServiceLocator.RobotServer;
+        var dir         = ServiceLocator.RobotDirectory;
+        if (robotServer != null && dir != null)
+        {
+            foreach (var robot in dir.GetAll())
+            {
+                if (paused)
+                {
+                    robotServer.SendMotorsOff(robot.RobotId);
+                    robotServer.SendStreamOff(robot.RobotId);
+                }
+                else
+                {
+                    robotServer.SendMotorsOn(robot.RobotId);
+                    robotServer.SendStreamOn(robot.RobotId);
+                }
+            }
+        }
+
+        string cmd = paused ? "game_paused" : "game_resumed";
+        BroadcastRaw("{\"cmd\":\"" + cmd + "\"}");
+        BroadcastDisplayUpdate();
+        Debug.Log("[PlayerWS] " + cmd);
+    }
+
     void OnPlayersChanged() => BroadcastPlayerList();
+
+    void OnMatchTimerTick(float remaining)
+    {
+        if (Time.time - _lastCaptureTick < 5.0f) return;
+        _lastCaptureTick = Time.time;
+        ServiceLocator.CapturePoints?.Tick();
+    }
+
+    void OnCapturePointCaptured(int pointIndex, int allianceIndex, string pointName)
+    {
+        string playerName = FindPlayerForLastCapture(allianceIndex);
+        string text = string.IsNullOrEmpty(playerName)
+            ? $"Alliance {allianceIndex + 1} captured {pointName} Point!"
+            : $"{playerName} captured {pointName} Point!";
+        BroadcastDisplayEvent(text);
+        BroadcastDisplayUpdate();
+    }
+
+    string FindPlayerForLastCapture(int allianceIndex)
+    {
+        var players = ServiceLocator.Players?.GetAll();
+        if (players == null) return null;
+        foreach (var p in players)
+            if (p.AllianceIndex == allianceIndex) return p.Name;
+        return null;
+    }
+
+    void OnTeamPointsChanged() => BroadcastDisplayUpdate();
 
     // ── State update helpers ──────────────────────────────────────────────────────
 
@@ -389,6 +500,23 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         foreach (var kvp in _connToPlayer)
             SendGameStarted(kvp.Key, kvp.Value);
+        SendHpToAllRobots();
+    }
+
+    void SendHpToAllRobots()
+    {
+        var server   = ServiceLocator.RobotServer;
+        var dir      = ServiceLocator.RobotDirectory;
+        var game     = ServiceLocator.Game;
+        var settings = ServiceLocator.GameSettings;
+        if (server == null || dir == null || game?.State == null) return;
+
+        int maxHp = settings != null ? settings.MaxHp : 100;
+        foreach (var robot in dir.GetAll())
+        {
+            int hp = game.State.RobotHp.GetValueOrDefault(robot.RobotId, maxHp);
+            server.SendSetHp(robot.RobotId, hp, maxHp);
+        }
     }
 
     void SendGameStarted(string connId, string playerName)
@@ -452,8 +580,17 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void SendGameOver()
     {
-        // OnGameWon fires before EndGame in most cases; this is a fallback.
-        // Only send if we haven't already (OnGameWon handles it).
+        var state = ServiceLocator.Game?.State;
+        string teamName = (state != null && state.WinnerAllianceIndex >= 0)
+            ? "Alliance " + (state.WinnerAllianceIndex + 1)
+            : "";
+        string reason = state?.EndReason ?? "manual";
+
+        string json = "{\"cmd\":\"game_over\",\"winnerTeam\":\"" +
+                      EscapeJson(teamName) + "\",\"reason\":\"" +
+                      EscapeJson(reason) + "\"}";
+        BroadcastRaw(json);
+        Debug.Log("[PlayerWS] Sent game_over reason=" + reason);
     }
 
     // ── Player list broadcast ─────────────────────────────────────────────────────
@@ -480,6 +617,93 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
         sb.Append("]}");
         return sb.ToString();
+    }
+
+    // ── Display page broadcast ────────────────────────────────────────────────────
+
+    public void BroadcastDisplayUpdate()
+    {
+        var sb         = new StringBuilder();
+        var flow       = ServiceLocator.GameFlow;
+        var gs         = ServiceLocator.Game?.State;
+        var settings   = ServiceLocator.GameSettings;
+        var players    = ServiceLocator.Players?.GetAll();
+        var dir        = ServiceLocator.RobotDirectory;
+        float timer    = ServiceLocator.MatchTimer?.Remaining ?? 0f;
+        string phase   = flow?.Phase.ToString().ToLower() ?? "mainmenu";
+
+        int maxPlayers   = settings?.MaxPlayers    ?? 6;
+        int maxTeamPts   = settings?.MaxTeamPoints  ?? 300;
+        int maxHp        = settings?.MaxHp          ?? 100;
+        int playerCount  = players?.Count ?? 0;
+
+        int tp0 = gs?.TeamPoints != null && gs.TeamPoints.Length > 0 ? gs.TeamPoints[0] : 0;
+        int tp1 = gs?.TeamPoints != null && gs.TeamPoints.Length > 1 ? gs.TeamPoints[1] : 0;
+
+        bool paused = flow?.IsPaused ?? false;
+
+        sb.Append("{\"cmd\":\"display_update\"");
+        sb.Append(",\"phase\":\"");   sb.Append(phase); sb.Append("\"");
+        sb.Append(",\"paused\":");    sb.Append(paused ? "true" : "false");
+        sb.Append(",\"timer\":");     sb.Append(timer.ToString("F1"));
+        sb.Append(",\"playerCount\":"); sb.Append(playerCount);
+        sb.Append(",\"maxPlayers\":"); sb.Append(maxPlayers);
+        sb.Append(",\"teamPoints\":["); sb.Append(tp0); sb.Append(","); sb.Append(tp1); sb.Append("]");
+        sb.Append(",\"maxTeamPoints\":"); sb.Append(maxTeamPts);
+
+        // Robots array
+        sb.Append(",\"robots\":[");
+        if (gs?.Robots != null)
+        {
+            bool first = true;
+            foreach (var r in gs.Robots)
+            {
+                if (!first) sb.Append(",");
+                first = false;
+
+                string callsign  = r.Callsign ?? r.RobotId;
+                string playerName = r.AssignedPlayer ?? "";
+                int    alliance  = -1;
+                if (players != null)
+                    foreach (var p in players)
+                        if (p.Name == playerName) { alliance = p.AllianceIndex; break; }
+
+                int hp = gs.RobotHp.TryGetValue(r.RobotId, out int v) ? v : maxHp;
+                bool dead = gs.DeadRobots.Contains(r.RobotId);
+
+                sb.Append("{\"callsign\":\""); sb.Append(EscapeJson(callsign)); sb.Append("\"");
+                sb.Append(",\"player\":\"");   sb.Append(EscapeJson(playerName)); sb.Append("\"");
+                sb.Append(",\"alliance\":"); sb.Append(alliance);
+                sb.Append(",\"hp\":"); sb.Append(hp);
+                sb.Append(",\"maxHp\":"); sb.Append(maxHp);
+                sb.Append(",\"dead\":"); sb.Append(dead ? "true" : "false");
+                sb.Append("}");
+            }
+        }
+        sb.Append("]");
+
+        // Capture points
+        string[] cpNames = { "North", "Centre", "South" };
+        sb.Append(",\"capturePoints\":[");
+        for (int i = 0; i < 3; i++)
+        {
+            if (i > 0) sb.Append(",");
+            int owner = gs?.CapturePointOwners != null && i < gs.CapturePointOwners.Length
+                ? gs.CapturePointOwners[i] : -1;
+            sb.Append("{\"name\":\""); sb.Append(cpNames[i]); sb.Append("\"");
+            sb.Append(",\"owner\":"); sb.Append(owner);
+            sb.Append("}");
+        }
+        sb.Append("]");
+
+        sb.Append("}");
+        BroadcastRaw(sb.ToString());
+    }
+
+    public void BroadcastDisplayEvent(string text)
+    {
+        string json = "{\"cmd\":\"display_event\",\"text\":\"" + EscapeJson(text) + "\"}";
+        BroadcastRaw(json);
     }
 
     void BroadcastRaw(string json)

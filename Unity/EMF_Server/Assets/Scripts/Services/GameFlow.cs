@@ -4,12 +4,14 @@ public enum GamePhase { MainMenu, Lobby, Playing, Ended }
 
 public sealed class GameFlow
 {
-    public GamePhase Phase { get; private set; } = GamePhase.MainMenu;
+    public GamePhase Phase    { get; private set; } = GamePhase.MainMenu;
+    public bool      IsPaused { get; private set; } = false;
 
     private readonly LobbyService _lobby;
     private readonly GameService  _game;
 
     public event Action<GamePhase> OnPhaseChanged;
+    public event Action<bool>      OnPausedChanged;
 
     public GameFlow(LobbyService lobby, GameService game)
     {
@@ -53,10 +55,36 @@ public sealed class GameFlow
         SetPhase(GamePhase.Playing);
     }
 
+    public bool CanPause()    => Phase == GamePhase.Playing && !IsPaused;
+    public bool CanResume()   => Phase == GamePhase.Playing && IsPaused;
+
+    public void PauseGame()
+    {
+        if (!CanPause()) return;
+        IsPaused = true;
+        ServiceLocator.MatchTimer?.Pause();
+        OnPausedChanged?.Invoke(true);
+    }
+
+    public void ResumeGame()
+    {
+        if (!CanResume()) return;
+        IsPaused = false;
+        ServiceLocator.MatchTimer?.Resume();
+        OnPausedChanged?.Invoke(false);
+    }
+
     /// <summary>Called by the operator End Game button or automatically by game logic.</summary>
     public void EndGame()
     {
         if (!CanEndGame()) return;
+
+        // Clear pause state
+        if (IsPaused)
+        {
+            IsPaused = false;
+            OnPausedChanged?.Invoke(false);
+        }
 
         // Stop the timer if still running
         var timer = ServiceLocator.MatchTimer;

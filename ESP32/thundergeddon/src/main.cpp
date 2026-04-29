@@ -42,6 +42,7 @@ extern "C" void __attribute__((constructor(101))) buzzerEarlyLow()
 #include "LedController.h"
 #include "CameraController.h"
 #include "MjpegServer.h"
+#include "RfidController.h"
 
 using namespace websockets;
 
@@ -68,6 +69,7 @@ IrController            ir;
 LedController           leds;
 CameraController        cam;
 MjpegServer             mjpeg;
+RfidController          rfid;
 
 // ---- Global state ----
 static String   g_robotId;
@@ -197,6 +199,61 @@ static void updateBuzzerFireEffect(uint32_t now)
             // Block length shrinks 20 ms → 1 ms as blast fades out.
             uint32_t blockMs = 1u + (uint32_t)((1.0f - t) * 19.0f);
             g_buzzerFireNextNoise = now + blockMs;
+        }
+    }
+}
+
+// ---- Buzzer hit effect ----
+// Phase 1 (0–50 ms):   clean sharp strike at 1200 Hz, full volume.
+// Phase 2 (50–380 ms): pixelated falling noise — centre descends 1200→150 Hz,
+//                       ±50 % random spread, 8 ms blocks, volume fades 128→0.
+static uint8_t  g_buzzerHitPhase     = 0; // 0=off, 1=strike, 2=fall
+static uint32_t g_buzzerHitStart     = 0;
+static uint32_t g_buzzerHitNextBlock = 0;
+
+static void startBuzzerHitEffect()
+{
+    g_buzzerActive    = false; // cancel plain tone
+    g_buzzerFirePhase = 0;     // cancel fire effect
+    ledcSetup(BUZZER_LEDC_CH, 1200, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 128);
+    g_buzzerHitPhase = 1;
+    g_buzzerHitStart = millis();
+}
+
+static void updateBuzzerHitEffect(uint32_t now)
+{
+    if (g_buzzerHitPhase == 0) return;
+    uint32_t elapsed = now - g_buzzerHitStart;
+
+    if (g_buzzerHitPhase == 1) {
+        if (elapsed >= 50) {
+            g_buzzerHitPhase     = 2;
+            g_buzzerHitNextBlock = now;
+        }
+        return;
+    }
+
+    if (g_buzzerHitPhase == 2) {
+        uint32_t ph2 = elapsed - 50u;
+        if (ph2 >= 330u) {
+            silenceBuzzer();
+            g_buzzerHitPhase = 0;
+            return;
+        }
+        if ((int32_t)(now - g_buzzerHitNextBlock) >= 0) {
+            float t = (float)ph2 / 330.0f; // 0→1
+            float centre = 1200.0f - t * 1050.0f; // 1200→150 Hz
+            float spread = centre * 0.5f;
+            int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * spread);
+            int32_t raw  = (int32_t)centre + rnd;
+            if (raw < 80)   raw = 80;
+            if (raw > 8000) raw = 8000;
+            uint8_t duty = (uint8_t)((1.0f - t) * 128.0f);
+            ledcSetup(BUZZER_LEDC_CH, (uint32_t)raw, 8);
+            ledcWrite(BUZZER_LEDC_CH, duty);
+            g_buzzerHitNextBlock = now + 8; // 8 ms blocks for chunky pixel feel
         }
     }
 }
@@ -331,7 +388,7 @@ static void handleWsText(const String& s)
     if (strcmp(cmd, "drive") == 0) {
         float l = doc["l"] | 0.0f;
         float r = doc["r"] | 0.0f;
-        motors.setLeftRight(l, r);
+        motors.setLeftRight(r, l); // motors swapped after hardware change
         return;
     }
 
@@ -386,7 +443,7 @@ static void handleWsText(const String& s)
 
     if (strcmp(cmd, "flash_hit") == 0) {
         leds.flashHit();
-        playBuzzer(350, 400);  // lower, longer hit sound
+        startBuzzerHitEffect();
         return;
     }
 
@@ -510,6 +567,21 @@ void setup()
     // IrController stores a reference to motors for shared I2C access
     ir.begin(motors);
 
+    // I2C bus scan — helps diagnose RFID address
+    Serial.println("[I2C] Scanning bus...");
+    int found = 0;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial.printf("[I2C]   device at 0x%02X\n", addr);
+            found++;
+        }
+    }
+    if (found == 0) Serial.println("[I2C]   nothing found");
+
+    // RFID uses the same Wire bus (already started by motors.begin)
+    rfid.begin();
+
     // Camera: configure pins only; driver started lazily on stream_on
     cam.begin();
 
@@ -565,6 +637,7 @@ void loop()
     // ---- Buzzer ----
     updateBuzzer(now);
     updateBuzzerFireEffect(now);
+    updateBuzzerHitEffect(now);
 
     // ---- IR listen window ----
     ir.update(now); // no-op when not listening
@@ -576,6 +649,16 @@ void loop()
                           ",\"dir\":\"" + res.dir + "\"}";
             ws.send(resp);
             Serial.print("[IR] result: "); Serial.println(resp);
+        }
+    }
+
+    // ---- RFID tag scan ----
+    {
+        String uid = rfid.poll(now);
+        if (uid.length() > 0 && g_wsOpen)
+        {
+            String msg = String("{\"cmd\":\"rfid\",\"uid\":\"") + uid + "\"}";
+            ws.send(msg);
         }
     }
 

@@ -24,6 +24,16 @@ public class MatchTimer : MonoBehaviour
         Running = false;
     }
 
+    public void Pause()
+    {
+        if (Running) Running = false;
+    }
+
+    public void Resume()
+    {
+        if (!Running && Remaining > 0f) Running = true;
+    }
+
     private void Update()
     {
         if (!Running) return;

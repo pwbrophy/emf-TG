@@ -113,6 +113,28 @@ public class UnityBridgeService : BackgroundService
                 case "game_over":
                     await HandleGameOver(doc.RootElement);
                     break;
+
+                case "rfid_tag":
+                    await HandleRfidTag(doc.RootElement);
+                    break;
+
+                case "display_update":
+                    await _hub.Clients.All.SendAsync("DisplayUpdate", json);
+                    break;
+
+                case "display_event":
+                    string? evtText = GetString(doc.RootElement, "text");
+                    if (!string.IsNullOrEmpty(evtText))
+                        await _hub.Clients.All.SendAsync("DisplayEvent", evtText);
+                    break;
+
+                case "game_paused":
+                    await _hub.Clients.All.SendAsync("GamePaused");
+                    break;
+
+                case "game_resumed":
+                    await _hub.Clients.All.SendAsync("GameResumed");
+                    break;
             }
         }
         catch (Exception ex)
@@ -169,6 +191,16 @@ public class UnityBridgeService : BackgroundService
 
         await _hub.Clients.Client(connId).SendAsync("YouAreDead");
         _logger.LogInformation("[Bridge] YouAreDead → conn {c}", connId);
+    }
+
+    private async Task HandleRfidTag(JsonElement root)
+    {
+        string? connId = GetString(root, "connectionId");
+        if (string.IsNullOrEmpty(connId)) return;
+
+        string uid = GetString(root, "uid") ?? "";
+        await _hub.Clients.Client(connId).SendAsync("RfidTag", uid);
+        _logger.LogInformation("[Bridge] RfidTag uid={uid} → conn {c}", uid, connId);
     }
 
     private async Task HandleGameOver(JsonElement root)

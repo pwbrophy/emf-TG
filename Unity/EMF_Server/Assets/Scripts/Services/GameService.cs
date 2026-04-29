@@ -42,6 +42,15 @@ public sealed class GameService
         }
 
         State = gs;
+        ServiceLocator.CapturePoints?.Reset();
+    }
+
+    /// <summary>
+    /// Force a win by alliance — used by CapturePointService when team points reach max.
+    /// </summary>
+    public void ForceWin(int allianceIndex, string reason)
+    {
+        DeclareWinner(allianceIndex, reason);
     }
 
     /// <summary>
@@ -81,10 +90,37 @@ public sealed class GameService
         {
             State.DeadRobots.Add(targetId);
             OnRobotDied?.Invoke(targetId);
+            if (shooterAlliance >= 0)
+                ServiceLocator.CapturePoints?.AwardKillPoints(shooterAlliance);
             CheckWinCondition(players, dir);
         }
 
         return damage;
+    }
+
+    /// <summary>
+    /// Apply a fixed amount of damage directly to a robot (bypasses shooter/alliance logic).
+    /// Used for operator test controls. Returns new HP, or -1 if not in game / already dead.
+    /// </summary>
+    public int ApplyDirectDamage(string targetId, int amount)
+    {
+        if (State == null) return -1;
+        if (State.DeadRobots.Contains(targetId)) return -1;
+        if (!State.RobotHp.ContainsKey(targetId)) return -1;
+
+        int newHp = Mathf.Max(0, State.RobotHp[targetId] - amount);
+        State.RobotHp[targetId] = newHp;
+
+        OnHpChanged?.Invoke(targetId, newHp);
+
+        if (newHp <= 0)
+        {
+            State.DeadRobots.Add(targetId);
+            OnRobotDied?.Invoke(targetId);
+            CheckWinCondition(ServiceLocator.Players, ServiceLocator.RobotDirectory);
+        }
+
+        return newHp;
     }
 
     /// <summary>
@@ -95,8 +131,18 @@ public sealed class GameService
     {
         if (State == null) return;
 
-        int winner = DetermineWinnerByScore(players, dir);
+        // Team points are the primary win condition; fall back to survivor/damage tiebreaker
+        int winner = DetermineWinnerByTeamPoints();
+        if (winner < 0) winner = DetermineWinnerByScore(players, dir);
         DeclareWinner(winner, "time");
+    }
+
+    private int DetermineWinnerByTeamPoints()
+    {
+        if (State?.TeamPoints == null || State.TeamPoints.Length < 2) return -1;
+        if (State.TeamPoints[0] > State.TeamPoints[1]) return 0;
+        if (State.TeamPoints[1] > State.TeamPoints[0]) return 1;
+        return -1; // tied — caller falls back to survivor count
     }
 
     // ── private helpers ────────────────────────────────────────────────

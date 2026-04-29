@@ -43,22 +43,27 @@ public:
 
         pinMode(LED_STATUS_PIN, OUTPUT);
         _setStatusPin(false); // off at boot
+        _drawHpBar(); // show initial full blue bar immediately
     }
 
     // Must be called every loop tick to advance timed effects and blink patterns.
     void update(uint32_t now)
     {
         _updateEffect(now);
+        _updatePulse(now);
         _updateStatus(now);
     }
 
     // ---- HP bar ----
 
     // Update stored HP values and redraw the bar (unless an effect is active).
+    // Resets the pulse cycle so the bar immediately shows the new state.
     void setHp(int hp, int maxHp)
     {
-        _hp    = (hp    < 0)    ? 0    : hp;
-        _maxHp = (maxHp < 1)    ? 1    : maxHp;
+        _hp    = (hp    < 0) ? 0    : hp;
+        _maxHp = (maxHp < 1) ? 1    : maxHp;
+        _pulseOn         = true;
+        _nextPulseToggle = millis() + 500;
         if (_effect == Effect::None) _drawHpBar();
     }
 
@@ -146,6 +151,20 @@ private:
         }
     }
 
+    // Drive the 0.5 s warning pulse when HP is in the last LED's territory.
+    void _updatePulse(uint32_t now)
+    {
+        if (_effect != Effect::None || _hp <= 0) return;
+        float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
+        if (ledsF > 1.0f) return; // only pulse at last LED
+
+        if ((int32_t)(now - _nextPulseToggle) >= 0) {
+            _pulseOn         = !_pulseOn;
+            _nextPulseToggle = now + 500;
+            _drawHpBar();
+        }
+    }
+
     // Advance the status LED blink pattern.
     void _updateStatus(uint32_t now)
     {
@@ -170,22 +189,30 @@ private:
         }
     }
 
-    // Draw blue HP bar.  Each of the 6 LEDs represents 1/6 of maxHp.
-    // The rightmost lit LED may be partially dimmed for a smoother reading.
+    // Draw the HP bar with proportional brightness.
+    // LED 5 (front) is the last to dim; LED 0 (back) dims first.
+    // Full LEDs are bright blue; the transition LED uses partial brightness.
+    // When in the last LED's territory, _pulseOn gates the whole display.
     void _drawHpBar()
     {
         _strip.clear();
-        if (_maxHp > 0 && _hp > 0) {
-            float frac = (float)_hp / (float)_maxHp;
-            float litf = frac * LED_STRIP_COUNT;
-            int   full = (int)litf;
-            int   part = (int)((litf - (float)full) * 255.0f);
+        if (_hp > 0 && _maxHp > 0) {
+            float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
+            if (ledsF > (float)LED_STRIP_COUNT) ledsF = (float)LED_STRIP_COUNT;
 
-            for (int i = 0; i < full && i < LED_STRIP_COUNT; i++) {
-                _strip.setPixelColor(i, _strip.Color(0, 0, 255));
-            }
-            if (full < LED_STRIP_COUNT && part > 8) { // ignore sub-pixel rounding noise
-                _strip.setPixelColor(full, _strip.Color(0, 0, (uint8_t)part));
+            int fullLeds = (int)ledsF;
+            uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * 255.0f);
+
+            bool warning = (ledsF <= 1.0f);
+            if (!warning || _pulseOn) {
+                // Full LEDs at the front (high indices: 5, 4, ... down)
+                int firstFull = LED_STRIP_COUNT - fullLeds;
+                for (int i = firstFull; i < LED_STRIP_COUNT; i++)
+                    _strip.setPixelColor(i, _strip.Color(0, 0, 255));
+                // Partial LED just below the full ones
+                int partialIdx = firstFull - 1;
+                if (partialBright > 0 && partialIdx >= 0)
+                    _strip.setPixelColor(partialIdx, _strip.Color(0, 0, partialBright));
             }
         }
         _strip.show();
@@ -208,9 +235,11 @@ private:
     Adafruit_NeoPixel _strip;
     Effect            _effect            = Effect::None;
     uint32_t          _effectEnd         = 0;
-    uint32_t          _seqStart          = 0; // millis() when FireSeq began
-    int               _hp                = 0;
+    uint32_t          _seqStart          = 0;
+    int               _hp                = 0;   // dark until set_hp received from server
     int               _maxHp             = 100;
+    bool              _pulseOn           = true;  // warning-pulse display state
+    uint32_t          _nextPulseToggle   = 0;
 
     StatusPattern     _statusPattern     = StatusPattern::SearchingFast;
     uint32_t          _statusNextToggle  = 0;

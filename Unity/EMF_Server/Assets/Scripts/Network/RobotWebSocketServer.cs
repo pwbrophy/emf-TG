@@ -54,6 +54,14 @@ public class RobotWebSocketServer : MonoBehaviour
     // Args: robotId, hit, direction (compass string e.g. "SE", or "" if no hit)
     public event Action<string, bool, string> OnIrResult;
 
+    // Fired when a robot sends ir_slot_result.
+    // Args: robotId, slotId, b1Mask, b2Mask
+    public event Action<string, int, byte, byte> OnIrSlotResult;
+
+    // Fired when a robot scans an RFID tag.
+    // Args: robotId, uid
+    public event Action<string, string> OnRfidTag;
+
     private static RobotWebSocketServer _self;
 
     private void Awake()
@@ -337,6 +345,19 @@ public class RobotWebSocketServer : MonoBehaviour
             OnIrResult?.Invoke(robotId, hit, dir);
             return;
         }
+
+        if (cmd == "ir_slot_result")
+        {
+            if (!_bySession.TryGetValue(sid, out var info)) return;
+            string robotId = info.RobotId;
+            if (string.IsNullOrEmpty(robotId)) return;
+            int  slotId = ExtractInt(json, "slot_id");
+            byte b1     = (byte)ExtractInt(json, "b1");
+            byte b2     = (byte)ExtractInt(json, "b2");
+            Debug.Log($"[WS<-Robot] ir_slot_result slot={slotId} b1=0x{b1:X2} b2=0x{b2:X2} -> {robotId}");
+            OnIrSlotResult?.Invoke(robotId, slotId, b1, b2);
+            return;
+        }
     }
 
     public void HandleBinary(string sid, byte[] data)
@@ -539,6 +560,45 @@ public class RobotWebSocketServer : MonoBehaviour
         return SendJsonToRobot(robotId, "{\"cmd\":\"ir_read\"}");
     }
 
+    // ===== IR slot commands =====
+
+    public void SendTimeSyncAll(long unityMs)
+    {
+        var ids = new List<string>(_sessionByRobot.Keys);
+        string json = "{\"cmd\":\"time_sync\",\"ut\":" + unityMs + "}";
+        foreach (var rid in ids)
+            SendJsonToRobot(rid, json);
+        Debug.Log($"[WS->Robot] time_sync ut={unityMs} -> {ids.Count} robots");
+    }
+
+    public bool SendIrFireSlot(string robotId, int slotId, long slotStart,
+                               int b1Dur, int gap12, int b2Dur, int repGap, int reps)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"ir_fire_slot\",\"slot_id\":{slotId}" +
+                      $",\"slot_start\":{slotStart}" +
+                      $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
+                      $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok ? $"[WS->Robot] ir_fire_slot slot={slotId} -> {robotId}"
+                     : $"[WS->Robot] FAILED ir_fire_slot -> {robotId}");
+        return ok;
+    }
+
+    public bool SendIrListenSlot(string robotId, int slotId, long slotStart,
+                                 int b1Dur, int gap12, int b2Dur, int repGap, int reps)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"ir_listen_slot\",\"slot_id\":{slotId}" +
+                      $",\"slot_start\":{slotStart}" +
+                      $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
+                      $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} -> {robotId}"
+                     : $"[WS->Robot] FAILED ir_listen_slot -> {robotId}");
+        return ok;
+    }
+
     // ===== LED / buzzer feedback commands =====
 
     public bool SendFlashFire(string robotId)
@@ -573,6 +633,27 @@ public class RobotWebSocketServer : MonoBehaviour
         if (_wss == null) return null;
         var svcHost = _wss.WebSocketServices[Path];
         return svcHost?.Sessions;
+    }
+
+    private static int ExtractInt(string s, string key)
+    {
+        if (string.IsNullOrEmpty(s) || string.IsNullOrEmpty(key)) return 0;
+        try
+        {
+            int k = s.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+            if (k < 0) return 0;
+            int colon = s.IndexOf(':', k);
+            if (colon < 0) return 0;
+            int i = colon + 1;
+            while (i < s.Length && (s[i] == ' ' || s[i] == '\t')) i++;
+            int start = i;
+            if (i < s.Length && s[i] == '-') i++;
+            while (i < s.Length && char.IsDigit(s[i])) i++;
+            if (i == start) return 0;
+            if (int.TryParse(s.Substring(start, i - start), out int val)) return val;
+            return 0;
+        }
+        catch { return 0; }
     }
 
     private static string ExtractString(string s, string key)

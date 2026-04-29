@@ -18,4 +18,20 @@ public class GameSettings : MonoBehaviour
 
     [Tooltip("Match duration in seconds.")]
     public float MatchDurationSeconds = 180f;
+
+    [Header("Lobby")]
+    [Tooltip("Maximum number of player slots shown on display page.")]
+    public int MaxPlayers = 6;
+
+    [Header("Team Points")]
+    [Tooltip("Team points needed to win immediately via tug-of-war.")]
+    public int MaxTeamPoints = 300;
+
+    [Tooltip("Team points awarded to the killing alliance per robot destroyed.")]
+    public int TeamPointsPerKill = 25;
+
+    [Header("Capture Point RFID UIDs — add one entry per physical tag")]
+    public string[] NorthPointUids  = new string[0];
+    public string[] CentrePointUids = new string[0];
+    public string[] SouthPointUids  = new string[0];
 }
