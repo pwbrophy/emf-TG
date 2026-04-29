@@ -370,10 +370,40 @@ public class PlayerWebSocketServer : MonoBehaviour
     void OnPhaseChanged(GamePhase phase)
     {
         if (phase == GamePhase.Playing)
+        {
             SendGameStartedToAll();
+            ActivateAllRobots();
+        }
         else if (phase == GamePhase.Ended)
+        {
             SendGameOver();
-        BroadcastDisplayUpdate();
+            DeactivateAllRobots();
+            BroadcastDisplayUpdate();
+        }
+    }
+
+    void ActivateAllRobots()
+    {
+        var dir = ServiceLocator.RobotDirectory;
+        var ws  = ServiceLocator.RobotServer;
+        if (dir == null || ws == null) return;
+        foreach (var robot in dir.GetAll())
+        {
+            ws.SendStreamOn(robot.RobotId);
+            ws.SendMotorsOn(robot.RobotId);
+        }
+    }
+
+    void DeactivateAllRobots()
+    {
+        var dir = ServiceLocator.RobotDirectory;
+        var ws  = ServiceLocator.RobotServer;
+        if (dir == null || ws == null) return;
+        foreach (var robot in dir.GetAll())
+        {
+            ws.SendStreamOff(robot.RobotId);
+            ws.SendMotorsOff(robot.RobotId);
+        }
     }
 
     void OnHpChanged(string robotId, int newHp)

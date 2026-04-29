@@ -62,6 +62,7 @@ public class RobotWebSocketServer : MonoBehaviour
     // Args: robotId, uid
     public event Action<string, string> OnRfidTag;
 
+
     private static RobotWebSocketServer _self;
 
     private void Awake()
@@ -354,6 +355,7 @@ public class RobotWebSocketServer : MonoBehaviour
             int  slotId = ExtractInt(json, "slot_id");
             byte b1     = (byte)ExtractInt(json, "b1");
             byte b2     = (byte)ExtractInt(json, "b2");
+
             Debug.Log($"[WS<-Robot] ir_slot_result slot={slotId} b1=0x{b1:X2} b2=0x{b2:X2} -> {robotId}");
             OnIrSlotResult?.Invoke(robotId, slotId, b1, b2);
             return;

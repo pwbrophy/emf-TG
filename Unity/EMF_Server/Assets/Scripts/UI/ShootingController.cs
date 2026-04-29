@@ -3,12 +3,12 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-// ShootingController - realtime shooting with 3-second per-robot cooldown.
+// ShootingController — manages per-robot fire cooldown and routes fire requests
+// to IrSlotScheduler.  The actual IR sequence runs in IrSlotScheduler.
 public class ShootingController : MonoBehaviour
 {
     [Header("UI wiring")]
     [SerializeField] private Button shootButton;
-    [SerializeField] private TextMeshProUGUI resultLabel;
     [SerializeField] private TextMeshProUGUI cooldownLabel;
     [SerializeField] private RobotSelectionPanel selectionPanel;
 
@@ -54,9 +54,8 @@ public class ShootingController : MonoBehaviour
             cooldownLabel.text = remaining > 0f ? $"Cooldown: {remaining:F1}s" : "";
     }
 
-    /// <summary>
-    /// Called by PlayerWebSocketServer to fire from a phone player's request.
-    /// </summary>
+    // Called by PlayerWebSocketServer for phone fire requests, and OnShootClicked
+    // for operator button presses.
     public void RequestFire(string robotId)
     {
         if (string.IsNullOrEmpty(robotId)) return;
@@ -96,6 +95,13 @@ public class ShootingController : MonoBehaviour
             Debug.Log("[Shooting] No robot selected.");
             return;
         }
+
+        if (CooldownRemaining(shooterId) > 0f)
+        {
+            Debug.Log("[Shooting] Still on cooldown.");
+            return;
+        }
+
 
         RequestFire(shooterId);
     }
