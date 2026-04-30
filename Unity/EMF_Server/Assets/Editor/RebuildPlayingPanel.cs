@@ -38,8 +38,12 @@ public static class RebuildPlayingPanel
         _font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(
             "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF.asset");
 
-        var pp = GameObject.Find("PlayingPanel");
-        if (pp == null) { Debug.LogError("[RebuildPlaying] PlayingPanel not found."); return; }
+        // GameObject.Find skips inactive objects, so search via the Canvas transform instead.
+        var canvas = GameObject.Find("Canvas");
+        if (canvas == null) { Debug.LogError("[RebuildPlaying] Canvas not found."); return; }
+        var ppTransform = canvas.transform.Find("PlayingPanel");
+        if (ppTransform == null) { Debug.LogError("[RebuildPlaying] PlayingPanel not found under Canvas."); return; }
+        var pp = ppTransform.gameObject;
 
         // ── 1. Remove all old children ────────────────────────────────────────
         for (int i = pp.transform.childCount - 1; i >= 0; i--)
@@ -140,10 +144,10 @@ public static class RebuildPlayingPanel
         if (tpBarUI == null) tpBarUI = pp.AddComponent<TeamPointsBarUI>();
         {
             var so = new SerializedObject(tpBarUI);
-            so.FindProperty("fill0").objectReferenceValue  = fill0.GetComponent<RectTransform>();
-            so.FindProperty("fill1").objectReferenceValue  = fill1.GetComponent<RectTransform>();
-            so.FindProperty("label0").objectReferenceValue = tpLabel0;
-            so.FindProperty("label1").objectReferenceValue = tpLabel1;
+            SetProp(so, "fill0",  fill0.GetComponent<RectTransform>());
+            SetProp(so, "fill1",  fill1.GetComponent<RectTransform>());
+            SetProp(so, "label0", tpLabel0);
+            SetProp(so, "label1", tpLabel1);
             so.ApplyModifiedProperties();
         }
 
@@ -166,7 +170,7 @@ public static class RebuildPlayingPanel
         if (evtPanel == null) evtPanel = pp.AddComponent<EventLogPanelUI>();
         {
             var so = new SerializedObject(evtPanel);
-            so.FindProperty("container").objectReferenceValue = evtContainer.GetComponent<RectTransform>();
+            SetProp(so, "container", evtContainer.GetComponent<RectTransform>());
             so.ApplyModifiedProperties();
         }
 
@@ -231,7 +235,7 @@ public static class RebuildPlayingPanel
         if (trp == null) trp = pp.AddComponent<TeamRosterPanel>();
         {
             var so = new SerializedObject(trp);
-            so.FindProperty("rowContainer").objectReferenceValue = rosterContent;
+            SetProp(so, "rowContainer", rosterContent);
             so.ApplyModifiedProperties();
         }
 
@@ -272,11 +276,12 @@ public static class RebuildPlayingPanel
         }
         if (cpType != null)
         {
-            var cpUI = pp.GetComponent(cpType) ?? pp.AddComponent(cpType);
+            var cpUI = pp.GetComponent(cpType);
+            if (cpUI == null) cpUI = pp.AddComponent(cpType);
             var so = new SerializedObject(cpUI);
-            so.FindProperty("circle0").objectReferenceValue = cpCircle0;
-            so.FindProperty("circle1").objectReferenceValue = cpCircle1;
-            so.FindProperty("circle2").objectReferenceValue = cpCircle2;
+            SetProp(so, "circle0", cpCircle0);
+            SetProp(so, "circle1", cpCircle1);
+            SetProp(so, "circle2", cpCircle2);
             so.ApplyModifiedProperties();
         }
         else Debug.LogWarning("[RebuildPlaying] CapturePointsPanelUI type not found.");
@@ -287,8 +292,8 @@ public static class RebuildPlayingPanel
         if (pgb == null) pgb = pp.AddComponent<PauseGameButton>();
         {
             var so = new SerializedObject(pgb);
-            so.FindProperty("button").objectReferenceValue = pauseBtn.GetComponent<Button>();
-            so.FindProperty("label").objectReferenceValue  = pauseBtn.GetComponentInChildren<TextMeshProUGUI>();
+            SetProp(so, "button", pauseBtn.GetComponent<Button>());
+            SetProp(so, "label",  pauseBtn.GetComponentInChildren<TextMeshProUGUI>());
             so.ApplyModifiedProperties();
         }
 
@@ -296,7 +301,7 @@ public static class RebuildPlayingPanel
         if (mtd != null)
         {
             var so = new SerializedObject(mtd);
-            so.FindProperty("timerLabel").objectReferenceValue = timerLbl;
+            SetProp(so, "timerLabel", timerLbl);
             so.ApplyModifiedProperties();
         }
 
@@ -304,7 +309,7 @@ public static class RebuildPlayingPanel
         if (gpp != null)
         {
             var so = new SerializedObject(gpp);
-            so.FindProperty("endGameButton").objectReferenceValue = endGameBtn.GetComponent<Button>();
+            SetProp(so, "endGameButton", endGameBtn.GetComponent<Button>());
             so.ApplyModifiedProperties();
         }
 
@@ -312,9 +317,8 @@ public static class RebuildPlayingPanel
         if (sc != null)
         {
             var so = new SerializedObject(sc);
-            so.FindProperty("shootButton").objectReferenceValue   = null;
-            so.FindProperty("resultLabel").objectReferenceValue   = null;
-            so.FindProperty("cooldownLabel").objectReferenceValue = null;
+            SetProp(so, "shootButton",   null);
+            SetProp(so, "cooldownLabel", null);
             so.ApplyModifiedProperties();
         }
 
@@ -322,7 +326,7 @@ public static class RebuildPlayingPanel
         if (tdb != null)
         {
             var so = new SerializedObject(tdb);
-            so.FindProperty("damageButton").objectReferenceValue = dmgBtn.GetComponent<Button>();
+            SetProp(so, "damageButton", dmgBtn.GetComponent<Button>());
             so.ApplyModifiedProperties();
         }
 
@@ -330,8 +334,8 @@ public static class RebuildPlayingPanel
         if (rpb != null)
         {
             var so = new SerializedObject(rpb);
-            so.FindProperty("pingButton").objectReferenceValue  = pingBtn.GetComponent<Button>();
-            so.FindProperty("resultLabel").objectReferenceValue = pingResult;
+            SetProp(so, "pingButton",  pingBtn.GetComponent<Button>());
+            SetProp(so, "resultLabel", pingResult);
             so.ApplyModifiedProperties();
         }
 
@@ -339,14 +343,14 @@ public static class RebuildPlayingPanel
         if (rsp != null)
         {
             var so = new SerializedObject(rsp);
-            so.FindProperty("prevButton").objectReferenceValue    = null;
-            so.FindProperty("nextButton").objectReferenceValue    = null;
-            so.FindProperty("clearButton").objectReferenceValue   = null;
-            so.FindProperty("nameLabel").objectReferenceValue     = null;
-            so.FindProperty("ipLabel").objectReferenceValue       = null;
-            so.FindProperty("playerLabel").objectReferenceValue   = null;
-            so.FindProperty("allianceLabel").objectReferenceValue = null;
-            so.FindProperty("clientLabel").objectReferenceValue   = null;
+            SetProp(so, "prevButton",    null);
+            SetProp(so, "nextButton",    null);
+            SetProp(so, "clearButton",   null);
+            SetProp(so, "nameLabel",     null);
+            SetProp(so, "ipLabel",       null);
+            SetProp(so, "playerLabel",   null);
+            SetProp(so, "allianceLabel", null);
+            SetProp(so, "clientLabel",   null);
             so.ApplyModifiedProperties();
         }
 
@@ -388,6 +392,16 @@ public static class RebuildPlayingPanel
         lbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 16f;
 
         return img;
+    }
+
+    // Null-safe SerializedObject property setter — logs a warning if property not found.
+    static void SetProp(SerializedObject so, string propName, UnityEngine.Object value)
+    {
+        var prop = so.FindProperty(propName);
+        if (prop == null)
+            Debug.LogWarning($"[RebuildPlaying] Property '{propName}' not found on {so.targetObject?.GetType().Name}");
+        else
+            prop.objectReferenceValue = value;
     }
 
     // ── Generic helpers ───────────────────────────────────────────────────────

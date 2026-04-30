@@ -17,12 +17,12 @@ using UnityEngine;
 public class IrSlotScheduler : MonoBehaviour
 {
     [Header("Slot timing (ms)")]
-    [SerializeField] private int slotFutureMs       = 150;
-    [SerializeField] private int b1DurMs            = 10;
-    [SerializeField] private int gap12Ms            = 25;
-    [SerializeField] private int b2DurMs            = 10;
-    [SerializeField] private int repGapMs           = 25;
-    [SerializeField] private int reps               = 2;
+    [SerializeField] private int slotFutureMs       = 200;  // lead time; must exceed WiFi latency jitter
+    [SerializeField] private int b1DurMs            = 25;   // wider windows absorb timing jitter between robots
+    [SerializeField] private int gap12Ms            = 20;
+    [SerializeField] private int b2DurMs            = 25;
+    [SerializeField] private int repGapMs           = 20;
+    [SerializeField] private int reps               = 3;
 
     [Header("Result collection")]
     [SerializeField] private float resultBufferSeconds = 0.5f;
@@ -211,18 +211,16 @@ public class IrSlotScheduler : MonoBehaviour
                 continue;
             }
 
-            byte bothMask = (byte)(masks.b1 & masks.b2);
+            // OR across both burst windows: a hit in either window counts.
+            // AND was too strict — WiFi jitter between robots shifts one window off-target.
+            byte detMask = (byte)(masks.b1 | masks.b2);
             Debug.Log($"[IrSlot]   {enemyName}: b1=0x{masks.b1:X2} b2=0x{masks.b2:X2} " +
-                      $"both=0x{bothMask:X2} ({MaskToDirs(bothMask)}) → {(bothMask != 0 ? "HIT" : "miss")}");
+                      $"det=0x{detMask:X2} ({MaskToDirs(detMask)}) → {(detMask != 0 ? "HIT" : "miss")}");
 
-            if (bothMask == 0)
-            {
-                if (masks.b1 != 0 || masks.b2 != 0)
-                    Debug.Log($"[IrSlot]   {enemyName}: partial detection (only one burst) — no hit.");
+            if (detMask == 0)
                 continue;
-            }
 
-            string hitDir = ResolveBestDirection(bothMask);
+            string hitDir = ResolveBestDirection(detMask);
             bool isRear   = hitDir == "S" || hitDir == "SE" || hitDir == "SW";
             Debug.Log($"[IrSlot] *** HIT: {enemyName} dir={hitDir} {(isRear ? "(REAR — 3× damage!)" : "")} ***");
             hitCount++;
