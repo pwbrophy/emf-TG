@@ -360,6 +360,18 @@ public class RobotWebSocketServer : MonoBehaviour
             OnIrSlotResult?.Invoke(robotId, slotId, b1, b2);
             return;
         }
+
+        if (cmd == "rfid")
+        {
+            if (!_bySession.TryGetValue(sid, out var info)) return;
+            string robotId = info.RobotId;
+            if (string.IsNullOrEmpty(robotId)) return;
+            string uid = ExtractString(json, "uid");
+            if (string.IsNullOrEmpty(uid)) return;
+            Debug.Log($"[WS<-Robot] rfid uid={uid} from {robotId}");
+            OnRfidTag?.Invoke(robotId, uid);
+            return;
+        }
     }
 
     public void HandleBinary(string sid, byte[] data)
@@ -573,30 +585,30 @@ public class RobotWebSocketServer : MonoBehaviour
         Debug.Log($"[WS->Robot] time_sync ut={unityMs} -> {ids.Count} robots");
     }
 
-    public bool SendIrFireSlot(string robotId, int slotId, long slotStart,
+    public bool SendIrFireSlot(string robotId, int slotId, int delayMs,
                                int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"ir_fire_slot\",\"slot_id\":{slotId}" +
-                      $",\"slot_start\":{slotStart}" +
+                      $",\"delay_ms\":{delayMs}" +
                       $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
                       $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_fire_slot slot={slotId} -> {robotId}"
+        Debug.Log(ok ? $"[WS->Robot] ir_fire_slot slot={slotId} delay={delayMs}ms -> {robotId}"
                      : $"[WS->Robot] FAILED ir_fire_slot -> {robotId}");
         return ok;
     }
 
-    public bool SendIrListenSlot(string robotId, int slotId, long slotStart,
+    public bool SendIrListenSlot(string robotId, int slotId, int delayMs,
                                  int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"ir_listen_slot\",\"slot_id\":{slotId}" +
-                      $",\"slot_start\":{slotStart}" +
+                      $",\"delay_ms\":{delayMs}" +
                       $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
                       $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} -> {robotId}"
+        Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} delay={delayMs}ms -> {robotId}"
                      : $"[WS->Robot] FAILED ir_listen_slot -> {robotId}");
         return ok;
     }
