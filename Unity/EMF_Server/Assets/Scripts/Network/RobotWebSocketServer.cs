@@ -639,6 +639,14 @@ public class RobotWebSocketServer : MonoBehaviour
         return ok;
     }
 
+    public bool SendFlashCapture(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_capture\"}");
+        Debug.Log(ok ? $"[WS->Robot] flash_capture -> {robotId}" : $"[WS->Robot] FAILED flash_capture -> {robotId}");
+        return ok;
+    }
+
     public bool SendFlashDeath(string robotId)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
