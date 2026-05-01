@@ -393,16 +393,38 @@
       align-items: center;
       justify-content: center;
       z-index: 50;
+      text-align: center;
+      gap: 10px;
     }
     #screen-dead.active { display: flex; }
-    #screen-dead h2 {
+    /* In dead-walk mode the overlay is decorative only — let touches through, no darkening */
+    #screen-dead.walkmode { pointer-events: none; background: transparent; }
+    #dead-title {
       font-size: 3rem;
       font-weight: 900;
       color: #ff2222;
       text-shadow: 0 0 30px rgba(255,0,0,0.6);
       letter-spacing: 0.05em;
     }
-    #screen-dead p { color: var(--muted); margin-top: 12px; }
+    #screen-dead.walkmode #dead-title {
+      font-size: 2rem;
+      color: #ff8844;
+      text-shadow: 0 0 20px rgba(255,100,0,0.5);
+    }
+    #dead-countdown {
+      font-size: 3.5rem;
+      font-weight: 900;
+      color: #ff2222;
+      text-shadow: 0 0 20px rgba(255,0,0,0.5);
+      line-height: 1;
+      min-height: 1em;
+    }
+    #dead-subtitle {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: rgba(255,140,68,0.9);
+    }
 
     /* ═══════════════════════════════════════════════════
        SCREEN 5 — GAME OVER
@@ -569,8 +591,9 @@
 
 <!-- ── Screen 4: Dead (overlay) ───────────────────────────────────── -->
 <div id="screen-dead" class="screen">
-  <h2>YOU ARE DEAD</h2>
-  <p>Waiting for the game to end…</p>
+  <h2 id="dead-title">YOU ARE DEAD</h2>
+  <div id="dead-countdown"></div>
+  <p id="dead-subtitle"></p>
 </div>
 
 <!-- ── Screen 5: Game over ─────────────────────────────────────────── -->
@@ -586,7 +609,9 @@
 // ════════════════════════════════════════════════════════
 let myName      = '';
 let connection  = null;
-let isDead      = false;
+let isDead      = false;      // true during 5-s explosion — all controls blocked
+let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
+let _deadTimer  = null;       // interval driving the countdown
 
 let maxHp       = 100;
 let currentHp   = 100;
@@ -629,13 +654,16 @@ function hideReconnectOverlay() {
 }
 
 function returnToJoin(message) {
-  isDead = false;
+  isDead     = false;
+  isDeadWalk = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
   joyL = joyR = turretSpeed = 0;
   joystickActive = false;
   turretActive   = false;
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
   document.getElementById('stream').src = '';
+  document.getElementById('screen-dead').classList.remove('active', 'walkmode');
   document.getElementById('game-paused-overlay').classList.remove('active');
   showScreen('screen-join');
   if (message) setStatus(message, true);
@@ -654,6 +682,7 @@ function buildConnection() {
   conn.on('GameStarted',  data     => onGameStarted(data));
   conn.on('StateUpdate',  data     => onStateUpdate(data));
   conn.on('YouAreDead',   ()       => onYouAreDead());
+  conn.on('YouAreAlive',  ()       => onYouAreAlive());
   conn.on('GameOver',     data     => onGameOver(data));
   conn.on('RfidTag',      uid      => onRfidTag(uid));
   conn.on('GamePaused',   ()       => document.getElementById('game-paused-overlay').classList.add('active'));
@@ -744,9 +773,12 @@ function toggleFullscreen() {
 }
 
 function onGameStarted(data) {
-  maxHp     = data.maxHp || 100;
-  currentHp = data.hp    || maxHp;
-  isDead    = false;
+  maxHp      = data.maxHp || 100;
+  currentHp  = data.hp    || maxHp;
+  isDead     = false;
+  isDeadWalk = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+  document.getElementById('screen-dead').classList.remove('active', 'walkmode');
 
   enterFullscreenLandscape();
 
@@ -769,6 +801,8 @@ function onStateUpdate(data) {
     currentHp = data.hp;
     maxHp     = data.maxHp || maxHp;
     updateHpBar();
+    // Fallback respawn detection: full HP while in dead walk = respawn happened
+    if (isDeadWalk && currentHp >= maxHp) onYouAreAlive();
   }
   if (data.timer !== undefined) {
     updateTimer(data.timer);
@@ -776,9 +810,52 @@ function onStateUpdate(data) {
 }
 
 function onYouAreDead() {
-  isDead = true;
-  document.getElementById('screen-dead').classList.add('active');
-  // Playing screen stays underneath; controls are hidden by the dead overlay
+  isDead     = true;
+  isDeadWalk = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+
+  const overlay   = document.getElementById('screen-dead');
+  const titleEl   = document.getElementById('dead-title');
+  const countEl   = document.getElementById('dead-countdown');
+  const subtitleEl = document.getElementById('dead-subtitle');
+
+  overlay.classList.remove('walkmode');
+  overlay.classList.add('active');
+  titleEl.textContent    = 'YOU ARE DEAD';
+  subtitleEl.textContent = '';
+
+  let secs = 5;
+  countEl.textContent = secs;
+
+  _deadTimer = setInterval(() => {
+    secs--;
+    if (secs > 0) {
+      countEl.textContent = secs;
+    } else {
+      clearInterval(_deadTimer);
+      _deadTimer = null;
+
+      // Explosion over — transition to dead-walk: can drive, cannot fire
+      isDead     = false;
+      isDeadWalk = true;
+
+      overlay.classList.add('walkmode');        // pointer-events:none → touches reach controls
+      titleEl.textContent    = 'RETURN TO BASE';
+      subtitleEl.textContent = 'TO RESPAWN';
+      countEl.textContent    = '';
+    }
+  }, 1000);
+}
+
+function onYouAreAlive() {
+  isDead     = false;
+  isDeadWalk = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+
+  const overlay = document.getElementById('screen-dead');
+  overlay.classList.remove('active', 'walkmode');
+  document.getElementById('dead-countdown').textContent = '';
+  document.getElementById('dead-subtitle').textContent  = '';
 }
 
 function onGameOver(data) {
@@ -958,7 +1035,7 @@ function updateTurret(cx) {
 // Fire button
 // ════════════════════════════════════════════════════════
 function onFire() {
-  if (isDead) return;
+  if (isDead || isDeadWalk) return;
   const now = Date.now();
   if (now < fireCooldownUntil) return;
 

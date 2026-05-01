@@ -30,6 +30,7 @@ public sealed class CapturePointService
 
         if (gs == null || settings == null || dir == null || players == null) return false;
         if (string.IsNullOrEmpty(uid)) return false;
+        if (gs.DeadRobots.Contains(robotId) || gs.RespawningRobots.Contains(robotId)) return false;
 
         int pointIndex = UidToPointIndex(uid, settings);
         if (pointIndex < 0) return false;

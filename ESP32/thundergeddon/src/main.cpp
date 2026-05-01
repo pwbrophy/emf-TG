@@ -264,6 +264,159 @@ static void updateBuzzerHitEffect(uint32_t now)
     }
 }
 
+// ---- Buzzer heal effect ----
+// Phase 1 (0–700 ms):   linear rising sweep 200→1500 Hz, volume 0→128.
+// Phase 2 (700–800 ms): hold at 1500 Hz, full volume.
+// Phase 3 (820–1220 ms): 4 ascending pips (1600 / 1900 / 2300 / 2800 Hz, 55 ms on / 45 ms off).
+static uint8_t  g_buzzerHealPhase   = 0; // 0=off, 1=ramp, 2=hold, 3=pips
+static uint32_t g_buzzerHealStart   = 0;
+static uint32_t g_buzzerHealLastUp  = 0;
+static uint8_t  g_buzzerHealCurPip  = 255;
+
+static const uint32_t HEAL_PIP_FREQS[4]  = {1600, 1900, 2300, 2800};
+static const uint8_t  HEAL_PIP_DUTIES[4] = {120,  135,  155,  175};
+
+static void startBuzzerHealEffect()
+{
+    g_buzzerActive    = false;
+    g_buzzerFirePhase = 0;
+    g_buzzerHitPhase  = 0;
+    ledcSetup(BUZZER_LEDC_CH, 200, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    g_buzzerHealPhase  = 1;
+    g_buzzerHealStart  = millis();
+    g_buzzerHealLastUp = millis();
+}
+
+static void updateBuzzerHealEffect(uint32_t now)
+{
+    if (g_buzzerHealPhase == 0) return;
+    uint32_t elapsed = now - g_buzzerHealStart;
+
+    if (g_buzzerHealPhase == 1) {
+        if (elapsed >= 700) {
+            ledcSetup(BUZZER_LEDC_CH, 1500, 8);
+            ledcWrite(BUZZER_LEDC_CH, 128);
+            g_buzzerHealPhase = 2;
+            return;
+        }
+        if ((int32_t)(now - g_buzzerHealLastUp) >= 10) {
+            g_buzzerHealLastUp = now;
+            float t = (float)elapsed / 700.0f;
+            uint32_t freq = 200u + (uint32_t)(t * 1300.0f); // 200→1500 Hz
+            uint8_t  duty = (uint8_t)(t * 128.0f);           // 0→128
+            ledcSetup(BUZZER_LEDC_CH, freq, 8);
+            ledcWrite(BUZZER_LEDC_CH, duty);
+        }
+        return;
+    }
+
+    if (g_buzzerHealPhase == 2) {
+        if (elapsed >= 800) {
+            ledcWrite(BUZZER_LEDC_CH, 0); // brief silence before pips
+            g_buzzerHealPhase  = 3;
+            g_buzzerHealCurPip = 255;
+        }
+        return;
+    }
+
+    if (g_buzzerHealPhase == 3) {
+        // 4 pips starting at 820 ms; each slot 100 ms (55 ms on, 45 ms off).
+        const uint32_t PIP_BASE = 820u;
+        const uint32_t PIP_SLOT = 100u;
+        const uint32_t PIP_ON   = 55u;
+
+        if (elapsed >= PIP_BASE + 4u * PIP_SLOT) {
+            silenceBuzzer();
+            g_buzzerHealPhase = 0;
+            return;
+        }
+        if (elapsed < PIP_BASE) return; // small pre-pip gap
+
+        uint32_t pipElapsed = elapsed - PIP_BASE;
+        uint8_t  pipIdx     = (uint8_t)(pipElapsed / PIP_SLOT);
+        uint32_t pipOff     = pipElapsed % PIP_SLOT;
+
+        if (pipIdx != g_buzzerHealCurPip) {
+            g_buzzerHealCurPip = pipIdx;
+            ledcSetup(BUZZER_LEDC_CH, HEAL_PIP_FREQS[pipIdx], 8);
+        }
+        ledcWrite(BUZZER_LEDC_CH, pipOff < PIP_ON ? HEAL_PIP_DUTIES[pipIdx] : 0);
+    }
+}
+
+// ---- Buzzer death explosion effect ----
+// Phase 1 (0–80 ms):    high-pitched crack — blocky noise 5000–12000 Hz, 3 ms blocks.
+// Phase 2 (80–5000 ms): deep rumble descending 2000→80 Hz, fading to silence over 4920 ms.
+static uint8_t  g_buzzerDeathPhase     = 0; // 0=off, 1=crack, 2=rumble
+static uint32_t g_buzzerDeathStart     = 0;
+static uint32_t g_buzzerDeathNextNoise = 0;
+
+static void startBuzzerDeathEffect()
+{
+    g_buzzerActive    = false;
+    g_buzzerFirePhase = 0;
+    g_buzzerHitPhase  = 0;
+    g_buzzerHealPhase = 0;
+    ledcSetup(BUZZER_LEDC_CH, 8000, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 255);
+    g_buzzerDeathPhase     = 1;
+    g_buzzerDeathStart     = millis();
+    g_buzzerDeathNextNoise = millis() + 3; // first noise block after 3 ms
+}
+
+static void updateBuzzerDeathEffect(uint32_t now)
+{
+    if (g_buzzerDeathPhase == 0) return;
+
+    uint32_t elapsed = now - g_buzzerDeathStart;
+
+    // ---- Phase 1: crack (0–80 ms), rapid noise blocks ----
+    if (g_buzzerDeathPhase == 1) {
+        if (elapsed >= 80u) {
+            g_buzzerDeathPhase     = 2;
+            g_buzzerDeathNextNoise = now;
+            return;
+        }
+        if ((int32_t)(now - g_buzzerDeathNextNoise) >= 0) {
+            // Random freq in 5000–12000 Hz range
+            uint32_t freq = 5000u + (uint32_t)(random(7001));
+            ledcSetup(BUZZER_LEDC_CH, freq, 8);
+            ledcWrite(BUZZER_LEDC_CH, 255);
+            g_buzzerDeathNextNoise = now + 3; // 3 ms blocks
+        }
+        return;
+    }
+
+    // ---- Phase 2: descending rumble (80–5000 ms) ----
+    if (g_buzzerDeathPhase == 2) {
+        uint32_t p2 = elapsed - 80u;
+        if (p2 >= 4920u) {
+            silenceBuzzer();
+            g_buzzerDeathPhase = 0;
+            return;
+        }
+        if ((int32_t)(now - g_buzzerDeathNextNoise) >= 0) {
+            float t      = (float)p2 / 4920.0f;          // 0→1
+            float centre = 2000.0f - t * 1920.0f;        // 2000→80 Hz
+            float spread = centre * 0.4f;
+            int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * spread);
+            int32_t raw  = (int32_t)centre + rnd;
+            if (raw < 60)    raw = 60;
+            if (raw > 20000) raw = 20000;
+
+            uint8_t duty = (uint8_t)((1.0f - t) * 200.0f);
+            ledcSetup(BUZZER_LEDC_CH, (uint32_t)raw, 8);
+            ledcWrite(BUZZER_LEDC_CH, duty);
+
+            uint32_t blockMs = 3u + (uint32_t)(t * 22.0f); // 3→25 ms blocks
+            g_buzzerDeathNextNoise = now + blockMs;
+        }
+    }
+}
+
 // ---- Robot ID (12-char uppercase MAC hex, no separators) ----
 static String makeRobotId()
 {
@@ -450,6 +603,18 @@ static void handleWsText(const String& s)
     if (strcmp(cmd, "flash_hit") == 0) {
         leds.flashHit();
         startBuzzerHitEffect();
+        return;
+    }
+
+    if (strcmp(cmd, "flash_heal") == 0) {
+        leds.healCharge();
+        startBuzzerHealEffect();
+        return;
+    }
+
+    if (strcmp(cmd, "flash_death") == 0) {
+        leds.deathExplosion();
+        startBuzzerDeathEffect();
         return;
     }
 
@@ -683,6 +848,8 @@ void loop()
     updateBuzzer(now);
     updateBuzzerFireEffect(now);
     updateBuzzerHitEffect(now);
+    updateBuzzerHealEffect(now);
+    updateBuzzerDeathEffect(now);
 
     // ---- IR: legacy listen window (ir_listen_and_report) ----
     ir.update(now);

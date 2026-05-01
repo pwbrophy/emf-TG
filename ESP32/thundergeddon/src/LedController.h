@@ -99,6 +99,29 @@ public:
         _fillStrip(255, 0, 0);
     }
 
+    // Base heal: progressive green fill then rapid white flashes.
+    // Phase 1 (0–750 ms): green bar charges from back (LED 0) to front (LED 5).
+    // Phase 2 (750–1200 ms): 5 rapid white flashes (90 ms on / 90 ms off).
+    void healCharge()
+    {
+        if (_effect == Effect::Hit) return; // hit takes priority
+        _effect   = Effect::HealCharge;
+        _seqStart = millis();
+        _strip.clear();
+        _strip.show();
+    }
+
+    // Death explosion: red/orange/yellow burst outward from center, then fire flicker
+    // fading over 5 s, then auto-transition to alternating dim-red dead blink.
+    void deathExplosion()
+    {
+        _effect   = Effect::DeathExplosion; // overrides everything including Hit
+        _seqStart = millis();
+        _deathFlickerNext = _seqStart + 20;
+        _strip.clear();
+        _strip.show();
+    }
+
     // ---- Status LED ----
 
     void setStatus(StatusPattern p)
@@ -109,7 +132,7 @@ public:
     }
 
 private:
-    enum class Effect : uint8_t { None, Fire, Hit, FireSeq };
+    enum class Effect : uint8_t { None, Fire, Hit, FireSeq, HealCharge, DeathExplosion, DeadBlink };
 
     // Check whether the active timed effect has expired; drive animations.
     void _updateEffect(uint32_t now)
@@ -144,6 +167,95 @@ private:
             return;
         }
 
+        if (_effect == Effect::HealCharge) {
+            uint32_t elapsed = now - _seqStart;
+            if (elapsed >= 1200) {
+                _effect = Effect::None;
+                _drawHpBar();
+                return;
+            }
+            if (elapsed < 750) {
+                // Phase 1: green bar fills from LED 0 (back) → LED 5 (front).
+                float ledsF = (float)elapsed * (float)LED_STRIP_COUNT / 750.0f;
+                int fullLeds = (int)ledsF;
+                uint8_t partialBright = (uint8_t)((ledsF - (float)fullLeds) * 220.0f);
+                _strip.clear();
+                for (int i = 0; i < fullLeds && i < LED_STRIP_COUNT; i++)
+                    _strip.setPixelColor(i, _strip.Color(0, 220, 0));
+                if (fullLeds < LED_STRIP_COUNT && partialBright > 0)
+                    _strip.setPixelColor(fullLeds, _strip.Color(0, partialBright, 0));
+                _strip.show();
+            } else {
+                // Phase 2: rapid white flashes (90 ms on / 90 ms off).
+                bool flashOn = ((elapsed - 750u) % 90u) < 45u;
+                if (flashOn) _fillStrip(255, 255, 255);
+                else { _strip.clear(); _strip.show(); }
+            }
+            return;
+        }
+
+        if (_effect == Effect::DeathExplosion) {
+            uint32_t elapsed = now - _seqStart;
+
+            if (elapsed < 300u) {
+                // Phase 1: burst outward in 3 waves (one pair per 100 ms)
+                int wave = (int)(elapsed / 100u);
+                _strip.clear();
+                if (wave >= 0) { // center pair: red
+                    _strip.setPixelColor(2, _strip.Color(255,  20, 0));
+                    _strip.setPixelColor(3, _strip.Color(255,  20, 0));
+                }
+                if (wave >= 1) { // middle pair: orange
+                    _strip.setPixelColor(1, _strip.Color(255,  90, 0));
+                    _strip.setPixelColor(4, _strip.Color(255,  90, 0));
+                }
+                if (wave >= 2) { // outer pair: yellow
+                    _strip.setPixelColor(0, _strip.Color(255, 180, 0));
+                    _strip.setPixelColor(5, _strip.Color(255, 180, 0));
+                }
+                _strip.show();
+
+            } else if (elapsed < 5000u) {
+                // Phase 2: fire flicker fading over 4700 ms
+                if ((int32_t)(now - _deathFlickerNext) >= 0) {
+                    _deathFlickerNext = now + 20;
+                    uint32_t p2  = elapsed - 300u;
+                    float    age = (float)p2 / 4700.0f;
+                    float    amp = 1.0f - age;
+                    for (int i = 0; i < LED_STRIP_COUNT; i++) {
+                        uint32_t period = 70u + (uint32_t)((unsigned)i * 23u);
+                        uint32_t phase  = (p2 + (uint32_t)((unsigned)i * 113u)) % period;
+                        float flick  = (phase < period * 2u / 3u) ? 1.0f : 0.2f;
+                        float bright = amp * flick;
+                        // Center LEDs: deeper red; outer LEDs: more orange
+                        float gFrac = (i == 2 || i == 3) ? 0.12f
+                                    : (i == 1 || i == 4) ? 0.25f : 0.45f;
+                        uint8_t r = (uint8_t)(bright * 255.0f);
+                        uint8_t g = (uint8_t)(bright * gFrac * 255.0f);
+                        _strip.setPixelColor(i, _strip.Color(r, g, 0));
+                    }
+                    _strip.show();
+                }
+
+            } else {
+                // Transition to dead blink
+                _effect          = Effect::DeadBlink;
+                _deadBlinkOn     = false;
+                _deadBlinkToggle = now + 500;
+                _drawDeadBlink();
+            }
+            return;
+        }
+
+        if (_effect == Effect::DeadBlink) {
+            if ((int32_t)(now - _deadBlinkToggle) >= 0) {
+                _deadBlinkOn     = !_deadBlinkOn;
+                _deadBlinkToggle = now + 500;
+                _drawDeadBlink();
+            }
+            return;
+        }
+
         // Fire / Hit timed effects: wait for expiry then restore HP bar.
         if ((int32_t)(now - _effectEnd) >= 0) {
             _effect = Effect::None;
@@ -154,7 +266,7 @@ private:
     // Drive the 0.5 s warning pulse when HP is in the last LED's territory.
     void _updatePulse(uint32_t now)
     {
-        if (_effect != Effect::None || _hp <= 0) return;
+        if (_effect != Effect::None || _hp <= 0) return; // suppress during any effect
         float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
         if (ledsF > 1.0f) return; // only pulse at last LED
 
@@ -218,6 +330,24 @@ private:
         _strip.show();
     }
 
+    // Dim red alternating pattern for dead-walk state.
+    // Even call: LEDs 0,2,4 lit. Odd call: LEDs 1,3,5 lit.
+    void _drawDeadBlink()
+    {
+        _strip.clear();
+        uint8_t r = 80;
+        if (_deadBlinkOn) {
+            _strip.setPixelColor(0, _strip.Color(r, 0, 0));
+            _strip.setPixelColor(2, _strip.Color(r, 0, 0));
+            _strip.setPixelColor(4, _strip.Color(r, 0, 0));
+        } else {
+            _strip.setPixelColor(1, _strip.Color(r, 0, 0));
+            _strip.setPixelColor(3, _strip.Color(r, 0, 0));
+            _strip.setPixelColor(5, _strip.Color(r, 0, 0));
+        }
+        _strip.show();
+    }
+
     void _fillStrip(uint8_t r, uint8_t g, uint8_t b)
     {
         for (int i = 0; i < LED_STRIP_COUNT; i++) {
@@ -240,6 +370,11 @@ private:
     int               _maxHp             = 100;
     bool              _pulseOn           = true;  // warning-pulse display state
     uint32_t          _nextPulseToggle   = 0;
+
+    // Death-explosion / dead-blink state
+    bool              _deadBlinkOn       = false;
+    uint32_t          _deadBlinkToggle   = 0;
+    uint32_t          _deathFlickerNext  = 0;
 
     StatusPattern     _statusPattern     = StatusPattern::SearchingFast;
     uint32_t          _statusNextToggle  = 0;

@@ -631,6 +631,22 @@ public class RobotWebSocketServer : MonoBehaviour
         return ok;
     }
 
+    public bool SendFlashHeal(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_heal\"}");
+        Debug.Log(ok ? $"[WS->Robot] flash_heal -> {robotId}" : $"[WS->Robot] FAILED flash_heal -> {robotId}");
+        return ok;
+    }
+
+    public bool SendFlashDeath(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_death\"}");
+        Debug.Log(ok ? $"[WS->Robot] flash_death -> {robotId}" : $"[WS->Robot] FAILED flash_death -> {robotId}");
+        return ok;
+    }
+
     public bool SendSetHp(string robotId, int hp, int maxHp)
     {
         if (string.IsNullOrEmpty(robotId)) return false;

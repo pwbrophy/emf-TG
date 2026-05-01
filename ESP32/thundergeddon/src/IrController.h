@@ -139,11 +139,11 @@ public:
     //   [b1Dur+gap12 .. +b2Dur)   burst2 ON
     //   [+b2Dur .. +repGap)       pause before next rep
 
-    void scheduleFireSlot(int slotId, int32_t slotStartLocal,
+    void scheduleFireSlot(int slotId, uint32_t delayMs,
                           int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
         _fireSlotId  = slotId;
-        _fireStart   = (uint32_t)slotStartLocal;
+        _fireStart   = millis() + delayMs;
         _fb1Dur      = b1Dur;
         _fgap12      = gap12;
         _fb2Dur      = b2Dur;
@@ -159,7 +159,7 @@ public:
         ledcAttachPin(IR_TX2_PIN, IR_LEDC_CH2);
         ledcWrite(IR_LEDC_CH1, 0);
         ledcWrite(IR_LEDC_CH2, 0);
-        Serial.printf("[IR] fire slot %d scheduled localStart=%u\n", slotId, _fireStart);
+        Serial.printf("[IR] fire slot %d scheduled localStart=%u delay=%u\n", slotId, _fireStart, delayMs);
     }
 
     // Call every loop tick; drives burst on/off transitions autonomously.
@@ -221,11 +221,11 @@ public:
     // ORs results across all repetitions so each direction's b1/b2 is true if
     // that burst was detected on ANY repetition.
 
-    void scheduleListenSlot(int slotId, int32_t slotStartLocal,
+    void scheduleListenSlot(int slotId, uint32_t delayMs,
                             int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
         _listenSlotId = slotId;
-        _listenStart  = (uint32_t)slotStartLocal;
+        _listenStart  = millis() + delayMs;
         _lb1Dur       = b1Dur;
         _lgap12       = gap12;
         _lb2Dur       = b2Dur;
@@ -236,7 +236,7 @@ public:
         _lb2Mask      = 0;
         _listenPhase  = ListenPhase::WaitingForStart;
         _slotDone     = false;
-        Serial.printf("[IR] listen slot %d scheduled localStart=%u\n", slotId, _listenStart);
+        Serial.printf("[IR] listen slot %d scheduled localStart=%u delay=%u\n", slotId, _listenStart, delayMs);
     }
 
     // Call every loop tick; classifies detections into burst subwindows.

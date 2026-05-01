@@ -14,8 +14,11 @@ public sealed class GameState
     // Damage dealt per alliance index (for tiebreaker)
     public Dictionary<int, int> TotalDamageDealt = new Dictionary<int, int>();
 
-    // Dead robots (HP reached 0)
+    // Dead robots (HP reached 0 — explosion phase, ~5 s, fully disabled)
     public HashSet<string> DeadRobots = new HashSet<string>();
+
+    // Respawning robots (dead walk — can drive but not shoot/capture; return to base to revive)
+    public HashSet<string> RespawningRobots = new HashSet<string>();
 
     // Match result — set when EndGame is called
     public int  WinnerAllianceIndex = -1;   // -1 = not yet decided

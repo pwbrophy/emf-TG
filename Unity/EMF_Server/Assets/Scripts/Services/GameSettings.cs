@@ -11,13 +11,13 @@ public class GameSettings : MonoBehaviour
     public int MaxHp = 100;
 
     [Tooltip("Base damage dealt per successful IR hit.")]
-    public int DamagePerHit = 25;
+    public int DamagePerHit = 10;
 
     [Tooltip("Rear-sector damage multiplier (hit from S / SE / SW).")]
     public float RearMultiplier = 3f;
 
     [Tooltip("Match duration in seconds.")]
-    public float MatchDurationSeconds = 180f;
+    public float MatchDurationSeconds = 600f;
 
     [Header("Lobby")]
     [Tooltip("Maximum number of player slots shown on display page.")]
@@ -28,7 +28,11 @@ public class GameSettings : MonoBehaviour
     public int MaxTeamPoints = 300;
 
     [Tooltip("Team points awarded to the killing alliance per robot destroyed.")]
-    public int TeamPointsPerKill = 25;
+    public int TeamPointsPerKill = 20;
+
+    [Header("Base RFID UIDs — one UID per alliance base tag")]
+    public string Alliance0BaseUid = "";
+    public string Alliance1BaseUid = "";
 
     [Header("Capture Point RFID UIDs — add one entry per physical tag")]
     public string[] NorthPointUids  = new string[0];

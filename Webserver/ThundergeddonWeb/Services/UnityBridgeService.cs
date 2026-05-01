@@ -110,6 +110,10 @@ public class UnityBridgeService : BackgroundService
                     await HandleYouAreDead(doc.RootElement);
                     break;
 
+                case "you_are_alive":
+                    await HandleYouAreAlive(doc.RootElement);
+                    break;
+
                 case "game_over":
                     await HandleGameOver(doc.RootElement);
                     break;
@@ -191,6 +195,15 @@ public class UnityBridgeService : BackgroundService
 
         await _hub.Clients.Client(connId).SendAsync("YouAreDead");
         _logger.LogInformation("[Bridge] YouAreDead → conn {c}", connId);
+    }
+
+    private async Task HandleYouAreAlive(JsonElement root)
+    {
+        string? connId = GetString(root, "connectionId");
+        if (string.IsNullOrEmpty(connId)) return;
+
+        await _hub.Clients.Client(connId).SendAsync("YouAreAlive");
+        _logger.LogInformation("[Bridge] YouAreAlive → conn {c}", connId);
     }
 
     private async Task HandleRfidTag(JsonElement root)

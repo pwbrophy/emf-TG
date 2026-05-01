@@ -61,6 +61,10 @@ public class ShootingController : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return;
         if (CooldownRemaining(robotId) > 0f) return;
 
+        // Block fire while dead (explosion) or in dead walk
+        var state = ServiceLocator.Game?.State;
+        if (state != null && (state.DeadRobots.Contains(robotId) || state.RespawningRobots.Contains(robotId))) return;
+
         Debug.Log("[Shooting] RequestFire: " + robotId);
         _nextFireTime[robotId] = Time.time + fireCooldownSeconds;
 

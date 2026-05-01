@@ -17,12 +17,13 @@ using UnityEngine;
 public class IrSlotScheduler : MonoBehaviour
 {
     [Header("Slot timing (ms)")]
-    [SerializeField] private int slotFutureMs       = 200;  // lead time; must exceed WiFi latency jitter
-    [SerializeField] private int b1DurMs            = 25;   // wider windows absorb timing jitter between robots
+    [SerializeField] private int slotFutureMs       = 300;  // shooter delay: fires N ms after receiving command
+    [SerializeField] private int listenDelayMs      = 0;    // listener delay: 0 = start listening immediately on receipt
+    [SerializeField] private int b1DurMs            = 25;
     [SerializeField] private int gap12Ms            = 20;
     [SerializeField] private int b2DurMs            = 25;
     [SerializeField] private int repGapMs           = 20;
-    [SerializeField] private int reps               = 3;
+    [SerializeField] private int reps               = 7;    // listener covers [0..610ms], shooter fires at [300..550ms]
 
     [Header("Result collection")]
     [SerializeField] private float resultBufferSeconds = 0.5f;
@@ -139,24 +140,16 @@ public class IrSlotScheduler : MonoBehaviour
 
         Debug.Log($"[IrSlot] Slot {slotId} — {enemies.Count} enemy(ies) targeted.");
 
-        // ── Time sync ──────────────────────────────────────────────────────
-        long syncMs = (long)(Time.time * 1000.0);
-        Debug.Log($"[IrSlot] Slot {slotId} — sending time_sync ut={syncMs} to all robots.");
-        server.SendTimeSyncAll(syncMs);
-
-        yield return null; // one frame so WS sends flush
-
         // ── Compute slot timing ────────────────────────────────────────────
-        long slotStartMs = (long)(Time.time * 1000.0) + slotFutureMs;
-        int  perRepMs    = b1DurMs + gap12Ms + b2DurMs + repGapMs;
-        int  slotDurMs   = reps * perRepMs - repGapMs;
-        float slotEndUnityTime = (float)(slotStartMs + slotDurMs) / 1000f;
+        int   delayMs  = slotFutureMs;
+        int   perRepMs = b1DurMs + gap12Ms + b2DurMs + repGapMs;
+        int   slotDurMs = reps * perRepMs - repGapMs;
 
         Debug.Log($"[IrSlot] Slot {slotId} timing: " +
-                  $"start={slotStartMs} ms | dur={slotDurMs} ms | " +
+                  $"delay={delayMs}ms | dur={slotDurMs}ms | " +
                   $"reps={reps} | b1={b1DurMs}ms gap={gap12Ms}ms b2={b2DurMs}ms repGap={repGapMs}ms");
-        Debug.Log($"[IrSlot] Slot {slotId} windows (relative to slot_start): " +
-                  $"Burst1=[0..{b1DurMs}ms] Burst2=[{b1DurMs+gap12Ms}..{b1DurMs+gap12Ms+b2DurMs}ms] " +
+        Debug.Log($"[IrSlot] Slot {slotId} windows (relative to command receipt): " +
+                  $"Burst1=[{delayMs}..{delayMs+b1DurMs}ms] Burst2=[{delayMs+b1DurMs+gap12Ms}..{delayMs+b1DurMs+gap12Ms+b2DurMs}ms] " +
                   $"(per rep, period={perRepMs}ms)");
 
         _currentSlotId = slotId;
@@ -175,19 +168,19 @@ public class IrSlotScheduler : MonoBehaviour
         server.OnIrSlotResult += OnResult;
 
         // ── Send fire/listen commands ──────────────────────────────────────
-        bool fireSent = server.SendIrFireSlot(shooterId, slotId, slotStartMs,
+        bool fireSent = server.SendIrFireSlot(shooterId, slotId, delayMs,
                                               b1DurMs, gap12Ms, b2DurMs, repGapMs, reps);
         Debug.Log($"[IrSlot] Slot {slotId} — ir_fire_slot to {shooterId}: {(fireSent ? "OK" : "FAILED")}");
 
         for (int i = 0; i < enemies.Count; i++)
         {
-            bool listenSent = server.SendIrListenSlot(enemies[i].RobotId, slotId, slotStartMs,
+            bool listenSent = server.SendIrListenSlot(enemies[i].RobotId, slotId, delayMs,
                                                       b1DurMs, gap12Ms, b2DurMs, repGapMs, reps);
             Debug.Log($"[IrSlot] Slot {slotId} — ir_listen_slot to {enemies[i].Callsign ?? enemies[i].RobotId}: {(listenSent ? "OK" : "FAILED")}");
         }
 
         // ── Wait for slot end + result buffer ─────────────────────────────
-        float waitUntil = slotEndUnityTime + resultBufferSeconds;
+        float waitUntil = Time.time + (delayMs + slotDurMs) / 1000f + resultBufferSeconds;
         float waitSecs  = waitUntil - Time.time;
         Debug.Log($"[IrSlot] Slot {slotId} — waiting {waitSecs * 1000f:F0}ms for results...");
         while (Time.time < waitUntil) yield return null;

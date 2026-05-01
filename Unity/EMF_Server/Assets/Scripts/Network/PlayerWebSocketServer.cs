@@ -55,6 +55,9 @@ public class PlayerWebSocketServer : MonoBehaviour
     private float _lastStateUpdate = 0f;
     private float _lastCaptureTick = 0f;
 
+    // robotId → Time.time when the robot died (used to time the 5-s explosion → dead-walk transition)
+    private readonly Dictionary<string, float> _deathTimes = new Dictionary<string, float>();
+
     // ── Events (consumed by UI components) ───────────────────────────────────────
 
     /// Fired when a phone sends drive/turret input.
@@ -83,12 +86,13 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.GameFlow.OnPausedChanged += OnPausedChanged;
         }
 
-        // HP / death / win events
+        // HP / death / respawn / win events
         if (ServiceLocator.Game != null)
         {
-            ServiceLocator.Game.OnHpChanged  += OnHpChanged;
-            ServiceLocator.Game.OnRobotDied  += OnRobotDied;
-            ServiceLocator.Game.OnGameWon    += OnGameWon;
+            ServiceLocator.Game.OnHpChanged       += OnHpChanged;
+            ServiceLocator.Game.OnRobotDied       += OnRobotDied;
+            ServiceLocator.Game.OnRobotRespawned  += OnRobotRespawned;
+            ServiceLocator.Game.OnGameWon         += OnGameWon;
         }
 
         // RFID tag scans
@@ -118,9 +122,10 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         if (ServiceLocator.Game != null)
         {
-            ServiceLocator.Game.OnHpChanged -= OnHpChanged;
-            ServiceLocator.Game.OnRobotDied -= OnRobotDied;
-            ServiceLocator.Game.OnGameWon   -= OnGameWon;
+            ServiceLocator.Game.OnHpChanged      -= OnHpChanged;
+            ServiceLocator.Game.OnRobotDied      -= OnRobotDied;
+            ServiceLocator.Game.OnRobotRespawned -= OnRobotRespawned;
+            ServiceLocator.Game.OnGameWon        -= OnGameWon;
         }
 
         if (ServiceLocator.RobotServer != null)
@@ -168,6 +173,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     private void Update()
     {
         PumpMain();
+        CheckDeathTransitions();
 
         // Push state updates (timer) to all players and display at ~1 Hz
         if (_started && Time.time - _lastStateUpdate >= 1.0f)
@@ -313,6 +319,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         string robotId = ConnToRobot(connId);
         if (robotId == null) return;
 
+        // Block all movement during the 5-s explosion phase
+        var state = ServiceLocator.Game?.State;
+        if (state != null && state.DeadRobots.Contains(robotId)) return;
+
         ServiceLocator.RobotServer?.SendDrive(robotId, l, r);
 
         string playerName = _connToPlayer.TryGetValue(connId, out var n) ? n : null;
@@ -327,6 +337,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         string robotId = ConnToRobot(connId);
         if (robotId == null) return;
 
+        // Block during explosion phase
+        var state = ServiceLocator.Game?.State;
+        if (state != null && state.DeadRobots.Contains(robotId)) return;
+
         ServiceLocator.RobotServer?.SendTurret(robotId, speed);
         _lastTurretByConn[connId] = speed;
 
@@ -339,6 +353,10 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         string robotId = ConnToRobot(connId);
         if (robotId == null) return;
+
+        // Block fire while dead (exploding) or in dead walk (respawning)
+        var state = ServiceLocator.Game?.State;
+        if (state != null && (state.DeadRobots.Contains(robotId) || state.RespawningRobots.Contains(robotId))) return;
 
         var shooting = ServiceLocator.Shooting;
         if (shooting == null)
@@ -422,6 +440,15 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnRobotDied(string robotId)
     {
+        // Record when the robot died so Update() can transition it to dead walk after 5 s
+        _deathTimes[robotId] = Time.time;
+
+        // Disable motors and trigger death explosion on the robot
+        var robotServer = ServiceLocator.RobotServer;
+        robotServer?.SendMotorsOff(robotId);
+        robotServer?.SendFlashDeath(robotId);
+
+        // Notify the assigned player's phone
         foreach (var kvp in _connToPlayer)
         {
             string rId = PlayerToRobot(kvp.Value);
@@ -431,6 +458,49 @@ public class PlayerWebSocketServer : MonoBehaviour
                           EscapeJson(kvp.Key) + "\"}";
             BroadcastRaw(json);
             Debug.Log("[PlayerWS] Sent you_are_dead to " + kvp.Value);
+        }
+    }
+
+    void OnRobotRespawned(string robotId)
+    {
+        // Notify the assigned player so their phone can exit the dead screen
+        foreach (var kvp in _connToPlayer)
+        {
+            if (PlayerToRobot(kvp.Value) != robotId) continue;
+
+            string json = "{\"cmd\":\"you_are_alive\",\"connectionId\":\"" +
+                          EscapeJson(kvp.Key) + "\"}";
+            BroadcastRaw(json);
+            SendSingleStateUpdate(kvp.Key);
+            Debug.Log("[PlayerWS] Sent you_are_alive to " + kvp.Value);
+        }
+    }
+
+    // Called every Update — moves robots from DeadRobots → RespawningRobots after 5 s,
+    // re-enables motors so the player can drive back to base.
+    void CheckDeathTransitions()
+    {
+        if (_deathTimes.Count == 0) return;
+        var game = ServiceLocator.Game;
+        if (game?.State == null) return;
+
+        List<string> toTransition = null;
+        foreach (var kvp in _deathTimes)
+        {
+            if (Time.time - kvp.Value >= 5f)
+            {
+                if (toTransition == null) toTransition = new List<string>();
+                toTransition.Add(kvp.Key);
+            }
+        }
+
+        if (toTransition == null) return;
+        foreach (var robotId in toTransition)
+        {
+            _deathTimes.Remove(robotId);
+            game.TransitionToRespawning(robotId);
+            ServiceLocator.RobotServer?.SendMotorsOn(robotId);
+            Debug.Log($"[PlayerWS] {robotId} → dead walk after explosion");
         }
     }
 
@@ -446,13 +516,49 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnRfidTag(string robotId, string uid)
     {
-        // Try to capture a point with this tag (fires OnPointCaptured if it succeeds)
+        var settings = ServiceLocator.GameSettings;
+        var game     = ServiceLocator.Game;
+
+        // ---- Respawning robot at its team base → full revival ----
+        if (settings != null && game?.State != null && game.State.RespawningRobots.Contains(robotId))
+        {
+            int alliance = GetRobotAllianceIndex(robotId);
+            string baseUid = alliance == 0 ? settings.Alliance0BaseUid :
+                             alliance == 1 ? settings.Alliance1BaseUid : null;
+            if (!string.IsNullOrEmpty(baseUid) && uid == baseUid)
+            {
+                game.RespawnRobot(robotId);
+                ServiceLocator.RobotServer?.SendFlashHeal(robotId);
+                if (game.State.RobotHp.TryGetValue(robotId, out int hp))
+                    ServiceLocator.RobotServer?.SendSetHp(robotId, hp, settings.MaxHp);
+            }
+            return; // respawning robots don't capture points
+        }
+
+        // ---- Dead robots (explosion phase) ignore all RFID tags ----
+        if (game?.State != null && game.State.DeadRobots.Contains(robotId)) return;
+
+        // ---- Normal play: try capture point, then check own base heal ----
         ServiceLocator.CapturePoints?.TryCapture(robotId, uid);
 
-        // Find the connection assigned to this robot and forward the tag UID
+        if (settings != null && game?.State != null)
+        {
+            int alliance = GetRobotAllianceIndex(robotId);
+            string baseUid = alliance == 0 ? settings.Alliance0BaseUid :
+                             alliance == 1 ? settings.Alliance1BaseUid : null;
+            if (!string.IsNullOrEmpty(baseUid) && uid == baseUid)
+            {
+                game.RestoreHp(robotId);
+                ServiceLocator.RobotServer?.SendFlashHeal(robotId);
+                if (game.State.RobotHp.TryGetValue(robotId, out int hp))
+                    ServiceLocator.RobotServer?.SendSetHp(robotId, hp, settings.MaxHp);
+            }
+        }
+
+        // Forward RFID tag event to the assigned player's phone
         foreach (var kvp in _connToPlayer)
         {
-            string connId    = kvp.Key;
+            string connId     = kvp.Key;
             string playerName = kvp.Value;
             if (PlayerToRobot(playerName) != robotId) continue;
 
@@ -463,7 +569,6 @@ public class PlayerWebSocketServer : MonoBehaviour
             Debug.Log($"[PlayerWS] rfid_tag uid={uid} -> {playerName}");
             return;
         }
-        // No player assigned to this robot — log anyway so it shows in console
         Debug.Log($"[PlayerWS] rfid_tag uid={uid} from {robotId} (no assigned player)");
     }
 
@@ -767,6 +872,18 @@ public class PlayerWebSocketServer : MonoBehaviour
         var state = ServiceLocator.Game?.State;
         if (state == null) return defaultMax;
         return state.RobotHp.TryGetValue(robotId, out int hp) ? hp : defaultMax;
+    }
+
+    private int GetRobotAllianceIndex(string robotId)
+    {
+        var dir     = ServiceLocator.RobotDirectory;
+        var players = ServiceLocator.Players;
+        if (dir == null || players == null) return -1;
+        if (!dir.TryGet(robotId, out var info)) return -1;
+        if (string.IsNullOrEmpty(info.AssignedPlayer)) return -1;
+        foreach (var p in players.GetAll())
+            if (p.Name == info.AssignedPlayer) return p.AllianceIndex;
+        return -1;
     }
 
     static string EscapeJson(string s)
