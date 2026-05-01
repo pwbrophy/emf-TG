@@ -15,6 +15,21 @@ GitHub: **https://github.com/pwbrophy/emf-TG** (branch: `master`)
 ### Unity: always use Coplay MCP
 The project has the `com.coplaydev.coplay` MCP plugin installed. **After every Unity C# change, call `mcp__coplay-mcp__check_compile_errors` to verify the project compiles clean before reporting success.** Use `mcp__coplay-mcp__get_unity_logs` to read the Unity console when diagnosing runtime errors. Never rely solely on reading `.cs` files to confirm correctness — always verify through Coplay.
 
+### Branches, worktrees, and how they interact with Unity and OTA
+
+Each Claude Code session works on a dedicated branch (`claude/<random-name>`) inside a git worktree at `.claude/worktrees/<name>/`. This means the session's file edits exist **only in that worktree directory** — the main project tree (`F:\Data\Thundergeddon\EMF_Project\`) stays on `master` and is untouched.
+
+**Critical consequence for Unity and OTA:**
+- **Unity** (running from the main project tree) reads source from `Unity/EMF_Server/Assets/` in the **main** tree, not the worktree. Unity will not see C# changes made in the worktree until they are merged to master and the main tree is updated.
+- **PlatformIO OTA** compiles from `ESP32/thundergeddon/src/` in whatever directory `pio run` is invoked from. If you run OTA from the worktree path, it compiles worktree sources. If you run from the main project path, it compiles master. **Always run OTA from the main project path after merging**, or explicitly `cd` into the worktree path when testing pre-merge.
+
+**Workflow:**
+1. Make all code changes inside the worktree (Claude does this automatically).
+2. Verify Unity compilation via `mcp__coplay-mcp__check_compile_errors` — Coplay MCP connects to the running Unity editor which reads the **main** tree. To test a Unity C# change, the worktree file must first be copied to the main tree or the branch merged to master. Run OTA from the worktree path to test firmware pre-merge.
+3. Commit changes on the `claude/<name>` branch, then merge to `master` (or raise a PR).
+4. After merge, Unity and OTA both pick up changes from master automatically.
+5. Old `claude/` branches and their worktree directories can be deleted once their commits are reachable from master. Use `git log --oneline <branch> ^master` to verify before deleting.
+
 ### ESP32 firmware: always upload via OTA
 Never ask the user to connect a USB cable. After every firmware change, upload using the `thundergeddon_ota` PlatformIO environment, which pushes over Wi-Fi via ArduinoOTA:
 
