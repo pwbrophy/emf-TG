@@ -274,6 +274,11 @@ public class PlayerWebSocketServer : MonoBehaviour
         // Auto-assign the first available (unassigned) robot to the new player.
         TryAssignFreeRobotToPlayer(name);
 
+        // If the game is already running, send game_started immediately so the
+        // phone transitions to the playing screen without waiting for the next phase change.
+        if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing)
+            SendGameStarted(connId, name);
+
         BroadcastPlayerList();
     }
 
@@ -298,6 +303,10 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
         _connToPlayer.Remove(connId);
+
+        // Player already rejoined with a new connection — don't evict them.
+        foreach (var v in _connToPlayer.Values)
+            if (v == playerName) return;
 
         var players = ServiceLocator.Players?.GetAll();
         if (players == null) return;
