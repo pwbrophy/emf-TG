@@ -21,6 +21,7 @@
 static constexpr int LED_STRIP_PIN   = 38;
 static constexpr int LED_STRIP_COUNT = 6;
 static constexpr int LED_STATUS_PIN  = 48; // active-LOW plain green LED
+static constexpr uint8_t DIM_BRIGHTNESS = 26; // ~10% of 255 — sustained effects only
 
 enum class StatusPattern : uint8_t {
     SearchingFast,  // fast blink — scanning for server
@@ -313,14 +314,14 @@ private:
             if (ledsF > (float)LED_STRIP_COUNT) ledsF = (float)LED_STRIP_COUNT;
 
             int fullLeds = (int)ledsF;
-            uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * 255.0f);
+            uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * (float)DIM_BRIGHTNESS);
 
             bool warning = (ledsF <= 1.0f);
             if (!warning || _pulseOn) {
                 // Full LEDs at the front (high indices: 5, 4, ... down)
                 int firstFull = LED_STRIP_COUNT - fullLeds;
                 for (int i = firstFull; i < LED_STRIP_COUNT; i++)
-                    _strip.setPixelColor(i, _strip.Color(0, 0, 255));
+                    _strip.setPixelColor(i, _strip.Color(0, 0, DIM_BRIGHTNESS));
                 // Partial LED just below the full ones
                 int partialIdx = firstFull - 1;
                 if (partialBright > 0 && partialIdx >= 0)
@@ -335,7 +336,7 @@ private:
     void _drawDeadBlink()
     {
         _strip.clear();
-        uint8_t r = 80;
+        uint8_t r = DIM_BRIGHTNESS;
         if (_deadBlinkOn) {
             _strip.setPixelColor(0, _strip.Color(r, 0, 0));
             _strip.setPixelColor(2, _strip.Color(r, 0, 0));
