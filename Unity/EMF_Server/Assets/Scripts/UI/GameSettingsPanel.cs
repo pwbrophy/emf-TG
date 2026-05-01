@@ -52,37 +52,53 @@ public class GameSettingsPanel : MonoBehaviour
     {
         if (_settings == null) return;
         if (int.TryParse(v, out int n) && n > 0)
+        {
             _settings.MaxHp = n;
+            _settings.SaveToDisk();
+        }
     }
 
     private void OnDamageChanged(string v)
     {
         if (_settings == null) return;
         if (int.TryParse(v, out int n) && n > 0)
+        {
             _settings.DamagePerHit = n;
+            _settings.SaveToDisk();
+        }
     }
 
     private void OnDurationChanged(string v)
     {
         if (_settings == null) return;
         if (float.TryParse(v, out float n) && n > 0)
+        {
             _settings.MatchDurationSeconds = n;
+            _settings.SaveToDisk();
+        }
     }
 
     private void OnMaxTeamPointsChanged(string v)
     {
         if (_settings == null) return;
         if (int.TryParse(v, out int n) && n > 0)
+        {
             _settings.MaxTeamPoints = n;
+            _settings.SaveToDisk();
+        }
     }
 
     private void OnAlliance0BaseChanged(string v)
     {
-        if (_settings != null) _settings.Alliance0BaseUid = v.Trim();
+        if (_settings == null) return;
+        _settings.Alliance0BaseUid = v.Trim();
+        _settings.SaveToDisk();
     }
 
     private void OnAlliance1BaseChanged(string v)
     {
-        if (_settings != null) _settings.Alliance1BaseUid = v.Trim();
+        if (_settings == null) return;
+        _settings.Alliance1BaseUid = v.Trim();
+        _settings.SaveToDisk();
     }
 }

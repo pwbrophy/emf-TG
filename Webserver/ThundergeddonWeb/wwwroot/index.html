@@ -654,6 +654,11 @@ function hideReconnectOverlay() {
 }
 
 function returnToJoin(message) {
+  // Stop old connection so Unity receives 'leave' before any new join arrives.
+  if (connection) {
+    connection.stop().catch(() => {});
+    connection = null;
+  }
   isDead     = false;
   isDeadWalk = false;
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
@@ -665,6 +670,7 @@ function returnToJoin(message) {
   document.getElementById('stream').src = '';
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
   document.getElementById('game-paused-overlay').classList.remove('active');
+  document.getElementById('join-btn').disabled = false;
   showScreen('screen-join');
   if (message) setStatus(message, true);
 }
@@ -696,7 +702,9 @@ function buildConnection() {
   });
   conn.onclose(() => {
     hideReconnectOverlay();
-    returnToJoin('Server connection lost. Please rejoin.');
+    // Only treat as unexpected loss if this connection is still the active one.
+    // If connection was intentionally stopped (returnToJoin nulled it first), skip.
+    if (connection === conn) returnToJoin('Server connection lost. Please rejoin.');
   });
 
   return conn;
