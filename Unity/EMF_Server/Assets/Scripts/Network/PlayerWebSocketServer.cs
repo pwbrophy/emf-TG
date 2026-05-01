@@ -548,7 +548,9 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (game?.State != null && game.State.DeadRobots.Contains(robotId)) return;
 
         // ---- Normal play: try capture point, then check own base heal ----
-        ServiceLocator.CapturePoints?.TryCapture(robotId, uid);
+        bool captured = ServiceLocator.CapturePoints?.TryCapture(robotId, uid) ?? false;
+        if (captured)
+            ServiceLocator.RobotServer?.SendFlashCapture(robotId);
 
         if (settings != null && game?.State != null)
         {

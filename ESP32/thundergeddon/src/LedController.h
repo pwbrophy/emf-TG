@@ -112,6 +112,17 @@ public:
         _strip.show();
     }
 
+    // Capture celebration: gold LEDs fill from the outside in (0&5 → 1&4 → 2&3),
+    // hold for 200 ms, then restore HP bar. Total 650 ms.
+    void captureSequence()
+    {
+        if (_effect == Effect::Hit) return; // hit takes priority
+        _effect   = Effect::CaptureSeq;
+        _seqStart = millis();
+        _strip.clear();
+        _strip.show();
+    }
+
     // Death explosion: red/orange/yellow burst outward from center, then fire flicker
     // fading over 5 s, then auto-transition to alternating dim-red dead blink.
     void deathExplosion()
@@ -133,7 +144,7 @@ public:
     }
 
 private:
-    enum class Effect : uint8_t { None, Fire, Hit, FireSeq, HealCharge, DeathExplosion, DeadBlink };
+    enum class Effect : uint8_t { None, Fire, Hit, FireSeq, HealCharge, CaptureSeq, DeathExplosion, DeadBlink };
 
     // Check whether the active timed effect has expired; drive animations.
     void _updateEffect(uint32_t now)
@@ -191,6 +202,31 @@ private:
                 bool flashOn = ((elapsed - 750u) % 90u) < 45u;
                 if (flashOn) _fillStrip(255, 255, 255);
                 else { _strip.clear(); _strip.show(); }
+            }
+            return;
+        }
+
+        if (_effect == Effect::CaptureSeq) {
+            // Phase 1 (0–450 ms): gold LEDs close in from both ends, one pair per 150 ms.
+            // Phase 2 (450–650 ms): hold all-gold.
+            uint32_t elapsed = now - _seqStart;
+            if (elapsed >= 650) {
+                _effect = Effect::None;
+                _drawHpBar();
+                return;
+            }
+            if (elapsed < 450) {
+                int step = (int)(elapsed / 150u); // 0, 1, or 2
+                _strip.clear();
+                // step 0: pair 0 & 5; step 1: also 1 & 4; step 2: also 2 & 3
+                for (int s = 0; s <= step; s++) {
+                    _strip.setPixelColor(s,                   _strip.Color(255, 165, 0));
+                    _strip.setPixelColor(LED_STRIP_COUNT-1-s, _strip.Color(255, 165, 0));
+                }
+                _strip.show();
+            } else {
+                // Phase 2: all six gold
+                _fillStrip(255, 165, 0);
             }
             return;
         }

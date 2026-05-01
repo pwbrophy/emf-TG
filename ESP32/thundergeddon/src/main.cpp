@@ -417,6 +417,56 @@ static void updateBuzzerDeathEffect(uint32_t now)
     }
 }
 
+// ---- Buzzer capture effect ----
+// 3-note ascending C-major arpeggio: C5 (523 Hz) → E5 (659 Hz) → G5 (784 Hz).
+// Each note slot is 110 ms (85 ms on, 25 ms off).  Total 330 ms.
+static uint8_t  g_buzzerCapturePhase  = 0; // 0=off, 1=playing
+static uint32_t g_buzzerCaptureStart  = 0;
+static uint8_t  g_buzzerCapturePip    = 255;
+
+static const uint32_t CAPTURE_PIP_FREQS[3]  = {523, 659, 784};
+static const uint8_t  CAPTURE_PIP_DUTIES[3] = {150, 160, 175};
+
+static void startBuzzerCaptureEffect()
+{
+    g_buzzerActive      = false;
+    g_buzzerFirePhase   = 0;
+    g_buzzerHitPhase    = 0;
+    g_buzzerHealPhase   = 0;
+    g_buzzerDeathPhase  = 0;
+    ledcSetup(BUZZER_LEDC_CH, CAPTURE_PIP_FREQS[0], 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    g_buzzerCapturePhase = 1;
+    g_buzzerCaptureStart = millis();
+    g_buzzerCapturePip   = 255;
+}
+
+static void updateBuzzerCaptureEffect(uint32_t now)
+{
+    if (g_buzzerCapturePhase == 0) return;
+
+    const uint32_t PIP_SLOT = 110u;
+    const uint32_t PIP_ON   = 85u;
+    uint32_t elapsed = now - g_buzzerCaptureStart;
+
+    if (elapsed >= 3u * PIP_SLOT) {
+        silenceBuzzer();
+        g_buzzerCapturePhase = 0;
+        return;
+    }
+
+    uint8_t  pipIdx = (uint8_t)(elapsed / PIP_SLOT);
+    uint32_t pipOff = elapsed % PIP_SLOT;
+
+    if (pipIdx != g_buzzerCapturePip) {
+        g_buzzerCapturePip = pipIdx;
+        ledcSetup(BUZZER_LEDC_CH, CAPTURE_PIP_FREQS[pipIdx], 8);
+        ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    }
+    ledcWrite(BUZZER_LEDC_CH, pipOff < PIP_ON ? CAPTURE_PIP_DUTIES[pipIdx] : 0);
+}
+
 // ---- Robot ID (12-char uppercase MAC hex, no separators) ----
 static String makeRobotId()
 {
@@ -615,6 +665,12 @@ static void handleWsText(const String& s)
     if (strcmp(cmd, "flash_death") == 0) {
         leds.deathExplosion();
         startBuzzerDeathEffect();
+        return;
+    }
+
+    if (strcmp(cmd, "flash_capture") == 0) {
+        leds.captureSequence();
+        startBuzzerCaptureEffect();
         return;
     }
 
@@ -850,6 +906,7 @@ void loop()
     updateBuzzerHitEffect(now);
     updateBuzzerHealEffect(now);
     updateBuzzerDeathEffect(now);
+    updateBuzzerCaptureEffect(now);
 
     // ---- IR: legacy listen window (ir_listen_and_report) ----
     ir.update(now);
