@@ -691,8 +691,9 @@ function buildConnection() {
   conn.on('YouAreAlive',  ()       => onYouAreAlive());
   conn.on('GameOver',     data     => onGameOver(data));
   conn.on('RfidTag',      uid      => onRfidTag(uid));
-  conn.on('GamePaused',   ()       => document.getElementById('game-paused-overlay').classList.add('active'));
-  conn.on('GameResumed',  ()       => document.getElementById('game-paused-overlay').classList.remove('active'));
+  conn.on('GamePaused',        ()   => document.getElementById('game-paused-overlay').classList.add('active'));
+  conn.on('GameResumed',       ()   => document.getElementById('game-paused-overlay').classList.remove('active'));
+  conn.on('ServerDisconnected',()   => returnToJoin('Game server closed. Please rejoin.'));
 
   conn.onreconnecting(() => showReconnectOverlay('Trying to reconnect…'));
   conn.onreconnected(async () => {
