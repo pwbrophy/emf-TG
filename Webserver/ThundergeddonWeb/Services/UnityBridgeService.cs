@@ -22,6 +22,7 @@ public class UnityBridgeService : BackgroundService
 
     private ClientWebSocket? _ws;
     private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
+    private bool _connectedToUnity = false;
 
     public UnityBridgeService(IHubContext<GameHub> hub, ILogger<UnityBridgeService> logger)
     {
@@ -48,6 +49,12 @@ public class UnityBridgeService : BackgroundService
                 _logger.LogWarning("[Bridge] Disconnected: {msg}. Retrying in 3s.", ex.Message);
             }
 
+            if (_connectedToUnity)
+            {
+                _connectedToUnity = false;
+                await _hub.Clients.All.SendAsync("ServerDisconnected", CancellationToken.None);
+            }
+
             if (!ct.IsCancellationRequested)
                 await Task.Delay(3000, ct).ContinueWith(_ => { });
         }
@@ -60,6 +67,7 @@ public class UnityBridgeService : BackgroundService
         _ws = new ClientWebSocket();
         _logger.LogInformation("[Bridge] Connecting to Unity at {url}…", UnityWsUrl);
         await _ws.ConnectAsync(new Uri(UnityWsUrl), ct);
+        _connectedToUnity = true;
         _logger.LogInformation("[Bridge] Connected.");
 
         var buffer = new byte[32768];
