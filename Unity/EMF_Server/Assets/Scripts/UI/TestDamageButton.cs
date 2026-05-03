@@ -6,6 +6,7 @@ using UnityEngine.UI;
 public class TestDamageButton : MonoBehaviour
 {
     [SerializeField] private RobotSelectionPanel selectionPanel;
+    [SerializeField] private RobotListPanel robotListPanel;
     [SerializeField] private Button damageButton;
 
     private void OnEnable()
@@ -22,7 +23,7 @@ public class TestDamageButton : MonoBehaviour
 
     private void OnDamageClicked()
     {
-        string robotId = selectionPanel?.CurrentRobotId;
+        string robotId = robotListPanel?.CurrentRobotId ?? selectionPanel?.CurrentRobotId;
         if (string.IsNullOrEmpty(robotId))
         {
             Debug.Log("[TestDamage] No robot selected.");

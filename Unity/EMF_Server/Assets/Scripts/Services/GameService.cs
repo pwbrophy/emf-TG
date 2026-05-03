@@ -18,6 +18,9 @@ public sealed class GameService
     // allianceIndex, reason (fired when a win condition is met)
     public event Action<int, string> OnGameWon;
 
+    // targetId = robot that was hit, direction = "N"|"NE"|"E"|"SE"|"S"|"SW"|"W"|"NW"
+    public event Action<string, string> OnRobotHitDirection;
+
     public bool CanStart() => true;
 
     public void StartGame()
@@ -88,6 +91,7 @@ public sealed class GameService
         }
 
         OnHpChanged?.Invoke(targetId, newHp);
+        OnRobotHitDirection?.Invoke(targetId, direction);
 
         if (newHp <= 0)
         {

@@ -12,6 +12,7 @@ public class RobotPingButton : MonoBehaviour
     [SerializeField] private Button pingButton;
     [SerializeField] private TextMeshProUGUI resultLabel;
     [SerializeField] private RobotSelectionPanel selectionPanel;
+    [SerializeField] private RobotListPanel robotListPanel;
 
     private RobotWebSocketServer _ws;
     private float _sentAt;
@@ -44,7 +45,8 @@ public class RobotPingButton : MonoBehaviour
     {
         if (_ws == null) _ws = ServiceLocator.RobotServer;
 
-        string robotId = selectionPanel != null ? selectionPanel.CurrentRobotId : null;
+        string robotId = robotListPanel?.CurrentRobotId
+                      ?? (selectionPanel != null ? selectionPanel.CurrentRobotId : null);
 
         if (string.IsNullOrEmpty(robotId))
         {
