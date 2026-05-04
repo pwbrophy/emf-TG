@@ -219,12 +219,14 @@ public static class RebuildPlayingPanel
         ctrlHLG.childControlWidth      = true;
         ctrlHLG.childControlHeight     = true;
 
-        var pingBtn  = MakeButton(ctrlRow.transform, "PingButton",   "PING",       C_DKBLUE, C_TEXT, 12f);
+        var pingBtn  = MakeButton(ctrlRow.transform, "PingButton",    "PING",        C_DKBLUE, C_TEXT, 12f);
         pingBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var dmgBtn   = MakeButton(ctrlRow.transform, "DamageButton", "DAMAGE 10%", C_DKRED,  C_TEXT, 12f);
+        var dmgBtn   = MakeButton(ctrlRow.transform, "DamageButton",  "DAMAGE 10%",  C_DKRED,  C_TEXT, 12f);
         dmgBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var healBtn  = MakeButton(ctrlRow.transform, "HealButton",   "HEAL",       new Color(0.10f, 0.35f, 0.10f), C_TEXT, 12f);
+        var healBtn  = MakeButton(ctrlRow.transform, "HealButton",    "HEAL",        new Color(0.10f, 0.35f, 0.10f), C_TEXT, 12f);
         healBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var camBtn   = MakeButton(ctrlRow.transform, "ToggleCamButton", "TOGGLE CAM", new Color(0.10f, 0.25f, 0.35f), C_TEXT, 12f);
+        camBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
         var pingResult = MakeTmp(pp.transform, "PingResult", "—", C_DIM, 10f, TextAlignmentOptions.MidlineLeft);
         pingResult.gameObject.SetActive(false); // hidden label used for wiring only
 
@@ -353,6 +355,15 @@ public static class RebuildPlayingPanel
             var so = new SerializedObject(rpb);
             SetProp(so, "pingButton",     pingBtn.GetComponent<Button>());
             SetProp(so, "resultLabel",    pingResult);
+            SetProp(so, "robotListPanel", rlp);
+            so.ApplyModifiedProperties();
+        }
+
+        var tcb = pp.GetComponent<ToggleCameraButton>();
+        if (tcb == null) tcb = pp.AddComponent<ToggleCameraButton>();
+        {
+            var so = new SerializedObject(tcb);
+            SetProp(so, "button",         camBtn.GetComponent<Button>());
             SetProp(so, "robotListPanel", rlp);
             so.ApplyModifiedProperties();
         }

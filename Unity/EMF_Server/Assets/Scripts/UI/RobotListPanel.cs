@@ -20,12 +20,14 @@ public class RobotListPanel : MonoBehaviour
     public event Action<string> SelectionChanged;
 
     // ── Colours ───────────────────────────────────────────────────────────────
-    static readonly Color C_SEL    = new Color(0f, 0.7f, 1f, 0.15f);
-    static readonly Color C_UNSEL  = Color.clear;
-    static readonly Color C_BLUE   = new Color(0.29f, 0.62f, 1.00f);
-    static readonly Color C_RED    = new Color(1.00f, 0.42f, 0.21f);
-    static readonly Color C_DIM    = new Color(0.40f, 0.40f, 0.40f);
-    static readonly Color C_DEAD   = new Color(0.27f, 0.27f, 0.27f);
+    static readonly Color C_SEL     = new Color(0f, 0.7f, 1f, 0.15f);
+    static readonly Color C_UNSEL   = Color.clear;
+    static readonly Color C_BLUE    = new Color(0.29f, 0.62f, 1.00f);
+    static readonly Color C_RED     = new Color(1.00f, 0.42f, 0.21f);
+    static readonly Color C_DIM     = new Color(0.40f, 0.40f, 0.40f);
+    static readonly Color C_DEAD    = new Color(0.27f, 0.27f, 0.27f);
+    static readonly Color C_CAM_ON  = new Color(0.15f, 0.85f, 0.35f, 1f);
+    static readonly Color C_CAM_OFF = new Color(0.30f, 0.30f, 0.30f, 1f);
 
     // ── Per-row data ──────────────────────────────────────────────────────────
     private sealed class RowData
@@ -36,9 +38,12 @@ public class RobotListPanel : MonoBehaviour
         public TextMeshProUGUI HpLabel;
         public IrCompassWidget Compass;
         public Image           Highlight;
+        public Image           CamIndicator;
         public int             Alliance; // 0 or 1 (resolved at build time)
     }
     private readonly List<RowData> _rows = new List<RowData>();
+
+    // Camera streaming state — true by default (cameras on when game starts)
     private readonly Dictionary<string, bool> _cameraStreaming = new Dictionary<string, bool>();
 
     // ── Services ──────────────────────────────────────────────────────────────
@@ -160,6 +165,20 @@ public class RobotListPanel : MonoBehaviour
         var hlLE = hlGO.AddComponent<LayoutElement>();
         hlLE.ignoreLayout = true;
 
+        // ── Camera indicator dot ──────────────────────────────────────────────
+        var camDotGO = new GameObject("CamDot");
+        camDotGO.AddComponent<RectTransform>();
+        camDotGO.transform.SetParent(row.transform, false);
+        var camDotImg = camDotGO.AddComponent<Image>();
+        camDotImg.raycastTarget = false;
+        var camDotLE = camDotGO.AddComponent<LayoutElement>();
+        camDotLE.preferredWidth  = 10f;
+        camDotLE.preferredHeight = 10f;
+        camDotLE.flexibleWidth   = 0f;
+        // Default: camera on (green)
+        bool camOn = !_cameraStreaming.TryGetValue(r.RobotId, out bool cs) || cs;
+        camDotImg.color = camOn ? C_CAM_ON : C_CAM_OFF;
+
         // ── Callsign label ────────────────────────────────────────────────────
         string name = string.IsNullOrEmpty(r.Callsign)
             ? r.RobotId.Substring(0, Mathf.Min(8, r.RobotId.Length))
@@ -221,58 +240,44 @@ public class RobotListPanel : MonoBehaviour
         compassLE.preferredHeight = 36f;
         compassLE.flexibleWidth   = 0f;
 
-        // ── Toggle Cam button ─────────────────────────────────────────────────
-        var camGO = new GameObject("ToggleCamBtn");
-        camGO.AddComponent<RectTransform>();
-        camGO.transform.SetParent(row.transform, false);
-        var camImg = camGO.AddComponent<Image>();
-        camGO.AddComponent<Button>();
-        var camBtn = camGO.GetComponent<Button>();
-        camGO.AddComponent<LayoutElement>().preferredWidth = 62f;
-
-        var camLabelGO = new GameObject("Text");
-        var camLabelRT = camLabelGO.AddComponent<RectTransform>();
-        camLabelGO.transform.SetParent(camGO.transform, false);
-        camLabelRT.anchorMin = Vector2.zero; camLabelRT.anchorMax = Vector2.one;
-        camLabelRT.offsetMin = Vector2.zero; camLabelRT.offsetMax = Vector2.zero;
-        var camTmp = camLabelGO.AddComponent<TextMeshProUGUI>();
-        camTmp.font      = font;
-        camTmp.fontSize  = 11f;
-        camTmp.color     = Color.white;
-        camTmp.alignment = TextAlignmentOptions.Center;
-
-        bool camOn = _cameraStreaming.TryGetValue(r.RobotId, out bool cs) && cs;
-        ApplyCamState(camImg, camTmp, camOn);
-
-        string capRobotId = r.RobotId;
-        camBtn.onClick.AddListener(() =>
-        {
-            var ws = ServiceLocator.RobotServer;
-            if (ws == null) return;
-            bool now = _cameraStreaming.TryGetValue(capRobotId, out bool cur) && cur;
-            now = !now;
-            _cameraStreaming[capRobotId] = now;
-            if (now) ws.SendStreamOn(capRobotId);
-            else     ws.SendStreamOff(capRobotId);
-            ApplyCamState(camImg, camTmp, now);
-        });
-
         // ── Store row data ────────────────────────────────────────────────────
         var data = new RowData
         {
-            RobotId   = r.RobotId,
-            FillRT    = fillRT,
-            FillImg   = fillImg,
-            HpLabel   = hpTmp,
-            Compass   = widget,
-            Highlight = hlImg,
-            Alliance  = alliance,
+            RobotId      = r.RobotId,
+            FillRT       = fillRT,
+            FillImg      = fillImg,
+            HpLabel      = hpTmp,
+            Compass      = widget,
+            Highlight    = hlImg,
+            CamIndicator = camDotImg,
+            Alliance     = alliance,
         };
         _rows.Add(data);
 
         // Wire click — capture robotId by value
         string robotId = r.RobotId;
         btn.onClick.AddListener(() => SelectRobot(robotId));
+    }
+
+    // ── Camera toggle (called by ToggleCameraButton) ──────────────────────────
+
+    public void ToggleCameraForSelected()
+    {
+        if (string.IsNullOrEmpty(CurrentRobotId)) return;
+        var ws = ServiceLocator.RobotServer;
+        if (ws == null) return;
+
+        // Default true (cameras on); flip
+        bool wasOn = !_cameraStreaming.TryGetValue(CurrentRobotId, out bool cur) || cur;
+        bool nowOn = !wasOn;
+        _cameraStreaming[CurrentRobotId] = nowOn;
+
+        if (nowOn) ws.SendStreamOn(CurrentRobotId);
+        else       ws.SendStreamOff(CurrentRobotId);
+
+        var row = FindRow(CurrentRobotId);
+        if (row?.CamIndicator != null)
+            row.CamIndicator.color = nowOn ? C_CAM_ON : C_CAM_OFF;
     }
 
     // ── Selection ─────────────────────────────────────────────────────────────
@@ -361,13 +366,5 @@ public class RobotListPanel : MonoBehaviour
     {
         Color full = alliance == 0 ? C_BLUE : C_RED;
         return Color.Lerp(new Color(1f, 0.2f, 0.2f), full, pct);
-    }
-
-    private static void ApplyCamState(Image bg, TextMeshProUGUI label, bool streaming)
-    {
-        label.text = streaming ? "Cam: ON" : "Cam: OFF";
-        bg.color   = streaming
-            ? new Color(0.15f, 0.55f, 0.25f, 1f)
-            : new Color(0.20f, 0.20f, 0.25f, 1f);
     }
 }
