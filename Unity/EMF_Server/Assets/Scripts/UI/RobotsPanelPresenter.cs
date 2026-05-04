@@ -15,7 +15,6 @@ public class RobotsPanelPresenter : MonoBehaviour
 
     private IRobotDirectory _dir;
     private bool _isSubscribed = false;
-    private readonly Dictionary<string, bool> _cameraStreaming = new Dictionary<string, bool>();
 
     private void OnEnable()
     {
@@ -92,7 +91,6 @@ public class RobotsPanelPresenter : MonoBehaviour
         Transform row = content.Find(robotId);
         if (row != null)
             Destroy(row.gameObject);
-        _cameraStreaming.Remove(robotId);
     }
 
     private void CreateOrUpdateRow(RobotInfo r, bool allowReuse = true)
@@ -117,9 +115,6 @@ public class RobotsPanelPresenter : MonoBehaviour
         TextMeshProUGUI ipText     = rowGO.transform.Find("Ip").GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI playerText = rowGO.transform.Find("Player").GetComponent<TextMeshProUGUI>();
         Button editButton          = rowGO.transform.Find("EditButton").GetComponent<Button>();
-        Button toggleCamButton     = rowGO.transform.Find("ToggleCamButton").GetComponent<Button>();
-        TextMeshProUGUI camLabel   = rowGO.transform.Find("ToggleCamButton/Text").GetComponent<TextMeshProUGUI>();
-        Image camBg                = rowGO.transform.Find("ToggleCamButton").GetComponent<Image>();
 
         nameText.text   = r.Callsign;
         ipText.text     = string.IsNullOrEmpty(r.Ip) ? "IP: ?" : $"IP: {r.Ip}";
@@ -147,31 +142,5 @@ public class RobotsPanelPresenter : MonoBehaviour
                 }
             );
         });
-
-        bool streaming = _cameraStreaming.TryGetValue(r.RobotId, out bool s) && s;
-        UpdateCamButton(camLabel, camBg, streaming);
-
-        toggleCamButton.onClick.RemoveAllListeners();
-        toggleCamButton.onClick.AddListener(() =>
-        {
-            var ws = ServiceLocator.RobotServer;
-            if (ws == null) return;
-            bool nowStreaming = _cameraStreaming.TryGetValue(r.RobotId, out bool cur) && cur;
-            nowStreaming = !nowStreaming;
-            _cameraStreaming[r.RobotId] = nowStreaming;
-            if (nowStreaming)
-                ws.SendStreamOn(r.RobotId);
-            else
-                ws.SendStreamOff(r.RobotId);
-            UpdateCamButton(camLabel, camBg, nowStreaming);
-        });
-    }
-
-    private void UpdateCamButton(TextMeshProUGUI label, Image bg, bool streaming)
-    {
-        label.text = streaming ? "Cam: ON" : "Cam: OFF";
-        bg.color   = streaming
-            ? new Color(0.15f, 0.55f, 0.25f, 1f)
-            : new Color(0.20f, 0.20f, 0.25f, 1f);
     }
 }

@@ -52,28 +52,6 @@ public static class RebuildRobotRowPrefab
         var spacerLE = spacer.AddComponent<LayoutElement>();
         spacerLE.flexibleWidth = 1;
 
-        // ── Toggle Cam button ─────────────────────────────────────────────────────
-        var camGO = new GameObject("ToggleCamButton");
-        camGO.transform.SetParent(root.transform, false);
-        camGO.AddComponent<RectTransform>();
-        camGO.AddComponent<Image>().color = new Color(0.2f, 0.2f, 0.25f, 1f);
-        camGO.AddComponent<Button>();
-        var camLE = camGO.AddComponent<LayoutElement>();
-        camLE.preferredWidth  = 62;
-        camLE.preferredHeight = 30;
-
-        var camTextGO = new GameObject("Text");
-        var camTextRT = camTextGO.AddComponent<RectTransform>();
-        camTextGO.transform.SetParent(camGO.transform, false);
-        camTextRT.anchorMin = Vector2.zero; camTextRT.anchorMax = Vector2.one;
-        camTextRT.offsetMin = Vector2.zero; camTextRT.offsetMax = Vector2.zero;
-        var camTMP = camTextGO.AddComponent<TextMeshProUGUI>();
-        camTMP.text      = "Cam: OFF";
-        camTMP.fontSize  = 11;
-        camTMP.color     = Color.white;
-        camTMP.alignment = TextAlignmentOptions.Center;
-        var f2 = GetFont(); if (f2 != null) camTMP.font = f2;
-
         // ── Edit button ───────────────────────────────────────────────────────────
         var editGO = new GameObject("EditButton", typeof(RectTransform), typeof(Image), typeof(Button));
         editGO.transform.SetParent(root.transform, false);
