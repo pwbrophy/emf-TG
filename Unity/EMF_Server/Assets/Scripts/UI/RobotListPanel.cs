@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -64,6 +65,12 @@ public class RobotListPanel : MonoBehaviour
         if (_flow != null)
             _flow.OnPhaseChanged += HandlePhaseChanged;
 
+        StartCoroutine(RebuildNextFrame());
+    }
+
+    private IEnumerator RebuildNextFrame()
+    {
+        yield return null;
         RebuildRows();
     }
 
@@ -105,19 +112,22 @@ public class RobotListPanel : MonoBehaviour
         }
 
         LayoutRebuilder.ForceRebuildLayoutImmediate(rowContainer);
+        Canvas.ForceUpdateCanvases();
     }
 
     private void CreateRow(RobotInfo r, int hp, int maxHp, bool dead, int alliance)
     {
+        var font = Resources.Load<TMPro.TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+
         // ── Row root (Button + transparent Image for raycast) ─────────────────
         var row = new GameObject("Row_" + r.RobotId);
         var rowRT = row.AddComponent<RectTransform>();
         row.transform.SetParent(rowContainer, false);
         row.AddComponent<LayoutElement>().preferredHeight = 42f;
 
-        // Transparent background image — required by Button.targetGraphic
+        // Subtle background — also required by Button.targetGraphic
         var rowBg = row.AddComponent<Image>();
-        rowBg.color = Color.clear;
+        rowBg.color = new Color(0.12f, 0.12f, 0.12f);
 
         var btn = row.AddComponent<Button>();
         btn.targetGraphic = rowBg;
@@ -146,6 +156,8 @@ public class RobotListPanel : MonoBehaviour
         hlRT.anchorMax  = Vector2.one;
         hlRT.offsetMin  = Vector2.zero;
         hlRT.offsetMax  = Vector2.zero;
+        var hlLE = hlGO.AddComponent<LayoutElement>();
+        hlLE.ignoreLayout = true;
 
         // ── Callsign label ────────────────────────────────────────────────────
         string name = string.IsNullOrEmpty(r.Callsign)
@@ -157,6 +169,7 @@ public class RobotListPanel : MonoBehaviour
         nameGO.transform.SetParent(row.transform, false);
         var nameTmp = nameGO.AddComponent<TextMeshProUGUI>();
         nameTmp.text      = name;
+        nameTmp.font      = font;
         nameTmp.fontSize  = 12f;
         nameTmp.fontStyle = FontStyles.Bold;
         nameTmp.color     = dead ? C_DIM : Color.white;
@@ -190,6 +203,7 @@ public class RobotListPanel : MonoBehaviour
         hpGO.transform.SetParent(row.transform, false);
         var hpTmp = hpGO.AddComponent<TextMeshProUGUI>();
         hpTmp.text      = dead ? "DEAD" : $"{hp}";
+        hpTmp.font      = font;
         hpTmp.fontSize  = 11f;
         hpTmp.color     = C_DIM;
         hpTmp.alignment = TextAlignmentOptions.MidlineRight;
@@ -283,7 +297,7 @@ public class RobotListPanel : MonoBehaviour
     private void HandlePhaseChanged(GamePhase phase)
     {
         if (phase == GamePhase.Playing)
-            RebuildRows();
+            StartCoroutine(RebuildNextFrame());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -492,8 +492,7 @@ public static class RebuildPlayingPanel
         vpRT.anchorMax = Vector2.one;
         vpRT.offsetMin = Vector2.zero;
         vpRT.offsetMax = Vector2.zero;
-        vp.AddComponent<Image>().color = Color.clear;
-        vp.AddComponent<Mask>().showMaskGraphic = false;
+        vp.AddComponent<RectMask2D>();
 
         var c = new GameObject("Content");
         c.AddComponent<RectTransform>();
