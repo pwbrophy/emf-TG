@@ -54,6 +54,8 @@ public static class RebuildPlayingPanel
         if (pim != null) Object.DestroyImmediate(pim);
         var rhp = pp.GetComponent<RobotHpPanel>();
         if (rhp != null) Object.DestroyImmediate(rhp);
+        var oldTrp = pp.GetComponent<TeamRosterPanel>();
+        if (oldTrp != null) Object.DestroyImmediate(oldTrp);
 
         // ── 2. Panel background ───────────────────────────────────────────────
         var bgImg = pp.GetComponent<Image>();
@@ -221,6 +223,8 @@ public static class RebuildPlayingPanel
         pingBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
         var dmgBtn   = MakeButton(ctrlRow.transform, "DamageButton", "DAMAGE 10%", C_DKRED,  C_TEXT, 12f);
         dmgBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var healBtn  = MakeButton(ctrlRow.transform, "HealButton",   "HEAL",       new Color(0.10f, 0.35f, 0.10f), C_TEXT, 12f);
+        healBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
         var pingResult = MakeTmp(pp.transform, "PingResult", "—", C_DIM, 10f, TextAlignmentOptions.MidlineLeft);
         pingResult.gameObject.SetActive(false); // hidden label used for wiring only
 
@@ -230,11 +234,14 @@ public static class RebuildPlayingPanel
         rosterScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
         rosterScroll.GetComponent<Image>().color = C_PANEL;
 
-        // TeamRosterPanel on PlayingPanel
-        var trp = pp.GetComponent<TeamRosterPanel>();
-        if (trp == null) trp = pp.AddComponent<TeamRosterPanel>();
+        // Remove stale TeamRosterPanel if still present, then add RobotListPanel
+        var stale = pp.GetComponent<TeamRosterPanel>();
+        if (stale != null) Object.DestroyImmediate(stale);
+
+        var rlp = pp.GetComponent<RobotListPanel>();
+        if (rlp == null) rlp = pp.AddComponent<RobotListPanel>();
         {
-            var so = new SerializedObject(trp);
+            var so = new SerializedObject(rlp);
             SetProp(so, "rowContainer", rosterContent);
             so.ApplyModifiedProperties();
         }
@@ -322,20 +329,31 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
+        var hb = pp.GetComponent<HealButton>();
+        if (hb == null) hb = pp.AddComponent<HealButton>();
+        {
+            var so = new SerializedObject(hb);
+            SetProp(so, "healButton",     healBtn.GetComponent<Button>());
+            SetProp(so, "robotListPanel", rlp);
+            so.ApplyModifiedProperties();
+        }
+
         var tdb = pp.GetComponent<TestDamageButton>();
-        if (tdb != null)
+        if (tdb == null) tdb = pp.AddComponent<TestDamageButton>();
         {
             var so = new SerializedObject(tdb);
-            SetProp(so, "damageButton", dmgBtn.GetComponent<Button>());
+            SetProp(so, "damageButton",   dmgBtn.GetComponent<Button>());
+            SetProp(so, "robotListPanel", rlp);
             so.ApplyModifiedProperties();
         }
 
         var rpb = pp.GetComponent<RobotPingButton>();
-        if (rpb != null)
+        if (rpb == null) rpb = pp.AddComponent<RobotPingButton>();
         {
             var so = new SerializedObject(rpb);
-            SetProp(so, "pingButton",  pingBtn.GetComponent<Button>());
-            SetProp(so, "resultLabel", pingResult);
+            SetProp(so, "pingButton",     pingBtn.GetComponent<Button>());
+            SetProp(so, "resultLabel",    pingResult);
+            SetProp(so, "robotListPanel", rlp);
             so.ApplyModifiedProperties();
         }
 
@@ -474,8 +492,7 @@ public static class RebuildPlayingPanel
         vpRT.anchorMax = Vector2.one;
         vpRT.offsetMin = Vector2.zero;
         vpRT.offsetMax = Vector2.zero;
-        vp.AddComponent<Image>().color = Color.clear;
-        vp.AddComponent<Mask>().showMaskGraphic = false;
+        vp.AddComponent<RectMask2D>();
 
         var c = new GameObject("Content");
         c.AddComponent<RectTransform>();
