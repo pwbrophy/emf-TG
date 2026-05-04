@@ -636,7 +636,6 @@ static void handleWsText(const String& s)
 
     if (strcmp(cmd, "stream_off") == 0) {
         mjpeg.setEnabled(false);
-        if (cam.isStarted()) cam.stop();
         leds.setStatus(StatusPattern::ConnectedSlow);
         Serial.println("[CAM] stream OFF");
         return;
