@@ -292,58 +292,40 @@ public static class RebuildPlayingPanel
         }
         else Debug.LogWarning("[RebuildPlaying] CapturePointsPanelUI type not found.");
 
-        // ── 8c. Settings column — game params + shot timing ───────────────────
-        var settingsCol = MakeRect(columns.transform, "SettingsColumn");
-        settingsCol.AddComponent<Image>().color = C_PANEL;
-        var settingsLE = settingsCol.AddComponent<LayoutElement>();
-        settingsLE.preferredWidth = 200f;
-        settingsLE.flexibleHeight = 1f;
-        settingsLE.flexibleWidth  = 0f;
+        // ── 8c. Game settings column ──────────────────────────────────────────
+        var gameSettingsCol = MakeSettingsColumn(columns.transform, "GameSettingsColumn", "GAME SETTINGS");
+        RectTransform gameSettingsContent;
+        var gameSettingsScroll = CreateScrollCard(gameSettingsCol.transform, "GameSettingsScroll", out gameSettingsContent);
+        gameSettingsScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        gameSettingsScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
 
-        var settingsVLG = settingsCol.AddComponent<VerticalLayoutGroup>();
-        settingsVLG.spacing             = 4f;
-        settingsVLG.padding             = new RectOffset(8, 8, 8, 8);
-        settingsVLG.childForceExpandWidth  = true;
-        settingsVLG.childForceExpandHeight = false;
-        settingsVLG.childControlWidth      = true;
-        settingsVLG.childControlHeight     = true;
-        settingsVLG.childAlignment         = TextAnchor.UpperLeft;
+        var f_maxHp      = MakeSettingsRow(gameSettingsContent, "Max HP",      "Starting HP for every robot.");
+        var f_damage     = MakeSettingsRow(gameSettingsContent, "Dmg/Hit",     "Base damage per IR hit (rear hits multiply).");
+        var f_rearMult   = MakeSettingsRow(gameSettingsContent, "Rear Mult",   "Damage multiplier for S/SE/SW hits.");
+        var f_duration   = MakeSettingsRow(gameSettingsContent, "Duration s",  "Match length in seconds.");
+        var f_maxPl      = MakeSettingsRow(gameSettingsContent, "Max Players", "Max slots on public display page.");
+        var f_teamPts    = MakeSettingsRow(gameSettingsContent, "Team Pts",    "Points needed for instant tug-of-war win.");
+        var f_ptsKill    = MakeSettingsRow(gameSettingsContent, "Pts/Kill",    "Team points awarded per robot destroyed.");
 
-        var settingsHdr = MakeTmp(settingsCol.transform, "LblSettings", "SETTINGS",
-                                   C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
-        settingsHdr.characterSpacing = 1f;
-        settingsHdr.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
+        // ── 8d. Shot timing column ────────────────────────────────────────────
+        var shotTimingCol = MakeSettingsColumn(columns.transform, "ShotTimingColumn", "SHOT TIMING");
+        RectTransform shotTimingContent;
+        var shotTimingScroll = CreateScrollCard(shotTimingCol.transform, "ShotTimingScroll", out shotTimingContent);
+        shotTimingScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        shotTimingScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
 
-        // Scrollable content area
-        RectTransform settingsContent;
-        var settingsScroll = CreateScrollCard(settingsCol.transform, "SettingsScroll", out settingsContent);
-        settingsScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
-        settingsScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
-
-        // Section: GAME SETTINGS
-        MakeSectionLabel(settingsContent, "SecGame", "GAME SETTINGS");
-        var f_maxHp      = MakeSettingsRow(settingsContent, "Max HP",       "Starting HP for every robot.");
-        var f_damage     = MakeSettingsRow(settingsContent, "Dmg/Hit",      "Base damage per IR hit (rear hits multiply).");
-        var f_rearMult   = MakeSettingsRow(settingsContent, "Rear Mult",    "Damage multiplier for S/SE/SW hits.");
-        var f_duration   = MakeSettingsRow(settingsContent, "Duration s",   "Match length in seconds.");
-        var f_maxPl      = MakeSettingsRow(settingsContent, "Max Players",  "Max slots on public display page.");
-        var f_teamPts    = MakeSettingsRow(settingsContent, "Team Pts",     "Points needed for instant tug-of-war win.");
-        var f_ptsKill    = MakeSettingsRow(settingsContent, "Pts/Kill",     "Team points awarded per robot destroyed.");
-
-        // Section: SHOT TIMING
-        MakeSectionLabel(settingsContent, "SecShot", "SHOT TIMING");
-        var f_cooldown   = MakeSettingsRow(settingsContent, "Cooldown s",   "Min seconds between shots per robot.");
-        var f_slotFuture = MakeSettingsRow(settingsContent, "Slot Future",  "ms shooter waits before emitting IR. Reduce to speed up; increase if enemies miss.");
-        var f_listenDly  = MakeSettingsRow(settingsContent, "Listen Dly",   "Extra ms added to listener start time (usually 0).");
-        var f_b1         = MakeSettingsRow(settingsContent, "Burst1 ms",    "IR burst 1 duration per rep. Longer = more detection chance.");
-        var f_gap12      = MakeSettingsRow(settingsContent, "Gap 1-2 ms",   "Silent gap between burst 1 and burst 2.");
-        var f_b2         = MakeSettingsRow(settingsContent, "Burst2 ms",    "IR burst 2 duration per rep.");
-        var f_repGap     = MakeSettingsRow(settingsContent, "Rep Gap ms",   "Silent gap between repetitions.");
-        var f_reps       = MakeSettingsRow(settingsContent, "Reps",         "Burst-pair repetitions per shot. More = reliable; longer total time.");
-        var f_resBuf     = MakeSettingsRow(settingsContent, "Res Buf s",    "Seconds Unity waits for IR results after slot ends.");
+        var f_cooldown   = MakeSettingsRow(shotTimingContent, "Cooldown s",  "Min seconds between shots per robot.");
+        var f_slotFuture = MakeSettingsRow(shotTimingContent, "Slot Future", "ms shooter waits before emitting IR. Reduce to speed up; increase if enemies miss.");
+        var f_listenDly  = MakeSettingsRow(shotTimingContent, "Listen Dly",  "Extra ms added to listener start time (usually 0).");
+        var f_b1         = MakeSettingsRow(shotTimingContent, "Burst1 ms",   "IR burst 1 duration per rep. Longer = more detection chance.");
+        var f_gap12      = MakeSettingsRow(shotTimingContent, "Gap 1-2 ms",  "Silent gap between burst 1 and burst 2.");
+        var f_b2         = MakeSettingsRow(shotTimingContent, "Burst2 ms",   "IR burst 2 duration per rep.");
+        var f_repGap     = MakeSettingsRow(shotTimingContent, "Rep Gap ms",  "Silent gap between repetitions.");
+        var f_reps       = MakeSettingsRow(shotTimingContent, "Reps",        "Burst-pair repetitions per shot. More = reliable; longer total time.");
+        var f_resBuf     = MakeSettingsRow(shotTimingContent, "Res Buf s",   "Seconds Unity waits for IR results after slot ends.");
 
         // Total time read-only label
-        var totalRow = MakeRect(settingsContent.transform, "TotalRow");
+        var totalRow = MakeRect(shotTimingContent.transform, "TotalRow");
         totalRow.AddComponent<LayoutElement>().preferredHeight = 20f;
         var totalLbl = MakeTmp(totalRow.transform, "TotalLabel", "Total: --",
                                 C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
@@ -567,6 +549,33 @@ public static class RebuildPlayingPanel
         go.AddComponent<Button>();
         MakeTmp(go.transform, "Label", label, textColor, fontSize, TextAlignmentOptions.Center, bold: true);
         return go;
+    }
+
+    // ── Settings column helper ────────────────────────────────────────────────────
+    static GameObject MakeSettingsColumn(Transform parent, string name, string header)
+    {
+        var col = MakeRect(parent, name);
+        col.AddComponent<Image>().color = C_PANEL;
+        var le = col.AddComponent<LayoutElement>();
+        le.preferredWidth = 160f;
+        le.flexibleHeight = 1f;
+        le.flexibleWidth  = 0f;
+
+        var vlg = col.AddComponent<VerticalLayoutGroup>();
+        vlg.spacing             = 4f;
+        vlg.padding             = new RectOffset(8, 8, 8, 8);
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childControlWidth      = true;
+        vlg.childControlHeight     = true;
+        vlg.childAlignment         = TextAnchor.UpperLeft;
+
+        var hdr = MakeTmp(col.transform, "LblHeader", header,
+                           C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
+        hdr.characterSpacing = 1f;
+        hdr.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
+
+        return col;
     }
 
     // ── Settings row helper ───────────────────────────────────────────────────────
