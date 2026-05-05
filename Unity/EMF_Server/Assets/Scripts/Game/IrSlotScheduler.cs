@@ -163,14 +163,20 @@ public class IrSlotScheduler : MonoBehaviour
         }
         server.OnIrSlotResult += OnResult;
 
-        // ── Send fire/listen commands ──────────────────────────────────────
-        bool fireSent = server.SendIrFireSlot(shooterId, slotId, delayMs,
+        // ── Pause cameras, sync clocks, send fire/listen commands ─────────
+        var wasStreaming = server.PauseAllStreams();
+
+        long unityMs    = (long)(Time.unscaledTime * 1000.0);
+        server.SendTimeSyncAll(unityMs);
+        long slotStartUt = unityMs + delayMs;
+
+        bool fireSent = server.SendIrFireSlot(shooterId, slotId, slotStartUt,
                                               b1DurMs, gap12Ms, b2DurMs, repGapMs, reps);
         Debug.Log($"[IrSlot] Slot {slotId} — ir_fire_slot to {shooterId}: {(fireSent ? "OK" : "FAILED")}");
 
         for (int i = 0; i < enemies.Count; i++)
         {
-            bool listenSent = server.SendIrListenSlot(enemies[i].RobotId, slotId, delayMs,
+            bool listenSent = server.SendIrListenSlot(enemies[i].RobotId, slotId, slotStartUt,
                                                       b1DurMs, gap12Ms, b2DurMs, repGapMs, reps);
             Debug.Log($"[IrSlot] Slot {slotId} — ir_listen_slot to {enemies[i].Callsign ?? enemies[i].RobotId}: {(listenSent ? "OK" : "FAILED")}");
         }
@@ -231,6 +237,7 @@ public class IrSlotScheduler : MonoBehaviour
 
         Debug.Log($"[IrSlot] ============ SLOT {slotId} DONE — {hitCount} hit(s) of {enemies.Count} enemy(ies) ============");
 
+        server.RestoreStreams(wasStreaming);
         _busy = false;
     }
 

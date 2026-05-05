@@ -35,6 +35,9 @@ public class RobotWebSocketServer : MonoBehaviour
         public int NumFrames;
     }
 
+    // Robots currently streaming camera video (maintained by SendStreamOn/Off)
+    private readonly HashSet<string> _activeStreams = new HashSet<string>();
+
     private readonly Dictionary<string, SessionInfo> _bySession = new Dictionary<string, SessionInfo>();
     private readonly Dictionary<string, string> _sessionByRobot = new Dictionary<string, string>();
 
@@ -225,6 +228,8 @@ public class RobotWebSocketServer : MonoBehaviour
             {
                 if (_sessionByRobot.TryGetValue(rid, out var mapSid) && mapSid == sid)
                     _sessionByRobot.Remove(rid);
+
+                _activeStreams.Remove(rid);
 
                 // Do NOT remove from RobotDirectory on a WebSocket close — the robot
                 // may be momentarily disconnected and will re-send hello shortly.
@@ -455,12 +460,29 @@ public class RobotWebSocketServer : MonoBehaviour
 
     public bool SendStreamOff(string robotId)
     {
+        _activeStreams.Remove(robotId);
         return SendJsonToRobot(robotId, "{\"cmd\":\"stream_off\"}");
     }
 
     public bool SendStreamOn(string robotId)
     {
+        _activeStreams.Add(robotId);
         return SendJsonToRobot(robotId, "{\"cmd\":\"stream_on\"}");
+    }
+
+    // Pauses all active camera streams; returns the set of robot IDs that were streaming.
+    public HashSet<string> PauseAllStreams()
+    {
+        var was = new HashSet<string>(_activeStreams);
+        _activeStreams.Clear();
+        foreach (var id in was) SendJsonToRobot(id, "{\"cmd\":\"stream_off\"}");
+        return was;
+    }
+
+    // Re-enables streams for robots returned by PauseAllStreams.
+    public void RestoreStreams(HashSet<string> toRestore)
+    {
+        foreach (var id in toRestore) SendStreamOn(id);
     }
 
     public bool SendMotorsOn(string robotId)
@@ -585,30 +607,30 @@ public class RobotWebSocketServer : MonoBehaviour
         Debug.Log($"[WS->Robot] time_sync ut={unityMs} -> {ids.Count} robots");
     }
 
-    public bool SendIrFireSlot(string robotId, int slotId, int delayMs,
+    public bool SendIrFireSlot(string robotId, int slotId, long slotStartUt,
                                int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"ir_fire_slot\",\"slot_id\":{slotId}" +
-                      $",\"delay_ms\":{delayMs}" +
+                      $",\"slot_start\":{slotStartUt}" +
                       $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
                       $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_fire_slot slot={slotId} delay={delayMs}ms -> {robotId}"
+        Debug.Log(ok ? $"[WS->Robot] ir_fire_slot slot={slotId} slot_start={slotStartUt} -> {robotId}"
                      : $"[WS->Robot] FAILED ir_fire_slot -> {robotId}");
         return ok;
     }
 
-    public bool SendIrListenSlot(string robotId, int slotId, int delayMs,
+    public bool SendIrListenSlot(string robotId, int slotId, long slotStartUt,
                                  int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"ir_listen_slot\",\"slot_id\":{slotId}" +
-                      $",\"delay_ms\":{delayMs}" +
+                      $",\"slot_start\":{slotStartUt}" +
                       $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
                       $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} delay={delayMs}ms -> {robotId}"
+        Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} slot_start={slotStartUt} -> {robotId}"
                      : $"[WS->Robot] FAILED ir_listen_slot -> {robotId}");
         return ok;
     }
