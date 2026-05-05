@@ -292,6 +292,90 @@ public static class RebuildPlayingPanel
         }
         else Debug.LogWarning("[RebuildPlaying] CapturePointsPanelUI type not found.");
 
+        // ── 8c. Settings column — game params + shot timing ───────────────────
+        var settingsCol = MakeRect(columns.transform, "SettingsColumn");
+        settingsCol.AddComponent<Image>().color = C_PANEL;
+        var settingsLE = settingsCol.AddComponent<LayoutElement>();
+        settingsLE.preferredWidth = 200f;
+        settingsLE.flexibleHeight = 1f;
+        settingsLE.flexibleWidth  = 0f;
+
+        var settingsVLG = settingsCol.AddComponent<VerticalLayoutGroup>();
+        settingsVLG.spacing             = 4f;
+        settingsVLG.padding             = new RectOffset(8, 8, 8, 8);
+        settingsVLG.childForceExpandWidth  = true;
+        settingsVLG.childForceExpandHeight = false;
+        settingsVLG.childControlWidth      = true;
+        settingsVLG.childControlHeight     = true;
+        settingsVLG.childAlignment         = TextAnchor.UpperLeft;
+
+        var settingsHdr = MakeTmp(settingsCol.transform, "LblSettings", "SETTINGS",
+                                   C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
+        settingsHdr.characterSpacing = 1f;
+        settingsHdr.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
+
+        // Scrollable content area
+        RectTransform settingsContent;
+        var settingsScroll = CreateScrollCard(settingsCol.transform, "SettingsScroll", out settingsContent);
+        settingsScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
+        settingsScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
+
+        // Section: GAME SETTINGS
+        MakeSectionLabel(settingsContent, "SecGame", "GAME SETTINGS");
+        var f_maxHp      = MakeSettingsRow(settingsContent, "Max HP",       "Starting HP for every robot.");
+        var f_damage     = MakeSettingsRow(settingsContent, "Dmg/Hit",      "Base damage per IR hit (rear hits multiply).");
+        var f_rearMult   = MakeSettingsRow(settingsContent, "Rear Mult",    "Damage multiplier for S/SE/SW hits.");
+        var f_duration   = MakeSettingsRow(settingsContent, "Duration s",   "Match length in seconds.");
+        var f_maxPl      = MakeSettingsRow(settingsContent, "Max Players",  "Max slots on public display page.");
+        var f_teamPts    = MakeSettingsRow(settingsContent, "Team Pts",     "Points needed for instant tug-of-war win.");
+        var f_ptsKill    = MakeSettingsRow(settingsContent, "Pts/Kill",     "Team points awarded per robot destroyed.");
+
+        // Section: SHOT TIMING
+        MakeSectionLabel(settingsContent, "SecShot", "SHOT TIMING");
+        var f_cooldown   = MakeSettingsRow(settingsContent, "Cooldown s",   "Min seconds between shots per robot.");
+        var f_slotFuture = MakeSettingsRow(settingsContent, "Slot Future",  "ms shooter waits before emitting IR. Reduce to speed up; increase if enemies miss.");
+        var f_listenDly  = MakeSettingsRow(settingsContent, "Listen Dly",   "Extra ms added to listener start time (usually 0).");
+        var f_b1         = MakeSettingsRow(settingsContent, "Burst1 ms",    "IR burst 1 duration per rep. Longer = more detection chance.");
+        var f_gap12      = MakeSettingsRow(settingsContent, "Gap 1-2 ms",   "Silent gap between burst 1 and burst 2.");
+        var f_b2         = MakeSettingsRow(settingsContent, "Burst2 ms",    "IR burst 2 duration per rep.");
+        var f_repGap     = MakeSettingsRow(settingsContent, "Rep Gap ms",   "Silent gap between repetitions.");
+        var f_reps       = MakeSettingsRow(settingsContent, "Reps",         "Burst-pair repetitions per shot. More = reliable; longer total time.");
+        var f_resBuf     = MakeSettingsRow(settingsContent, "Res Buf s",    "Seconds Unity waits for IR results after slot ends.");
+
+        // Total time read-only label
+        var totalRow = MakeRect(settingsContent.transform, "TotalRow");
+        totalRow.AddComponent<LayoutElement>().preferredHeight = 20f;
+        var totalLbl = MakeTmp(totalRow.transform, "TotalLabel", "Total: --",
+                                C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
+        Anchor(totalLbl.gameObject, 0, 0, 1, 1, 0, 0, 0, 0);
+
+        // Wire PlayingSettingsPanel
+        var psp = pp.GetComponent<PlayingSettingsPanel>();
+        if (psp == null) psp = pp.AddComponent<PlayingSettingsPanel>();
+        {
+            var so = new SerializedObject(psp);
+            SetProp(so, "maxHpField",      f_maxHp);
+            SetProp(so, "damageField",     f_damage);
+            SetProp(so, "rearMultField",   f_rearMult);
+            SetProp(so, "durationField",   f_duration);
+            SetProp(so, "maxPlayersField", f_maxPl);
+            SetProp(so, "maxTeamPtsField", f_teamPts);
+            SetProp(so, "ptsPerKillField", f_ptsKill);
+            SetProp(so, "cooldownField",   f_cooldown);
+            SetProp(so, "slotFutureField", f_slotFuture);
+            SetProp(so, "listenDelayField",f_listenDly);
+            SetProp(so, "b1DurField",      f_b1);
+            SetProp(so, "gap12Field",      f_gap12);
+            SetProp(so, "b2DurField",      f_b2);
+            SetProp(so, "repGapField",     f_repGap);
+            SetProp(so, "repsField",       f_reps);
+            SetProp(so, "resultBufField",  f_resBuf);
+            // Wire totalTimeLabel (TMP_Text, not TMP_InputField — use FindProperty directly)
+            var prop = so.FindProperty("totalTimeLabel");
+            if (prop != null) prop.objectReferenceValue = totalLbl;
+            so.ApplyModifiedProperties();
+        }
+
         // ── 9. Wire existing components ───────────────────────────────────────
 
         var pgb = pp.GetComponent<PauseGameButton>();
@@ -497,6 +581,101 @@ public static class RebuildPlayingPanel
         go.AddComponent<Button>();
         MakeTmp(go.transform, "Label", label, textColor, fontSize, TextAlignmentOptions.Center, bold: true);
         return go;
+    }
+
+    // ── Settings row helper ───────────────────────────────────────────────────────
+    // Returns the TMP_InputField. Each row is a VLG block: top sub-row (label+input)
+    // + description line below.
+    static TMP_InputField MakeSettingsRow(RectTransform parent, string labelText, string description)
+    {
+        var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
+        var rowVLG = row.AddComponent<VerticalLayoutGroup>();
+        rowVLG.spacing             = 1f;
+        rowVLG.childForceExpandWidth  = true;
+        rowVLG.childForceExpandHeight = false;
+        rowVLG.childControlWidth      = true;
+        rowVLG.childControlHeight     = true;
+        row.AddComponent<LayoutElement>().preferredHeight = 38f;
+
+        // Top sub-row: label + input field
+        var topRow = MakeRect(row.transform, "TopRow");
+        var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
+        topHLG.spacing             = 4f;
+        topHLG.childForceExpandWidth  = false;
+        topHLG.childForceExpandHeight = true;
+        topHLG.childControlWidth      = true;
+        topHLG.childControlHeight     = true;
+        topRow.AddComponent<LayoutElement>().preferredHeight = 22f;
+
+        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+                           new Color(0.75f, 0.75f, 0.75f), 9f, TextAlignmentOptions.MidlineLeft);
+        lbl.gameObject.AddComponent<LayoutElement>().preferredWidth = 76f;
+
+        var inputField = MakeTmpInputField(topRow.transform, "Field");
+
+        // Description line
+        var desc = MakeTmp(row.transform, "Desc", description,
+                            new Color(0.38f, 0.38f, 0.38f), 7f, TextAlignmentOptions.MidlineLeft);
+        desc.enableWordWrapping = true;
+        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 14f;
+
+        return inputField;
+    }
+
+    static TMP_InputField MakeTmpInputField(Transform parent, string name)
+    {
+        var go = new GameObject(name);
+        go.AddComponent<RectTransform>();
+        go.transform.SetParent(parent, false);
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.14f, 0.14f, 0.14f);
+
+        var field = go.AddComponent<TMP_InputField>();
+
+        // Text area child
+        var textArea = new GameObject("Text Area");
+        textArea.AddComponent<RectTransform>();
+        textArea.transform.SetParent(go.transform, false);
+        var taRT = textArea.GetComponent<RectTransform>();
+        taRT.anchorMin = Vector2.zero;
+        taRT.anchorMax = Vector2.one;
+        taRT.offsetMin = new Vector2(4f, 0f);
+        taRT.offsetMax = new Vector2(-4f, 0f);
+        textArea.AddComponent<RectMask2D>();
+
+        // Text child
+        var textGo = new GameObject("Text");
+        textGo.AddComponent<RectTransform>();
+        textGo.transform.SetParent(textArea.transform, false);
+        var textRT = textGo.GetComponent<RectTransform>();
+        textRT.anchorMin = Vector2.zero;
+        textRT.anchorMax = Vector2.one;
+        textRT.offsetMin = Vector2.zero;
+        textRT.offsetMax = Vector2.zero;
+
+        var tmp = textGo.AddComponent<TextMeshProUGUI>();
+        tmp.font      = _font;
+        tmp.fontSize  = 9f;
+        tmp.color     = new Color(0.91f, 0.91f, 0.91f);
+        tmp.alignment = TextAlignmentOptions.MidlineLeft;
+
+        field.textViewport  = taRT;
+        field.textComponent = tmp;
+        field.fontAsset     = _font;
+        field.pointSize     = 9f;
+
+        go.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
+        return field;
+    }
+
+    static void MakeSectionLabel(RectTransform parent, string name, string text)
+    {
+        var lbl = MakeTmp(parent.transform, name, text,
+                           new Color(0.45f, 0.45f, 0.45f), 8f, TextAlignmentOptions.MidlineLeft, bold: true);
+        lbl.characterSpacing = 1f;
+        lbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
     }
 
     static GameObject CreateScrollCard(Transform parent, string name, out RectTransform content)
