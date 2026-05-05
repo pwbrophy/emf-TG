@@ -365,6 +365,20 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
+        var rcg = pp.GetComponent<RobotControlsGroup>();
+        if (rcg == null) rcg = pp.AddComponent<RobotControlsGroup>();
+        {
+            var so = new SerializedObject(rcg);
+            SetProp(so, "robotListPanel", rlp);
+            var arr = so.FindProperty("buttons");
+            arr.arraySize = 4;
+            arr.GetArrayElementAtIndex(0).objectReferenceValue = pingBtn.GetComponent<Button>();
+            arr.GetArrayElementAtIndex(1).objectReferenceValue = dmgBtn.GetComponent<Button>();
+            arr.GetArrayElementAtIndex(2).objectReferenceValue = healBtn.GetComponent<Button>();
+            arr.GetArrayElementAtIndex(3).objectReferenceValue = camBtn.GetComponent<Button>();
+            so.ApplyModifiedProperties();
+        }
+
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)
         {
