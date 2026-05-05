@@ -227,9 +227,6 @@ public static class RebuildPlayingPanel
         healBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
         var camBtn   = MakeButton(ctrlRow.transform, "ToggleCamButton", "TOGGLE CAM", new Color(0.10f, 0.25f, 0.35f), C_TEXT, 12f);
         camBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var pingResult = MakeTmp(pp.transform, "PingResult", "—", C_DIM, 10f, TextAlignmentOptions.MidlineLeft);
-        pingResult.gameObject.SetActive(false); // hidden label used for wiring only
-
         // Roster scroll
         RectTransform rosterContent;
         var rosterScroll = CreateScrollCard(leftCol.transform, "RosterScroll", out rosterContent);
@@ -354,7 +351,7 @@ public static class RebuildPlayingPanel
         {
             var so = new SerializedObject(rpb);
             SetProp(so, "pingButton",     pingBtn.GetComponent<Button>());
-            SetProp(so, "resultLabel",    pingResult);
+            SetProp(so, "resultLabel",    null);
             SetProp(so, "robotListPanel", rlp);
             so.ApplyModifiedProperties();
         }
