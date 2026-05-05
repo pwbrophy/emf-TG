@@ -12,9 +12,6 @@ public class ShootingController : MonoBehaviour
     [SerializeField] private TextMeshProUGUI cooldownLabel;
     [SerializeField] private RobotSelectionPanel selectionPanel;
 
-    [Header("Timings")]
-    [SerializeField] private float fireCooldownSeconds = 3f;
-
     // Per-robot cooldown: robotId -> time when next shot is allowed
     private readonly Dictionary<string, float> _nextFireTime = new Dictionary<string, float>();
 
@@ -66,7 +63,8 @@ public class ShootingController : MonoBehaviour
         if (state != null && (state.DeadRobots.Contains(robotId) || state.RespawningRobots.Contains(robotId))) return;
 
         Debug.Log("[Shooting] RequestFire: " + robotId);
-        _nextFireTime[robotId] = Time.time + fireCooldownSeconds;
+        float cooldown = ServiceLocator.GameSettings?.FireCooldownSeconds ?? 3f;
+        _nextFireTime[robotId] = Time.time + cooldown;
 
         var server = ServiceLocator.RobotServer;
         if (server != null) server.SendFlashFire(robotId);

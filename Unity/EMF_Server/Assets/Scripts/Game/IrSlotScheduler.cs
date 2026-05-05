@@ -16,18 +16,6 @@ using UnityEngine;
 //   6. Applies damage, flash_hit (red LEDs + buzzer), set_hp for each confirmed hit
 public class IrSlotScheduler : MonoBehaviour
 {
-    [Header("Slot timing (ms)")]
-    [SerializeField] private int slotFutureMs       = 300;  // shooter delay: fires N ms after receiving command
-    [SerializeField] private int listenDelayMs      = 0;    // listener delay: 0 = start listening immediately on receipt
-    [SerializeField] private int b1DurMs            = 25;
-    [SerializeField] private int gap12Ms            = 20;
-    [SerializeField] private int b2DurMs            = 25;
-    [SerializeField] private int repGapMs           = 20;
-    [SerializeField] private int reps               = 7;    // listener covers [0..610ms], shooter fires at [300..550ms]
-
-    [Header("Result collection")]
-    [SerializeField] private float resultBufferSeconds = 0.5f;
-
     private readonly Queue<string> _queue = new Queue<string>();
     private bool _busy;
     private int  _nextSlotId = 1;
@@ -140,9 +128,17 @@ public class IrSlotScheduler : MonoBehaviour
 
         Debug.Log($"[IrSlot] Slot {slotId} — {enemies.Count} enemy(ies) targeted.");
 
-        // ── Compute slot timing ────────────────────────────────────────────
-        int   delayMs  = slotFutureMs;
-        int   perRepMs = b1DurMs + gap12Ms + b2DurMs + repGapMs;
+        // ── Compute slot timing (read live from GameSettings so UI changes take effect immediately) ──
+        int   slotFutureMs        = settings != null ? settings.SlotFutureMs       : 300;
+        int   b1DurMs             = settings != null ? settings.B1DurMs            : 25;
+        int   gap12Ms             = settings != null ? settings.Gap12Ms            : 20;
+        int   b2DurMs             = settings != null ? settings.B2DurMs            : 25;
+        int   repGapMs            = settings != null ? settings.RepGapMs           : 20;
+        int   reps                = settings != null ? settings.Reps               : 7;
+        float resultBufferSeconds = settings != null ? settings.ResultBufferSeconds : 0.5f;
+
+        int   delayMs   = slotFutureMs;
+        int   perRepMs  = b1DurMs + gap12Ms + b2DurMs + repGapMs;
         int   slotDurMs = reps * perRepMs - repGapMs;
 
         Debug.Log($"[IrSlot] Slot {slotId} timing: " +
