@@ -2,10 +2,10 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Heals the selected robot — mirrors the RFID base-tag heal logic.
+/// Heals the selected robot — operator override, bypasses all phase guards.
+/// Dead/explosion phase: force-transitions to respawning then fully revives.
+/// Dead-walk phase: RespawnRobot (full revive).
 /// Alive robots: RestoreHp (full HP restore).
-/// Respawning robots: RespawnRobot (full revive from dead-walk).
-/// Dead robots in the explosion phase cannot be healed yet.
 /// </summary>
 public class HealButton : MonoBehaviour
 {
@@ -48,14 +48,14 @@ public class HealButton : MonoBehaviour
 
         int maxHp = settings != null ? settings.MaxHp : 100;
 
-        // Explosion phase — robot is dead but hasn't transitioned to dead-walk yet
-        if (game.State.DeadRobots.Contains(robotId) && !game.State.RespawningRobots.Contains(robotId))
+        if (game.State.DeadRobots.Contains(robotId))
         {
-            Debug.Log($"[Heal] {robotId} is in explosion phase — cannot heal yet.");
-            return;
+            // Operator override: skip explosion phase and revive immediately
+            game.TransitionToRespawning(robotId);
+            game.RespawnRobot(robotId);
+            Debug.Log($"[Heal] Operator revive: {robotId} force-respawned.");
         }
-
-        if (game.State.RespawningRobots.Contains(robotId))
+        else if (game.State.RespawningRobots.Contains(robotId))
         {
             game.RespawnRobot(robotId);
             Debug.Log($"[Heal] Respawned {robotId} at base.");

@@ -36,6 +36,7 @@ public class RobotListPanel : MonoBehaviour
         public RectTransform   FillRT;
         public Image           FillImg;
         public TextMeshProUGUI HpLabel;
+        public TextMeshProUGUI PlayerLabel;
         public IrCompassWidget Compass;
         public Image           Highlight;
         public Image           CamIndicator;
@@ -109,12 +110,35 @@ public class RobotListPanel : MonoBehaviour
 
         if (state == null) return;
 
+        // Split robots into two team buckets, preserving original order within each
+        var team0 = new List<RobotInfo>();
+        var team1 = new List<RobotInfo>();
         foreach (var r in state.Robots)
         {
-            int  hp      = state.RobotHp.GetValueOrDefault(r.RobotId, maxHp);
-            bool dead    = state.DeadRobots.Contains(r.RobotId);
-            int  alliance = ResolveAlliance(r);
-            CreateRow(r, hp, maxHp, dead, alliance);
+            if (ResolveAlliance(r) == 0) team0.Add(r);
+            else                          team1.Add(r);
+        }
+
+        if (team0.Count > 0)
+        {
+            CreateTeamHeader("TEAM 1", C_BLUE);
+            foreach (var r in team0)
+            {
+                int  hp    = state.RobotHp.GetValueOrDefault(r.RobotId, maxHp);
+                bool dead  = state.DeadRobots.Contains(r.RobotId);
+                CreateRow(r, hp, maxHp, dead, 0);
+            }
+        }
+
+        if (team1.Count > 0)
+        {
+            CreateTeamHeader("TEAM 2", C_RED);
+            foreach (var r in team1)
+            {
+                int  hp    = state.RobotHp.GetValueOrDefault(r.RobotId, maxHp);
+                bool dead  = state.DeadRobots.Contains(r.RobotId);
+                CreateRow(r, hp, maxHp, dead, 1);
+            }
         }
 
         LayoutRebuilder.ForceRebuildLayoutImmediate(rowContainer);
@@ -196,6 +220,18 @@ public class RobotListPanel : MonoBehaviour
         nameTmp.alignment = TextAlignmentOptions.MidlineLeft;
         nameGO.AddComponent<LayoutElement>().preferredWidth = 80f;
 
+        // ── Player label ──────────────────────────────────────────────────────
+        var playerGO = new GameObject("Player");
+        playerGO.AddComponent<RectTransform>();
+        playerGO.transform.SetParent(row.transform, false);
+        var playerTmp = playerGO.AddComponent<TextMeshProUGUI>();
+        playerTmp.text      = r.AssignedPlayer ?? string.Empty;
+        playerTmp.font      = font;
+        playerTmp.fontSize  = 10f;
+        playerTmp.color     = C_DIM;
+        playerTmp.alignment = TextAlignmentOptions.MidlineLeft;
+        playerGO.AddComponent<LayoutElement>().preferredWidth = 60f;
+
         // ── HP bar ────────────────────────────────────────────────────────────
         var barBG = new GameObject("BarBG");
         barBG.AddComponent<RectTransform>();
@@ -247,6 +283,7 @@ public class RobotListPanel : MonoBehaviour
             FillRT       = fillRT,
             FillImg      = fillImg,
             HpLabel      = hpTmp,
+            PlayerLabel  = playerTmp,
             Compass      = widget,
             Highlight    = hlImg,
             CamIndicator = camDotImg,
@@ -257,6 +294,59 @@ public class RobotListPanel : MonoBehaviour
         // Wire click — capture robotId by value
         string robotId = r.RobotId;
         btn.onClick.AddListener(() => SelectRobot(robotId));
+    }
+
+    // ── Team header ───────────────────────────────────────────────────────────
+
+    private void CreateTeamHeader(string label, Color accent)
+    {
+        var font = Resources.Load<TMPro.TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+
+        var hdr = new GameObject("TeamHeader_" + label);
+        hdr.AddComponent<RectTransform>();
+        hdr.transform.SetParent(rowContainer, false);
+        var hdrImg = hdr.AddComponent<Image>();
+        hdrImg.color = new Color(0.08f, 0.08f, 0.08f);
+        hdr.AddComponent<LayoutElement>().preferredHeight = 20f;
+
+        var hlg = hdr.AddComponent<HorizontalLayoutGroup>();
+        hlg.padding             = new RectOffset(8, 6, 2, 2);
+        hlg.childForceExpandWidth  = false;
+        hlg.childForceExpandHeight = true;
+        hlg.childControlWidth      = true;
+        hlg.childControlHeight     = true;
+        hlg.childAlignment         = TextAnchor.MiddleLeft;
+
+        // Accent bar
+        var accent_go = new GameObject("Accent");
+        accent_go.AddComponent<RectTransform>();
+        accent_go.transform.SetParent(hdr.transform, false);
+        var accentImg = accent_go.AddComponent<Image>();
+        accentImg.color = accent;
+        accentImg.raycastTarget = false;
+        var accentLE = accent_go.AddComponent<LayoutElement>();
+        accentLE.preferredWidth  = 3f;
+        accentLE.preferredHeight = 14f;
+        accentLE.flexibleWidth   = 0f;
+
+        // Spacer
+        var spacer = new GameObject("Spacer");
+        spacer.AddComponent<RectTransform>();
+        spacer.transform.SetParent(hdr.transform, false);
+        spacer.AddComponent<LayoutElement>().preferredWidth = 5f;
+
+        // Label
+        var lblGO = new GameObject("Label");
+        lblGO.AddComponent<RectTransform>();
+        lblGO.transform.SetParent(hdr.transform, false);
+        var lbl = lblGO.AddComponent<TextMeshProUGUI>();
+        lbl.text      = label;
+        lbl.font      = font;
+        lbl.fontSize  = 9f;
+        lbl.fontStyle = FontStyles.Bold;
+        lbl.color     = accent;
+        lbl.alignment = TextAlignmentOptions.MidlineLeft;
+        lblGO.AddComponent<LayoutElement>().flexibleWidth = 1f;
     }
 
     // ── Camera toggle (called by ToggleCameraButton) ──────────────────────────
