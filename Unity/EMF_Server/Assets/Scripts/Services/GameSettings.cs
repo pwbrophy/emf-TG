@@ -47,7 +47,7 @@ public class GameSettings : MonoBehaviour
     public float FireCooldownSeconds = 3f;
 
     [Tooltip("How many ms after receiving the ir_fire_slot command the shooter waits before emitting IR. Gives listeners time to get ready. Reduce to speed up the sequence; increase if enemies consistently miss the window.")]
-    public int SlotFutureMs = 300;
+    public int SlotFutureMs = 50;
 
     [Tooltip("Extra delay (ms) added to the listener start time relative to the fire command. Currently 0. Could offset the listen window if the shooter fires early.")]
     public int ListenDelayMs = 0;
