@@ -13,19 +13,27 @@ namespace OtaSupport
     // Set true by the onStart callback so loop() can skip normal work during update.
     inline volatile bool active = false;
 
-    using PauseFn  = void (*)();
-    using ResumeFn = void (*)();
+    using PauseFn    = void (*)();
+    using ResumeFn   = void (*)();
+    using ProgressFn = void (*)(uint8_t pct);
+    using EndFn      = void (*)();
 
-    inline PauseFn  onPause  = nullptr;
-    inline ResumeFn onResume = nullptr;
+    inline PauseFn    onPause      = nullptr;
+    inline ResumeFn   onResume     = nullptr;
+    inline ProgressFn onOtaProgress = nullptr;
+    inline EndFn      onOtaEnd     = nullptr;
 
     inline void begin(const char* hostname,
-                      const char* password = nullptr,
-                      PauseFn  pauseFn  = nullptr,
-                      ResumeFn resumeFn = nullptr)
+                      const char* password    = nullptr,
+                      PauseFn    pauseFn      = nullptr,
+                      ResumeFn   resumeFn     = nullptr,
+                      ProgressFn progressFn   = nullptr,
+                      EndFn      endFn        = nullptr)
     {
-        onPause  = pauseFn;
-        onResume = resumeFn;
+        onPause       = pauseFn;
+        onResume      = resumeFn;
+        onOtaProgress = progressFn;
+        onOtaEnd      = endFn;
 
         WiFi.setSleep(false);                    // keep radio fully awake during transfers
         WiFi.setTxPower(WIFI_POWER_19_5dBm);
@@ -41,6 +49,7 @@ namespace OtaSupport
         });
 
         ArduinoOTA.onEnd([]() {
+            if (onOtaEnd) onOtaEnd();
             Serial.println("[OTA] end");
             // Device reboots after this; onResume is not needed
         });
@@ -51,6 +60,7 @@ namespace OtaSupport
             if (pct != lastPct) {
                 lastPct = pct;
                 Serial.printf("[OTA] %u%%\n", pct);
+                if (onOtaProgress) onOtaProgress(pct);
             }
             yield(); // keep Wi-Fi stack fed during long transfers
         });
