@@ -326,9 +326,9 @@ public static class RebuildPlayingPanel
 
         // Total time read-only label
         var totalRow = MakeRect(shotTimingContent.transform, "TotalRow");
-        totalRow.AddComponent<LayoutElement>().preferredHeight = 20f;
+        totalRow.AddComponent<LayoutElement>().preferredHeight = 26f;
         var totalLbl = MakeTmp(totalRow.transform, "TotalLabel", "Total: --",
-                                C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
+                                C_CYAN, 12f, TextAlignmentOptions.MidlineLeft, bold: true);
         Anchor(totalLbl.gameObject, 0, 0, 1, 1, 0, 0, 0, 0);
 
         // Wire PlayingSettingsPanel
@@ -571,7 +571,7 @@ public static class RebuildPlayingPanel
         var col = MakeRect(parent, name);
         col.AddComponent<Image>().color = C_PANEL;
         var le = col.AddComponent<LayoutElement>();
-        le.preferredWidth = 160f;
+        le.preferredWidth = 210f;
         le.flexibleHeight = 1f;
         le.flexibleWidth  = 0f;
 
@@ -585,9 +585,9 @@ public static class RebuildPlayingPanel
         vlg.childAlignment         = TextAnchor.UpperLeft;
 
         var hdr = MakeTmp(col.transform, "LblHeader", header,
-                           C_CYAN, 9f, TextAlignmentOptions.MidlineLeft, bold: true);
+                           C_CYAN, 12f, TextAlignmentOptions.MidlineLeft, bold: true);
         hdr.characterSpacing = 1f;
-        hdr.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
+        hdr.gameObject.AddComponent<LayoutElement>().preferredHeight = 22f;
 
         return col;
     }
@@ -604,7 +604,7 @@ public static class RebuildPlayingPanel
         rowVLG.childForceExpandHeight = false;
         rowVLG.childControlWidth      = true;
         rowVLG.childControlHeight     = true;
-        row.AddComponent<LayoutElement>().preferredHeight = 38f;
+        row.AddComponent<LayoutElement>().preferredHeight = 50f;
 
         // Top sub-row: label + input field
         var topRow = MakeRect(row.transform, "TopRow");
@@ -614,19 +614,19 @@ public static class RebuildPlayingPanel
         topHLG.childForceExpandHeight = true;
         topHLG.childControlWidth      = true;
         topHLG.childControlHeight     = true;
-        topRow.AddComponent<LayoutElement>().preferredHeight = 22f;
+        topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
 
         var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
-                           new Color(0.75f, 0.75f, 0.75f), 9f, TextAlignmentOptions.MidlineLeft);
-        lbl.gameObject.AddComponent<LayoutElement>().preferredWidth = 76f;
+                           new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
+        lbl.gameObject.AddComponent<LayoutElement>().preferredWidth = 96f;
 
         var inputField = MakeTmpInputField(topRow.transform, "Field");
 
         // Description line
         var desc = MakeTmp(row.transform, "Desc", description,
-                            new Color(0.38f, 0.38f, 0.38f), 7f, TextAlignmentOptions.MidlineLeft);
+                            new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
         desc.enableWordWrapping = true;
-        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 14f;
+        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
 
         return inputField;
     }
@@ -665,14 +665,14 @@ public static class RebuildPlayingPanel
 
         var tmp = textGo.AddComponent<TextMeshProUGUI>();
         tmp.font      = _font;
-        tmp.fontSize  = 9f;
+        tmp.fontSize  = 12f;
         tmp.color     = new Color(0.91f, 0.91f, 0.91f);
         tmp.alignment = TextAlignmentOptions.MidlineLeft;
 
         field.textViewport  = taRT;
         field.textComponent = tmp;
         field.fontAsset     = _font;
-        field.pointSize     = 9f;
+        field.pointSize     = 12f;
 
         go.AddComponent<LayoutElement>().flexibleWidth = 1f;
 
