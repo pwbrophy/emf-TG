@@ -467,6 +467,28 @@ static void updateBuzzerCaptureEffect(uint32_t now)
     ledcWrite(BUZZER_LEDC_CH, pipOff < PIP_ON ? CAPTURE_PIP_DUTIES[pipIdx] : 0);
 }
 
+// ---- OTA audio/LED callbacks ----
+
+static void otaProgressCb(uint8_t pct)
+{
+    leds.showOtaProgress(pct);
+}
+
+static void otaEndCb()
+{
+    // Victory pips: C5 → E5 → G5 (blocking — device reboots immediately after)
+    ledcSetup(BUZZER_LEDC_CH, 523, 8); ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 28); delay(18);
+    ledcWrite(BUZZER_LEDC_CH, 0);  delay(10);
+    ledcSetup(BUZZER_LEDC_CH, 659, 8);
+    ledcWrite(BUZZER_LEDC_CH, 28); delay(18);
+    ledcWrite(BUZZER_LEDC_CH, 0);  delay(10);
+    ledcSetup(BUZZER_LEDC_CH, 784, 8);
+    ledcWrite(BUZZER_LEDC_CH, 28); delay(22);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    leds.showOtaProgress(100);
+}
+
 // ---- Robot ID (12-char uppercase MAC hex, no separators) ----
 static String makeRobotId()
 {
@@ -867,8 +889,18 @@ void setup()
             ir.stopEmit();
             mjpeg.setEnabled(false);
             if (cam.isStarted()) cam.stop();
+            // Start chirp: two tiny ascending pips
+            ledcSetup(BUZZER_LEDC_CH, 1200, 8); ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+            ledcWrite(BUZZER_LEDC_CH, 28); delay(18);
+            ledcWrite(BUZZER_LEDC_CH, 0);  delay(12);
+            ledcSetup(BUZZER_LEDC_CH, 2400, 8);
+            ledcWrite(BUZZER_LEDC_CH, 28); delay(18);
+            ledcWrite(BUZZER_LEDC_CH, 0);
+            leds.showOtaProgress(0);
         },
-        nullptr // no resume needed (device reboots after OTA)
+        nullptr,       // no resume needed (device reboots after OTA)
+        otaProgressCb,
+        otaEndCb
     );
 
     startDiscovery();
