@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 // Exposes all GameSettings (match params + shot timing) as editable fields on the
 // Playing screen. Values auto-save to disk on each change via GameSettings.SaveToDisk().
@@ -26,6 +27,8 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField repGapField;
     [SerializeField] private TMP_InputField repsField;
     [SerializeField] private TMP_InputField resultBufField;
+    [SerializeField] private Toggle         disableCameraToggle;
+    [SerializeField] private Toggle         disableMotorsToggle;
 
     [Header("Computed display")]
     [SerializeField] private TMP_Text totalTimeLabel;
@@ -66,6 +69,8 @@ public class PlayingSettingsPanel : MonoBehaviour
         Set(repGapField,     _settings.RepGapMs.ToString());
         Set(repsField,       _settings.Reps.ToString());
         Set(resultBufField,  _settings.ResultBufferSeconds.ToString("F2"));
+        SetToggle(disableCameraToggle, _settings.DisableCameraWhileDetecting);
+        SetToggle(disableMotorsToggle, _settings.DisableMotorsWhileDetecting);
 
         UpdateTotal();
     }
@@ -73,6 +78,11 @@ public class PlayingSettingsPanel : MonoBehaviour
     private static void Set(TMP_InputField f, string v)
     {
         if (f != null) f.SetTextWithoutNotify(v);
+    }
+
+    private static void SetToggle(Toggle t, bool v)
+    {
+        if (t != null) t.SetIsOnWithoutNotify(v);
     }
 
     // ── Total time computation ────────────────────────────────────────────────────
@@ -106,6 +116,8 @@ public class PlayingSettingsPanel : MonoBehaviour
         Reg(repGapField,      OnRepGapChanged);
         Reg(repsField,        OnRepsChanged);
         Reg(resultBufField,   OnResultBufChanged);
+        RegToggle(disableCameraToggle, OnDisableCameraChanged);
+        RegToggle(disableMotorsToggle, OnDisableMotorsChanged);
     }
 
     private void RemoveListeners()
@@ -126,6 +138,8 @@ public class PlayingSettingsPanel : MonoBehaviour
         Unreg(repGapField,      OnRepGapChanged);
         Unreg(repsField,        OnRepsChanged);
         Unreg(resultBufField,   OnResultBufChanged);
+        UnregToggle(disableCameraToggle, OnDisableCameraChanged);
+        UnregToggle(disableMotorsToggle, OnDisableMotorsChanged);
     }
 
     private static void Reg(TMP_InputField f, UnityEngine.Events.UnityAction<string> cb)
@@ -136,6 +150,16 @@ public class PlayingSettingsPanel : MonoBehaviour
     private static void Unreg(TMP_InputField f, UnityEngine.Events.UnityAction<string> cb)
     {
         if (f != null) f.onValueChanged.RemoveListener(cb);
+    }
+
+    private static void RegToggle(Toggle t, UnityEngine.Events.UnityAction<bool> cb)
+    {
+        if (t != null) t.onValueChanged.AddListener(cb);
+    }
+
+    private static void UnregToggle(Toggle t, UnityEngine.Events.UnityAction<bool> cb)
+    {
+        if (t != null) t.onValueChanged.RemoveListener(cb);
     }
 
     // ── Change handlers ───────────────────────────────────────────────────────────
@@ -234,6 +258,20 @@ public class PlayingSettingsPanel : MonoBehaviour
     {
         if (_settings == null) return;
         if (float.TryParse(v, out float n) && n >= 0) { _settings.ResultBufferSeconds = n; Save(); UpdateTotal(); }
+    }
+
+    private void OnDisableCameraChanged(bool v)
+    {
+        if (_settings == null) return;
+        _settings.DisableCameraWhileDetecting = v;
+        Save();
+    }
+
+    private void OnDisableMotorsChanged(bool v)
+    {
+        if (_settings == null) return;
+        _settings.DisableMotorsWhileDetecting = v;
+        Save();
     }
 
     private void Save()

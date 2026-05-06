@@ -70,6 +70,12 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Seconds Unity waits after the slot ends before collecting results. Accounts for Wi-Fi/processing latency on the robot. Reduce if robots respond quickly; increase if results arrive late.")]
     public float ResultBufferSeconds = 0.5f;
 
+    [Tooltip("Pause all robot camera streams for the duration of the IR detection window. Reduces Wi-Fi congestion so slot commands arrive on time.")]
+    public bool DisableCameraWhileDetecting = true;
+
+    [Tooltip("Send motors_off to all robots involved in a shot before the detection window, then motors_on after. Stops motor electrical noise from triggering IR receivers.")]
+    public bool DisableMotorsWhileDetecting = true;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
     private void Awake()
@@ -88,22 +94,24 @@ public class GameSettings : MonoBehaviour
         {
             var data = new SaveData
             {
-                maxHp                = MaxHp,
-                damagePerHit         = DamagePerHit,
-                rearMultiplier       = RearMultiplier,
-                matchDurationSeconds = MatchDurationSeconds,
-                maxPlayers           = MaxPlayers,
-                maxTeamPoints        = MaxTeamPoints,
-                teamPointsPerKill    = TeamPointsPerKill,
-                fireCooldownSeconds  = FireCooldownSeconds,
-                slotFutureMs         = SlotFutureMs,
-                listenDelayMs        = ListenDelayMs,
-                b1DurMs              = B1DurMs,
-                gap12Ms              = Gap12Ms,
-                b2DurMs              = B2DurMs,
-                repGapMs             = RepGapMs,
-                reps                 = Reps,
-                resultBufferSeconds  = ResultBufferSeconds,
+                maxHp                       = MaxHp,
+                damagePerHit                = DamagePerHit,
+                rearMultiplier              = RearMultiplier,
+                matchDurationSeconds        = MatchDurationSeconds,
+                maxPlayers                  = MaxPlayers,
+                maxTeamPoints               = MaxTeamPoints,
+                teamPointsPerKill           = TeamPointsPerKill,
+                fireCooldownSeconds         = FireCooldownSeconds,
+                slotFutureMs                = SlotFutureMs,
+                listenDelayMs               = ListenDelayMs,
+                b1DurMs                     = B1DurMs,
+                gap12Ms                     = Gap12Ms,
+                b2DurMs                     = B2DurMs,
+                repGapMs                    = RepGapMs,
+                reps                        = Reps,
+                resultBufferSeconds         = ResultBufferSeconds,
+                disableCameraWhileDetecting = DisableCameraWhileDetecting,
+                disableMotorsWhileDetecting = DisableMotorsWhileDetecting,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -138,6 +146,8 @@ public class GameSettings : MonoBehaviour
             if (data.repGapMs             > 0) RepGapMs             = data.repGapMs;
             if (data.reps                 > 0) Reps                 = data.reps;
             if (data.resultBufferSeconds  > 0) ResultBufferSeconds  = data.resultBufferSeconds;
+            DisableCameraWhileDetecting = data.disableCameraWhileDetecting;
+            DisableMotorsWhileDetecting = data.disableMotorsWhileDetecting;
 
             Debug.Log("[GameSettings] Loaded from " + SavePath);
         }
@@ -166,5 +176,7 @@ public class GameSettings : MonoBehaviour
         public int   repGapMs;
         public int   reps;
         public float resultBufferSeconds;
+        public bool  disableCameraWhileDetecting;
+        public bool  disableMotorsWhileDetecting;
     }
 }

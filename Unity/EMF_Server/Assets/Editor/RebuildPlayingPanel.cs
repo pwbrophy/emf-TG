@@ -323,6 +323,8 @@ public static class RebuildPlayingPanel
         var f_repGap     = MakeSettingsRow(shotTimingContent, "Rep Gap ms",  "Silent gap between repetitions.");
         var f_reps       = MakeSettingsRow(shotTimingContent, "Reps",        "Burst-pair repetitions per shot. More = reliable; longer total time.");
         var f_resBuf     = MakeSettingsRow(shotTimingContent, "Res Buf s",   "Seconds Unity waits for IR results after slot ends.");
+        var t_disableCam    = MakeSettingsToggle(shotTimingContent, "Disable Cam",    "Pause camera streams during IR slot to reduce Wi-Fi congestion.");
+        var t_disableMotors = MakeSettingsToggle(shotTimingContent, "Disable Motors", "Stop motors during IR slot to cut electrical noise on receivers.");
 
         // Total time read-only label
         var totalRow = MakeRect(shotTimingContent.transform, "TotalRow");
@@ -351,7 +353,9 @@ public static class RebuildPlayingPanel
             SetProp(so, "b2DurField",      f_b2);
             SetProp(so, "repGapField",     f_repGap);
             SetProp(so, "repsField",       f_reps);
-            SetProp(so, "resultBufField",  f_resBuf);
+            SetProp(so, "resultBufField",       f_resBuf);
+            SetProp(so, "disableCameraToggle",  t_disableCam);
+            SetProp(so, "disableMotorsToggle",  t_disableMotors);
             // Wire totalTimeLabel (TMP_Text, not TMP_InputField — use FindProperty directly)
             var prop = so.FindProperty("totalTimeLabel");
             if (prop != null) prop.objectReferenceValue = totalLbl;
@@ -677,6 +681,66 @@ public static class RebuildPlayingPanel
         go.AddComponent<LayoutElement>().flexibleWidth = 1f;
 
         return field;
+    }
+
+    // ── Settings toggle row helper ────────────────────────────────────────────────
+    // Returns the Toggle. Row layout matches MakeSettingsRow: top sub-row (checkbox+label)
+    // + description line below.
+    static Toggle MakeSettingsToggle(RectTransform parent, string labelText, string description)
+    {
+        var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
+        var rowVLG = row.AddComponent<VerticalLayoutGroup>();
+        rowVLG.spacing             = 1f;
+        rowVLG.childForceExpandWidth  = true;
+        rowVLG.childForceExpandHeight = false;
+        rowVLG.childControlWidth      = true;
+        rowVLG.childControlHeight     = true;
+        row.AddComponent<LayoutElement>().preferredHeight = 50f;
+
+        // Top sub-row: checkbox + label
+        var topRow = MakeRect(row.transform, "TopRow");
+        var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
+        topHLG.spacing             = 6f;
+        topHLG.childForceExpandWidth  = false;
+        topHLG.childForceExpandHeight = true;
+        topHLG.childControlWidth      = true;
+        topHLG.childControlHeight     = true;
+        topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
+
+        // Checkbox background
+        var checkboxGo = MakeRect(topRow.transform, "Toggle");
+        var checkboxLE = checkboxGo.AddComponent<LayoutElement>();
+        checkboxLE.preferredWidth  = 24f;
+        checkboxLE.preferredHeight = 24f;
+        checkboxLE.flexibleWidth   = 0f;
+        var bgImg = checkboxGo.AddComponent<Image>();
+        bgImg.color = new Color(0.14f, 0.14f, 0.14f);
+        var toggle = checkboxGo.AddComponent<Toggle>();
+        toggle.targetGraphic = bgImg;
+
+        // Checkmark (filled cyan square inset)
+        var checkmarkGo = MakeRect(checkboxGo.transform, "Checkmark");
+        var checkmarkRT = checkmarkGo.GetComponent<RectTransform>();
+        checkmarkRT.anchorMin = new Vector2(0.15f, 0.15f);
+        checkmarkRT.anchorMax = new Vector2(0.85f, 0.85f);
+        checkmarkRT.offsetMin = Vector2.zero;
+        checkmarkRT.offsetMax = Vector2.zero;
+        var checkImg = checkmarkGo.AddComponent<Image>();
+        checkImg.color = C_CYAN;
+        toggle.graphic = checkImg;
+
+        // Label
+        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+                           new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
+        lbl.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
+        // Description line
+        var desc = MakeTmp(row.transform, "Desc", description,
+                            new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
+        desc.enableWordWrapping = true;
+        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
+
+        return toggle;
     }
 
     static void MakeSectionLabel(RectTransform parent, string name, string text)
