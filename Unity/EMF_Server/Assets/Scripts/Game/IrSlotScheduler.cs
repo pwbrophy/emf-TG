@@ -163,10 +163,21 @@ public class IrSlotScheduler : MonoBehaviour
         }
         server.OnIrSlotResult += OnResult;
 
-        // ── Pause cameras, sync clocks, send fire/listen commands ─────────
-        var wasStreaming = server.PauseAllStreams();
+        // ── Pause cameras, stop motors, sync clocks, send fire/listen commands ──
+        bool disableCam    = settings != null && settings.DisableCameraWhileDetecting;
+        bool disableMotors = settings != null && settings.DisableMotorsWhileDetecting;
 
-        long unityMs    = (long)(Time.unscaledTime * 1000.0);
+        HashSet<string> wasStreaming = disableCam ? server.PauseAllStreams() : null;
+
+        if (disableMotors)
+        {
+            server.SendMotorsOff(shooterId);
+            for (int i = 0; i < enemies.Count; i++)
+                server.SendMotorsOff(enemies[i].RobotId);
+            Debug.Log($"[IrSlot] Slot {slotId} — motors OFF for shooter + {enemies.Count} enemy(ies)");
+        }
+
+        long unityMs     = (long)(Time.unscaledTime * 1000.0);
         server.SendTimeSyncAll(unityMs);
         long slotStartUt = unityMs + delayMs;
 
@@ -237,7 +248,15 @@ public class IrSlotScheduler : MonoBehaviour
 
         Debug.Log($"[IrSlot] ============ SLOT {slotId} DONE — {hitCount} hit(s) of {enemies.Count} enemy(ies) ============");
 
-        server.RestoreStreams(wasStreaming);
+        if (disableMotors)
+        {
+            server.SendMotorsOn(shooterId);
+            for (int i = 0; i < enemies.Count; i++)
+                server.SendMotorsOn(enemies[i].RobotId);
+            Debug.Log($"[IrSlot] Slot {slotId} — motors ON restored");
+        }
+
+        if (wasStreaming != null) server.RestoreStreams(wasStreaming);
         _busy = false;
     }
 

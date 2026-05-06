@@ -737,7 +737,6 @@ static void handleWsText(const String& s)
         int     repGap      = doc["rep_gap"]   | 25;
         int     reps        = doc["reps"]      | 2;
         int32_t slotStartLocal = slotStartUt - g_unityTimeOffset;
-        motors.enable(false);
         ir.scheduleFireSlot(slotId, slotStartLocal, b1Dur, gap12, b2Dur, repGap, reps);
         Serial.printf("[IR] ir_fire_slot slot=%d localStart=%d\n", slotId, slotStartLocal);
         return;
@@ -753,7 +752,6 @@ static void handleWsText(const String& s)
         int     repGap      = doc["rep_gap"]   | 25;
         int     reps        = doc["reps"]      | 2;
         int32_t slotStartLocal = slotStartUt - g_unityTimeOffset;
-        motors.enable(false);
         ir.scheduleListenSlot(slotId, slotStartLocal, b1Dur, gap12, b2Dur, repGap, reps);
         Serial.printf("[IR] ir_listen_slot slot=%d localStart=%d\n", slotId, slotStartLocal);
         return;
