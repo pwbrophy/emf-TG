@@ -250,9 +250,15 @@ public class RobotWebSocketServer : MonoBehaviour
 
         if (cmd == "hello")
         {
-            // Allow robots to reconnect at any game phase — don't gate on Lobby.
-            // If we kick robots that connect during Playing they can never re-register
-            // and all commands fail (FAILED motors_on, FAILED ping, etc.).
+            // Accept registrations in Lobby (new robot joining) or Playing (mid-game
+            // reconnect after a brief Wi-Fi drop). Reject in MainMenu and Ended so
+            // robots can't join a finished match or before setup has started.
+            var phase = _flow?.Phase;
+            if (phase != GamePhase.Lobby && phase != GamePhase.Playing)
+            {
+                Debug.LogWarning($"[WS] hello rejected — wrong phase ({phase}): {ExtractString(json, "id")}");
+                return;
+            }
 
             string id = ExtractString(json, "id");
             if (string.IsNullOrEmpty(id)) return;

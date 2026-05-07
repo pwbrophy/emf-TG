@@ -289,7 +289,7 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 
 - **Windows Firewall blocking port 8080** — If the robot can't connect via WebSocket (sends UDP announces, gets replies, but no `hello` appears in Unity console), add a firewall rule: `netsh advfirewall firewall add rule name="UnityRobotWS" dir=in action=allow protocol=TCP localport=8080`
 - **Robot re-registration after disconnect** — `RobotWebSocketServer.OnClosed` must NOT call `_dir.Remove()`. If it does, the robot re-enters the directory via UDP `Upsert` with no WebSocket session, and all commands silently fail (`FAILED motors_on`, `FAILED ping`). Only the heartbeat timeout sweep removes stale directory entries.
-- **`hello` must be accepted at any game phase** — The `hello` handler must not gate on `GamePhase.Lobby`. If the robot connects just as the game starts, it gets kicked and can never register, so all commands fail for the entire match.
+- **`hello` is accepted in Lobby and Playing only** — The `hello` handler rejects robots in MainMenu and Ended. New robots must join during Lobby; robots that drop Wi-Fi mid-match can reconnect during Playing. Do not widen this to all phases or robots can join a finished game.
 - **WebSocketSharp must bind to 0.0.0.0** — `new WebSocketServer(Port)` (port-only constructor) is used instead of `new WebSocketServer("ws://ip:port")`. Binding to a specific IP in WebSocketSharp can silently reject connections.
 - **ArduinoWebsockets Host header missing port** — WebSocketSharp 400s on `Host: 192.168.86.197` (no port). The library patch above fixes this. Root cause: ArduinoWebsockets `generateHandshake()` takes only host (no port), so the call site must pre-concatenate `host:port`.
 

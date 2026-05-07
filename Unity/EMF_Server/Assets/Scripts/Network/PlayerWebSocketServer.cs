@@ -325,6 +325,8 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void HandleDrive(string connId, float l, float r)
     {
+        if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
+
         string robotId = ConnToRobot(connId);
         if (robotId == null) return;
 
@@ -343,6 +345,8 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void HandleTurret(string connId, float speed)
     {
+        if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
+
         string robotId = ConnToRobot(connId);
         if (robotId == null) return;
 
@@ -360,6 +364,8 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void HandleFire(string connId)
     {
+        if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
+
         string robotId = ConnToRobot(connId);
         if (robotId == null) return;
 
