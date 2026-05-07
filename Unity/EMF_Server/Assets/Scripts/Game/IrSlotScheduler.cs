@@ -235,8 +235,14 @@ public class IrSlotScheduler : MonoBehaviour
                       $"cardinal={cardinalDir} {(isRear ? "(REAR — 3× damage!)" : "")} ***");
             hitCount++;
 
-            // Flash red + play damage buzzer on the hit robot
-            server.SendFlashHit(enemyId);
+            // Skip dead robots — ApplyDamage also guards this, but we must not
+            // send flash_hit to a robot that is already dead (would play buzzer + red LEDs).
+            var state = game?.State;
+            if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId)))
+            {
+                Debug.Log($"[IrSlot]   {enemyName} is dead/respawning — skipping hit effects");
+                continue;
+            }
 
             // Apply damage (also fires OnHpChanged → PlayerWebSocketServer sends state_update to phone)
             int damage = 0;
@@ -245,6 +251,10 @@ public class IrSlotScheduler : MonoBehaviour
 
             int newHp = game?.State?.RobotHp.GetValueOrDefault(enemyId, 0) ?? 0;
             Debug.Log($"[IrSlot]   damage={damage} newHp={newHp}/{maxHp}");
+
+            // Flash red + play damage buzzer only if damage was actually dealt
+            if (damage > 0)
+                server.SendFlashHit(enemyId);
 
             // Update HP bar LEDs on hit robot
             server.SendSetHp(enemyId, newHp, maxHp);
