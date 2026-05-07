@@ -421,9 +421,9 @@ public class RobotListPanel : MonoBehaviour
         HandleHpChanged(robotId, maxHp);
     }
 
-    private void HandleHitDirection(string robotId, string direction)
+    private void HandleHitDirection(string robotId, byte rawMask, string cardinalDir)
     {
-        FindRow(robotId)?.Compass.Flash(direction);
+        FindRow(robotId)?.Compass.Flash(rawMask, cardinalDir);
     }
 
     private void HandlePhaseChanged(GamePhase phase)
