@@ -370,6 +370,30 @@ public class RobotListPanel : MonoBehaviour
             row.CamIndicator.color = nowOn ? C_CAM_ON : C_CAM_OFF;
     }
 
+    // ── Video flip (called by FlipVideoButtons) ───────────────────────────────
+
+    public void FlipHForSelected()
+    {
+        if (string.IsNullOrEmpty(CurrentRobotId)) return;
+        var dir = _dir ?? ServiceLocator.RobotDirectory;
+        if (dir == null || !dir.TryGet(CurrentRobotId, out var info)) return;
+        bool newH = !info.HFlip;
+        dir.SetFlip(CurrentRobotId, newH, info.VFlip);
+        ServiceLocator.RobotServer?.SendVideoFlip(CurrentRobotId, newH, info.VFlip);
+        UnityEngine.Object.FindObjectOfType<ESP32VideoReceiver>()?.SetFlip(newH, info.VFlip);
+    }
+
+    public void FlipVForSelected()
+    {
+        if (string.IsNullOrEmpty(CurrentRobotId)) return;
+        var dir = _dir ?? ServiceLocator.RobotDirectory;
+        if (dir == null || !dir.TryGet(CurrentRobotId, out var info)) return;
+        bool newV = !info.VFlip;
+        dir.SetFlip(CurrentRobotId, info.HFlip, newV);
+        ServiceLocator.RobotServer?.SendVideoFlip(CurrentRobotId, info.HFlip, newV);
+        UnityEngine.Object.FindObjectOfType<ESP32VideoReceiver>()?.SetFlip(info.HFlip, newV);
+    }
+
     // ── Selection ─────────────────────────────────────────────────────────────
 
     public void SelectRobot(string robotId)
