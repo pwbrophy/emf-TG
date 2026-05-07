@@ -35,6 +35,7 @@ extern "C" void __attribute__((constructor(101))) buzzerEarlyLow()
 #include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
 
+#include <Preferences.h>
 #include "secrets.h"                // WIFI_SSID, WIFI_PASS — gitignored
 #include "OtaSupport.h"
 #include "MotorController_PCA9555.h"
@@ -78,6 +79,11 @@ static String   g_wsHost;
 static int      g_wsPort  = 8080;
 static String   g_wsPath  = "/esp32";
 static bool     g_wsOpen  = false;
+
+// Camera flip state — loaded from NVS on boot, updated by set_video_flip command.
+// Both default to 1 to match the original hardcoded values in CameraController.
+static int      g_hflip = 1;
+static int      g_vflip = 1;
 
 // Offset between Unity clock (ms) and local millis(). Set by time_sync command.
 // To convert a Unity timestamp to local millis: localMs = unityMs - g_unityTimeOffset
@@ -666,6 +672,19 @@ static void handleWsText(const String& s)
         return;
     }
 
+    if (strcmp(cmd, "set_video_flip") == 0) {
+        g_hflip = doc["h"] | g_hflip;
+        g_vflip = doc["v"] | g_vflip;
+        cam.applyFlip(g_vflip != 0, g_hflip != 0);
+        Preferences prefs;
+        prefs.begin("tg_cam", false); // read-write
+        prefs.putInt("hflip", g_hflip);
+        prefs.putInt("vflip", g_vflip);
+        prefs.end();
+        Serial.printf("[CAM] flip set hflip=%d vflip=%d\n", g_hflip, g_vflip);
+        return;
+    }
+
     // ---- Game effects ----
 
     if (strcmp(cmd, "flash_fire") == 0) {
@@ -802,9 +821,11 @@ static void connectWebSocket()
             g_wsOpen        = true;
             g_lastHeartbeat = 0; // trigger immediate heartbeat next tick
 
-            // hello includes IP so the server can show it in the robot list
+            // hello includes IP and flip state so the server can sync its UI
             String hello = String("{\"cmd\":\"hello\",\"id\":\"") + g_robotId +
-                           "\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+                           "\",\"ip\":\"" + WiFi.localIP().toString() +
+                           "\",\"hflip\":" + String(g_hflip) +
+                           ",\"vflip\":"  + String(g_vflip) + "}";
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
             Serial.println("[WS] opened");
@@ -881,6 +902,17 @@ void setup()
 
     // Camera: configure pins only; driver started lazily on stream_on
     cam.begin();
+
+    // Load flip/mirror prefs from NVS (defaults match original hardcoded values)
+    {
+        Preferences prefs;
+        prefs.begin("tg_cam", true); // read-only
+        g_hflip = prefs.getInt("hflip", 1);
+        g_vflip = prefs.getInt("vflip", 1);
+        prefs.end();
+        cam.applyFlip(g_vflip != 0, g_hflip != 0);
+        Serial.printf("[CAM] flip loaded hflip=%d vflip=%d\n", g_hflip, g_vflip);
+    }
 
     // Wi-Fi: blocking until connected
     connectWifi();

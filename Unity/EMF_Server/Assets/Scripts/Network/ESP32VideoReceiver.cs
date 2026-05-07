@@ -48,6 +48,19 @@ public sealed class ESP32VideoReceiver : MonoBehaviour
             _tex.Apply(false, false);
             target.texture = _tex;
         }
+        SetFlip(false, false);
+    }
+
+    // Flip the displayed image by adjusting UV rect. Safe to call at any time.
+    // hflip mirrors left-right; vflip flips top-bottom.
+    public void SetFlip(bool hflip, bool vflip)
+    {
+        if (target == null) return;
+        float x = hflip ? 1f : 0f;
+        float y = vflip ? 1f : 0f;
+        float w = hflip ? -1f : 1f;
+        float h = vflip ? -1f : 1f;
+        target.uvRect = new Rect(x, y, w, h);
     }
 
     public void SetTarget(RawImage ri)
