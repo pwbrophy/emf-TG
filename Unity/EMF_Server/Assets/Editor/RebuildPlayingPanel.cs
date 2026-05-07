@@ -227,6 +227,10 @@ public static class RebuildPlayingPanel
         healBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
         var camBtn   = MakeButton(ctrlRow.transform, "ToggleCamButton", "TOGGLE CAM", new Color(0.10f, 0.25f, 0.35f), C_TEXT, 12f);
         camBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var hFlipBtn = MakeButton(ctrlRow.transform, "HFlipButton",   "H FLIP",      new Color(0.15f, 0.15f, 0.30f), C_TEXT, 12f);
+        hFlipBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var vFlipBtn = MakeButton(ctrlRow.transform, "VFlipButton",   "V FLIP",      new Color(0.15f, 0.15f, 0.30f), C_TEXT, 12f);
+        vFlipBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
         // Roster scroll
         RectTransform rosterContent;
         var rosterScroll = CreateScrollCard(leftCol.transform, "RosterScroll", out rosterContent);
@@ -435,17 +439,29 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
+        var fvb = pp.GetComponent<FlipVideoButtons>();
+        if (fvb == null) fvb = pp.AddComponent<FlipVideoButtons>();
+        {
+            var so = new SerializedObject(fvb);
+            SetProp(so, "robotListPanel", rlp);
+            SetProp(so, "hFlipButton",    hFlipBtn.GetComponent<Button>());
+            SetProp(so, "vFlipButton",    vFlipBtn.GetComponent<Button>());
+            so.ApplyModifiedProperties();
+        }
+
         var rcg = pp.GetComponent<RobotControlsGroup>();
         if (rcg == null) rcg = pp.AddComponent<RobotControlsGroup>();
         {
             var so = new SerializedObject(rcg);
             SetProp(so, "robotListPanel", rlp);
             var arr = so.FindProperty("buttons");
-            arr.arraySize = 4;
+            arr.arraySize = 6;
             arr.GetArrayElementAtIndex(0).objectReferenceValue = pingBtn.GetComponent<Button>();
             arr.GetArrayElementAtIndex(1).objectReferenceValue = dmgBtn.GetComponent<Button>();
             arr.GetArrayElementAtIndex(2).objectReferenceValue = healBtn.GetComponent<Button>();
             arr.GetArrayElementAtIndex(3).objectReferenceValue = camBtn.GetComponent<Button>();
+            arr.GetArrayElementAtIndex(4).objectReferenceValue = hFlipBtn.GetComponent<Button>();
+            arr.GetArrayElementAtIndex(5).objectReferenceValue = vFlipBtn.GetComponent<Button>();
             so.ApplyModifiedProperties();
         }
 
