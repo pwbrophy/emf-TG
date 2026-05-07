@@ -22,11 +22,17 @@ public class RobotSelectionPanel : MonoBehaviour
     [Header("Video")]
     [SerializeField] private ESP32VideoReceiver video;
 
+    [Header("Video Flip")]
+    [SerializeField] private Button flipHButton;
+    [SerializeField] private Button flipVButton;
+
     private IRobotDirectory _dir;
     private RobotWebSocketServer _ws;
     private readonly List<RobotInfo> _list = new();
     private int _index = -1;
     private string _selectedRobotId;
+    private bool _hflip;
+    private bool _vflip;
 
     private HashSet<string> _allowedSet;
 
@@ -57,6 +63,7 @@ public class RobotSelectionPanel : MonoBehaviour
             return;
 
         if (video) video.ClearActiveRobot();
+        RefreshFlipButtons();
         RefreshUI();
         SelectionChanged?.Invoke(null);
     }
@@ -84,6 +91,18 @@ public class RobotSelectionPanel : MonoBehaviour
         {
             clearButton.onClick.RemoveAllListeners();
             clearButton.onClick.AddListener(ClearSelection);
+        }
+
+        if (flipHButton != null)
+        {
+            flipHButton.onClick.RemoveAllListeners();
+            flipHButton.onClick.AddListener(ToggleHFlip);
+        }
+
+        if (flipVButton != null)
+        {
+            flipVButton.onClick.RemoveAllListeners();
+            flipVButton.onClick.AddListener(ToggleVFlip);
         }
     }
 
@@ -225,8 +244,11 @@ public class RobotSelectionPanel : MonoBehaviour
 
         _index = -1;
         _selectedRobotId = null;
+        _hflip = false;
+        _vflip = false;
 
         if (video) video.ClearActiveRobot();
+        RefreshFlipButtons();
         RefreshUI();
         SelectionChanged?.Invoke(null);
     }
@@ -260,6 +282,11 @@ public class RobotSelectionPanel : MonoBehaviour
 
         if (video)
             video.SetActiveRobot(_selectedRobotId);
+
+        _hflip = r.HFlip;
+        _vflip = r.VFlip;
+        video?.SetFlip(_hflip, _vflip);
+        RefreshFlipButtons();
 
         _ws?.SendStreamOn(_selectedRobotId);
         _ws?.SendMotorsOn(_selectedRobotId);
@@ -313,6 +340,45 @@ public class RobotSelectionPanel : MonoBehaviour
             string id = allowedIds[i];
             if (!string.IsNullOrEmpty(id))
                 _allowedSet.Add(id);
+        }
+    }
+
+    private void ToggleHFlip()
+    {
+        _hflip = !_hflip;
+        video?.SetFlip(_hflip, _vflip);
+        _ws = ServiceLocator.RobotServer;
+        _ws?.SendVideoFlip(_selectedRobotId, _hflip, _vflip);
+        _dir?.SetFlip(_selectedRobotId, _hflip, _vflip);
+        RefreshFlipButtons();
+    }
+
+    private void ToggleVFlip()
+    {
+        _vflip = !_vflip;
+        video?.SetFlip(_hflip, _vflip);
+        _ws = ServiceLocator.RobotServer;
+        _ws?.SendVideoFlip(_selectedRobotId, _hflip, _vflip);
+        _dir?.SetFlip(_selectedRobotId, _hflip, _vflip);
+        RefreshFlipButtons();
+    }
+
+    private void RefreshFlipButtons()
+    {
+        bool hasRobot = !string.IsNullOrEmpty(_selectedRobotId);
+
+        if (flipHButton != null)
+        {
+            var label = flipHButton.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null) label.text = _hflip ? "H Flip: ON" : "H Flip: OFF";
+            flipHButton.interactable = hasRobot;
+        }
+
+        if (flipVButton != null)
+        {
+            var label = flipVButton.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null) label.text = _vflip ? "V Flip: ON" : "V Flip: OFF";
+            flipVButton.interactable = hasRobot;
         }
     }
 

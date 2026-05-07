@@ -5,4 +5,6 @@ public class RobotInfo
     public string Callsign;        // nice display name (editable)
     public string Ip;              // last-known local IP
     public string AssignedPlayer;  // "Player1" or "Player2" for now
+    public bool   HFlip;           // camera horizontal mirror (reported by robot in hello)
+    public bool   VFlip;           // camera vertical flip (reported by robot in hello)
 }

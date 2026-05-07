@@ -336,9 +336,17 @@ public static class LayoutPanels
         var prev  = GO("PlayingPanel/PrevRobotButton");
         var next  = GO("PlayingPanel/NextRobotButton");
         var clear = GO("PlayingPanel/ClearRobotButton");
-        if (prev  != null) { ButtonStyle(prev,  new Color(0.20f, 0.30f, 0.45f), "◄", 18); Stretch(prev,  0f,    0.57f, 0.11f, 0.63f, 8f, 2f, 2f, 2f); }
-        if (next  != null) { ButtonStyle(next,  new Color(0.20f, 0.30f, 0.45f), "►", 18); Stretch(next,  0.11f, 0.57f, 0.22f, 0.63f, 2f, 2f, 2f, 2f); }
-        if (clear != null) { ButtonStyle(clear, new Color(0.35f, 0.20f, 0.20f), "✕", 16); Stretch(clear, 0.22f, 0.57f, 0.30f, 0.63f, 2f, 2f, 4f, 2f); }
+        if (prev  != null) { ButtonStyle(prev,  new Color(0.20f, 0.30f, 0.45f), "◄", 18); Stretch(prev,  0f,    0.63f, 0.11f, 0.69f, 8f, 2f, 2f, 2f); }
+        if (next  != null) { ButtonStyle(next,  new Color(0.20f, 0.30f, 0.45f), "►", 18); Stretch(next,  0.11f, 0.63f, 0.22f, 0.69f, 2f, 2f, 2f, 2f); }
+        if (clear != null) { ButtonStyle(clear, new Color(0.35f, 0.20f, 0.20f), "✕", 16); Stretch(clear, 0.22f, 0.63f, 0.30f, 0.69f, 2f, 2f, 4f, 2f); }
+
+        // PingRow — below nav buttons
+        var pingRow = GO("PlayingPanel/PingRow");
+        if (pingRow != null) Stretch(pingRow, 0f, 0.56f, 0.37f, 0.63f, 8f, 2f, 4f, 2f);
+
+        // FlipRow — below PingRow
+        var flipRow = GO("PlayingPanel/FlipRow");
+        if (flipRow != null) Stretch(flipRow, 0f, 0.49f, 0.37f, 0.56f, 8f, 2f, 4f, 2f);
 
         // Joystick
         var joystick = GO("PlayingPanel/JoystickBase");

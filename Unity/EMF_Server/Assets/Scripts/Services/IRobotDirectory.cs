@@ -21,6 +21,7 @@ public interface IRobotDirectory
     void SetCallsign(string robotId, string newCallsign);
     void SetAssignedPlayer(string robotId, string playerName);
     void ClearAssignedPlayer(string robotId);
+    void SetFlip(string robotId, bool hflip, bool vflip);
 
     // Robot is gone (disconnected or timed out) -> remove from registry
     bool Remove(string robotId);

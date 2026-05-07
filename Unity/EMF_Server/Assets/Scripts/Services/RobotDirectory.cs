@@ -223,6 +223,15 @@ public class RobotDirectory : IRobotDirectory
         SaveToDisk();
     }
 
+    public void SetFlip(string robotId, bool hflip, bool vflip)
+    {
+        if (!_byId.TryGetValue(robotId, out var r)) return;
+        if (r.HFlip == hflip && r.VFlip == vflip) return;
+        r.HFlip = hflip;
+        r.VFlip = vflip;
+        OnRobotUpdated?.Invoke(r);
+    }
+
     public void ClearAssignedPlayer(string robotId)
     {
         if (!_byId.TryGetValue(robotId, out var r)) return;

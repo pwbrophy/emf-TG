@@ -268,7 +268,12 @@ public class RobotWebSocketServer : MonoBehaviour
 
             _sessionByRobot[id] = sid;
 
-            _dir?.Upsert(id, id, ip: "");
+            string helloIp = ExtractString(json, "ip") ?? "";
+            _dir?.Upsert(id, id, ip: helloIp);
+
+            bool hflip = ExtractInt(json, "hflip") != 0;
+            bool vflip = ExtractInt(json, "vflip") != 0;
+            _dir?.SetFlip(id, hflip, vflip);
 
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
             return;
@@ -483,6 +488,18 @@ public class RobotWebSocketServer : MonoBehaviour
     public void RestoreStreams(HashSet<string> toRestore)
     {
         foreach (var id in toRestore) SendStreamOn(id);
+    }
+
+    public bool SendVideoFlip(string robotId, bool hflip, bool vflip)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = "{\"cmd\":\"set_video_flip\",\"h\":" + (hflip ? 1 : 0) +
+                      ",\"v\":" + (vflip ? 1 : 0) + "}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok
+            ? $"[WS->Robot] set_video_flip h={hflip} v={vflip} -> {robotId}"
+            : $"[WS->Robot] FAILED set_video_flip -> {robotId}");
+        return ok;
     }
 
     public bool SendMotorsOn(string robotId)

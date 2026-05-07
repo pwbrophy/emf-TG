@@ -25,6 +25,8 @@ public:
       : _started(false)
       , _frameSize(FRAMESIZE_HVGA) // 480×320
       , _jpegQuality(10)          // 0=best quality, 63=smallest file; 10 is a good balance
+      , _vflip(1)
+      , _hmirror(1)
     {
         memset(&_cfg, 0, sizeof(_cfg));
     }
@@ -86,9 +88,8 @@ public:
             s->set_quality(s, _jpegQuality);
             s->set_brightness(s, 0);
             s->set_saturation(s, 0);
-            // Adjust these two if the image appears upside-down or mirrored
-            s->set_vflip(s, 1);
-            s->set_hmirror(s, 1);
+            s->set_vflip(s, _vflip);
+            s->set_hmirror(s, _hmirror);
         }
 
         _started = true;
@@ -107,9 +108,27 @@ public:
 
     bool isStarted() const { return _started; }
 
+    // Apply flip/mirror at runtime. Safe to call before or after start().
+    void applyFlip(bool vflip, bool hmirror)
+    {
+        _vflip   = vflip   ? 1 : 0;
+        _hmirror = hmirror ? 1 : 0;
+        if (_started) {
+            if (sensor_t* s = esp_camera_sensor_get()) {
+                s->set_vflip(s,   _vflip);
+                s->set_hmirror(s, _hmirror);
+            }
+        }
+    }
+
+    int getVFlip()   const { return _vflip; }
+    int getHMirror() const { return _hmirror; }
+
 private:
     camera_config_t _cfg;
     bool            _started;
     framesize_t     _frameSize;
     int             _jpegQuality;
+    int             _vflip;
+    int             _hmirror;
 };
