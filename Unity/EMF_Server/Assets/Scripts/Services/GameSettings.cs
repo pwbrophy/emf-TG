@@ -50,25 +50,25 @@ public class GameSettings : MonoBehaviour
     public int SlotFutureMs = 50;
 
     [Tooltip("Extra delay (ms) added to the listener start time relative to the fire command. Currently 0. Could offset the listen window if the shooter fires early.")]
-    public int ListenDelayMs = 0;
+    public int ListenDelayMs = 50;
 
     [Tooltip("Duration of the first IR burst within each repetition. Longer = more chance of detection; too long wastes time with diminishing returns.")]
-    public int B1DurMs = 25;
+    public int B1DurMs = 90;
 
     [Tooltip("Silent gap between Burst 1 and Burst 2 within each rep. The two-burst design lets the receiver disambiguate which reps triggered.")]
-    public int Gap12Ms = 20;
+    public int Gap12Ms = 15;
 
     [Tooltip("Duration of the second IR burst within each repetition. Should match B1DurMs unless intentionally asymmetric.")]
-    public int B2DurMs = 25;
+    public int B2DurMs = 90;
 
     [Tooltip("Silent gap between consecutive repetitions. Shortening packs more reps into the same window; lengthening helps slow receivers reset.")]
     public int RepGapMs = 20;
 
-    [Tooltip("Number of IR burst-pairs emitted per shot. More reps = higher hit reliability at cost of longer slot. Listen window must cover all reps: Reps x (B1+Gap+B2+RepGap) - RepGap ms.")]
-    public int Reps = 7;
+    [Tooltip("Number of IR burst-pairs emitted per shot. 2 reps with 90ms burst windows gives reliable interrupt-driven detection. Increase if getting missed hits; decrease if you need a shorter shot cycle.")]
+    public int Reps = 2;
 
-    [Tooltip("Seconds Unity waits after the slot ends before collecting results. Accounts for Wi-Fi/processing latency on the robot. Reduce if robots respond quickly; increase if results arrive late.")]
-    public float ResultBufferSeconds = 0.5f;
+    [Tooltip("Fallback ceiling: Unity waits at most this long after the slot ends for any remaining results. With interrupt-driven early exit the wait usually ends well before this. 0.1s covers Wi-Fi round-trip.")]
+    public float ResultBufferSeconds = 0.1f;
 
     [Tooltip("Pause all robot camera streams for the duration of the IR detection window. Reduces Wi-Fi congestion so slot commands arrive on time.")]
     public bool DisableCameraWhileDetecting = true;

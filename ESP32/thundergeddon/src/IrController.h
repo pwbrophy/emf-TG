@@ -18,6 +18,12 @@
 #include <Arduino.h>
 #include "MotorController_PCA9555.h"
 
+// Declared in main.cpp; written by PCA9555 INT ISR (GPIO14 FALLING).
+// IrController::updateListen() consumes this flag to gate Port 0 reads.
+// The ISR itself (pca9555IntISR) and attachInterrupt() call live in main.cpp
+// so the linker can place the literal pool adjacent to the IRAM function body.
+extern volatile bool g_pca9555IntFired;
+
 // ---- IR LED pins (turret board) ----
 static constexpr int     IR_TX1_PIN    = 39;
 static constexpr int     IR_TX2_PIN    = 40;
@@ -54,7 +60,12 @@ public:
         _pca = &pca;
         pinMode(IR_TX1_PIN, OUTPUT); digitalWrite(IR_TX1_PIN, LOW);
         pinMode(IR_TX2_PIN, OUTPUT); digitalWrite(IR_TX2_PIN, LOW);
-        Serial.println("[IR] ready (TX GPIO39+40, RX PCA9555 port0)");
+
+        // PCA9555 INT (GPIO14): attachInterrupt is called from main.cpp setup()
+        // after begin() returns, keeping the ISR and its literal pool in the same TU.
+        _pca->readPort0(); // flush any pre-existing INT assertion before first slot
+
+        Serial.println("[IR] ready (TX GPIO39+40, RX PCA9555 port0, INT GPIO14)");
     }
 
     // =========================================================
@@ -174,8 +185,8 @@ public:
                 _fRepsDone = 0;
                 _fRepStart = _fireStart;
                 _firePhase = FirePhase::Burst1;
-                _ledOn();
-                Serial.printf("[IR] fire slot %d rep0 burst1 ON\n", _fireSlotId);
+                _led1On(); // left barrel for burst 1
+                Serial.printf("[IR] fire slot %d rep0 burst1 ON (LED1)\n", _fireSlotId);
             }
             break;
 
@@ -188,7 +199,7 @@ public:
 
         case FirePhase::Gap12:
             if ((int32_t)(now - (_fRepStart + (uint32_t)(_fb1Dur + _fgap12))) >= 0) {
-                _ledOn();
+                _led2On(); // right barrel for burst 2
                 _firePhase = FirePhase::Burst2;
             }
             break;
@@ -203,8 +214,8 @@ public:
                     uint32_t perRep = (uint32_t)(_fb1Dur + _fgap12 + _fb2Dur + _frepGap);
                     _fRepStart += perRep;
                     _firePhase  = FirePhase::Burst1;
-                    _ledOn();
-                    Serial.printf("[IR] fire slot %d rep%d burst1 ON\n",
+                    _led1On(); // left barrel for burst 1
+                    Serial.printf("[IR] fire slot %d rep%d burst1 ON (LED1)\n",
                                   _fireSlotId, _fRepsDone);
                 }
             }
@@ -234,6 +245,8 @@ public:
         _lRepsDone    = 0;
         _lb1Mask      = 0;
         _lb2Mask      = 0;
+        _pca->readPort0();         // flush any pending INT and update PCA9555 last-read baseline
+        g_pca9555IntFired = false; // discard ISR flag set by that flush or any prior noise
         _listenPhase  = ListenPhase::WaitingForStart;
         _slotDone     = false;
         Serial.printf("[IR] listen slot %d scheduled localStart=%u\n", slotId, _listenStart);
@@ -258,27 +271,42 @@ public:
 
         case ListenPhase::Burst1Window:
             {
-                uint8_t port0 = _pca->readPort0();
-                _lb1Mask |= (~port0 & 0xFF);
+                // Read Port 0 only when PCA9555 INT signals a change.
+                // Clear flag BEFORE read: if another edge arrives between the clear
+                // and the read, PCA9555 re-asserts INT, so no detection is lost.
+                // No early exit here — wait for the full burst window so every
+                // sensor that fires (not just the first one) is captured in the mask.
+                if (g_pca9555IntFired) {
+                    g_pca9555IntFired = false;
+                    uint8_t port0 = _pca->readPort0(); // also clears PCA9555 INT line
+                    _lb1Mask |= (~port0 & 0xFF);
+                }
                 if ((int32_t)(now - (_lRepStart + (uint32_t)_lb1Dur)) >= 0)
                     _listenPhase = ListenPhase::Gap12;
             }
             break;
 
         case ListenPhase::Gap12:
+            // Do not consume g_pca9555IntFired here — a late TSOP de-assert fires
+            // INT during the gap; leaving the flag set means Burst2Window catches it.
             if ((int32_t)(now - (_lRepStart + (uint32_t)(_lb1Dur + _lgap12))) >= 0)
                 _listenPhase = ListenPhase::Burst2Window;
             break;
 
         case ListenPhase::Burst2Window:
             {
-                uint8_t port0 = _pca->readPort0();
-                _lb2Mask |= (~port0 & 0xFF);
+                if (g_pca9555IntFired) {
+                    g_pca9555IntFired = false;
+                    uint8_t port0 = _pca->readPort0();
+                    _lb2Mask |= (~port0 & 0xFF);
+                }
                 if ((int32_t)(now - (_lRepStart + (uint32_t)(_lb1Dur + _lgap12 + _lb2Dur))) >= 0) {
                     _lRepsDone++;
                     if (_lRepsDone >= _lReps) {
                         _listenPhase = ListenPhase::Idle;
                         _slotDone    = true;
+                        // Flush INT so GPIO14 returns HIGH before the next slot.
+                        _pca->readPort0();
                         Serial.printf("[IR] listen slot %d done b1=0x%02X b2=0x%02X\n",
                                       _listenSlotId, _lb1Mask, _lb2Mask);
                     } else {
@@ -352,8 +380,9 @@ private:
     uint8_t     _lb2Mask      = 0;
 
     // ---- Helpers ----
-    void _ledOn()  { ledcWrite(IR_LEDC_CH1, 128); ledcWrite(IR_LEDC_CH2, 128); }
-    void _ledOff() { ledcWrite(IR_LEDC_CH1, 0);   ledcWrite(IR_LEDC_CH2, 0);   }
+    void _led1On()  { ledcWrite(IR_LEDC_CH1, 128); ledcWrite(IR_LEDC_CH2, 0);   } // burst 1: left barrel only
+    void _led2On()  { ledcWrite(IR_LEDC_CH1, 0);   ledcWrite(IR_LEDC_CH2, 128); } // burst 2: right barrel only
+    void _ledOff()  { ledcWrite(IR_LEDC_CH1, 0);   ledcWrite(IR_LEDC_CH2, 0);   }
 
     void _forceLedsOff()
     {

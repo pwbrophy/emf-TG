@@ -195,8 +195,10 @@ public class IrSlotScheduler : MonoBehaviour
         // ── Wait for slot end + result buffer ─────────────────────────────
         float waitUntil = Time.time + (delayMs + slotDurMs) / 1000f + resultBufferSeconds;
         float waitSecs  = waitUntil - Time.time;
-        Debug.Log($"[IrSlot] Slot {slotId} — waiting {waitSecs * 1000f:F0}ms for results...");
-        while (Time.time < waitUntil) yield return null;
+        Debug.Log($"[IrSlot] Slot {slotId} — waiting up to {waitSecs * 1000f:F0}ms for results...");
+        while (Time.time < waitUntil && _slotResults.Count < enemies.Count) yield return null;
+        Debug.Log($"[IrSlot] Slot {slotId} — wait ended: {_slotResults.Count}/{enemies.Count} results, " +
+                  $"{(waitUntil - Time.time) * 1000f:F0}ms remaining in window");
 
         server.OnIrSlotResult -= OnResult;
 
@@ -217,9 +219,10 @@ public class IrSlotScheduler : MonoBehaviour
                 continue;
             }
 
-            // OR across both burst windows: a hit in either window counts.
-            // AND was too strict — WiFi jitter between robots shifts one window off-target.
-            byte detMask = (byte)(masks.b1 | masks.b2);
+            // AND across both burst windows: hit requires detection of BOTH IR LEDs
+            // (LED1 fires in burst 1, LED2 fires in burst 2). Filters ambient IR and
+            // single-window reflections — only a direct beam triggers both windows.
+            byte detMask = (byte)(masks.b1 & masks.b2);
             Debug.Log($"[IrSlot]   {enemyName}: b1=0x{masks.b1:X2} b2=0x{masks.b2:X2} " +
                       $"det=0x{detMask:X2} ({MaskToDirs(detMask)}) → {(detMask != 0 ? "HIT" : "miss")}");
 

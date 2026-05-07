@@ -82,6 +82,9 @@ static bool     g_wsOpen  = false;
 // Offset between Unity clock (ms) and local millis(). Set by time_sync command.
 // To convert a Unity timestamp to local millis: localMs = unityMs - g_unityTimeOffset
 static int32_t  g_unityTimeOffset = 0;
+// Written by PCA9555 INT ISR (GPIO14 FALLING); consumed by IrController::updateListen().
+// volatile so the compiler never caches it across loop iterations.
+volatile bool   g_pca9555IntFired = false;
 // Edge-detect for fire slot completion (to re-enable motors after slot ends)
 static bool     g_fireSlotActive  = false;
 
@@ -852,6 +855,14 @@ void setup()
 
     // IrController stores a reference to motors for shared I2C access
     ir.begin(motors);
+
+    // PCA9555 INT (GPIO14): attach here (same TU as g_pca9555IntFired) so the
+    // linker places the IRAM literal pool adjacent to the ISR body.
+    // open-drain output with external pull-up; fires FALLING when any Port 0 input changes.
+    pinMode(14, INPUT);
+    attachInterrupt(digitalPinToInterrupt(14),
+        []() IRAM_ATTR { g_pca9555IntFired = true; },
+        FALLING);
 
     // I2C bus scan — helps diagnose RFID address
     Serial.println("[I2C] Scanning bus...");
