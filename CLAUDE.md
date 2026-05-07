@@ -46,6 +46,8 @@ The robot must be powered on and connected to Wi-Fi for OTA to work. The `platfo
 
 A successful upload ends with `Result: OK` / `Success`. If the hostname doesn't resolve, substitute the robot's current IP directly, e.g. `pio run -e thundergeddon_ota --target upload --upload-port 192.168.x.x`.
 
+**Robot IPs** are stored in the Claude memory file `C:\Users\Pete\.claude\projects\F--Data-Thundergeddon-EMF-Project\memory\project_robot_ip.md`. Current static IPs: robot 1 = `192.168.86.101`, robot 2 = `192.168.86.102`. When flashing multiple robots, build once then upload sequentially — parallel uploads conflict on the shared `firmware.bin` output file.
+
 ---
 
 ## Project Overview
