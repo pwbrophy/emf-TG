@@ -18,8 +18,8 @@ public sealed class GameService
     // allianceIndex, reason (fired when a win condition is met)
     public event Action<int, string> OnGameWon;
 
-    // targetId = robot that was hit, direction = "N"|"NE"|"E"|"SE"|"S"|"SW"|"W"|"NW"
-    public event Action<string, string> OnRobotHitDirection;
+    // targetId, rawDetMask (8-bit sensor bits), cardinalDir ("N"|"E"|"S"|"W")
+    public event Action<string, byte, string> OnRobotHitDirection;
 
     public bool CanStart() => true;
 
@@ -64,7 +64,8 @@ public sealed class GameService
     /// Rear sector (S, SE, SW) applies RearMultiplier.
     /// Returns the actual damage dealt (0 if robot already dead or not in game).
     /// </summary>
-    public int ApplyDamage(string shooterId, string targetId, string direction,
+    public int ApplyDamage(string shooterId, string targetId,
+                           byte rawMask, string cardinalDir,
                            PlayersService players, IRobotDirectory dir)
     {
         if (State == null) return 0;
@@ -75,7 +76,7 @@ public sealed class GameService
         int baseDamage    = settings != null ? settings.DamagePerHit    : 25;
         float rearMult    = settings != null ? settings.RearMultiplier   : 3f;
 
-        float multiplier  = IsRearHit(direction) ? rearMult : 1f;
+        float multiplier  = IsRearHit(cardinalDir) ? rearMult : 1f;
         int damage        = Mathf.RoundToInt(baseDamage * multiplier);
 
         int newHp = Mathf.Max(0, State.RobotHp[targetId] - damage);
@@ -91,7 +92,7 @@ public sealed class GameService
         }
 
         OnHpChanged?.Invoke(targetId, newHp);
-        OnRobotHitDirection?.Invoke(targetId, direction);
+        OnRobotHitDirection?.Invoke(targetId, rawMask, cardinalDir);
 
         if (newHp <= 0)
         {
@@ -207,10 +208,7 @@ public sealed class GameService
 
     // ── private helpers ────────────────────────────────────────────────
 
-    private static bool IsRearHit(string dir)
-    {
-        return dir == "S" || dir == "SE" || dir == "SW";
-    }
+    private static bool IsRearHit(string dir) => dir == "S";
 
     private void CheckWinCondition(PlayersService players, IRobotDirectory dir)
     {

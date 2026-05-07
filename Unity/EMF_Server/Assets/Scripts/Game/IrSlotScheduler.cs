@@ -229,9 +229,10 @@ public class IrSlotScheduler : MonoBehaviour
             if (detMask == 0)
                 continue;
 
-            string hitDir = ResolveBestDirection(detMask);
-            bool isRear   = hitDir == "S" || hitDir == "SE" || hitDir == "SW";
-            Debug.Log($"[IrSlot] *** HIT: {enemyName} dir={hitDir} {(isRear ? "(REAR — 3× damage!)" : "")} ***");
+            string cardinalDir = ResolveAveragedCardinal(detMask);
+            bool isRear        = cardinalDir == "S";
+            Debug.Log($"[IrSlot] *** HIT: {enemyName} sensors={MaskToDirs(detMask)} " +
+                      $"cardinal={cardinalDir} {(isRear ? "(REAR — 3× damage!)" : "")} ***");
             hitCount++;
 
             // Flash red + play damage buzzer on the hit robot
@@ -240,7 +241,7 @@ public class IrSlotScheduler : MonoBehaviour
             // Apply damage (also fires OnHpChanged → PlayerWebSocketServer sends state_update to phone)
             int damage = 0;
             if (game != null)
-                damage = game.ApplyDamage(shooterId, enemyId, hitDir, players, dir);
+                damage = game.ApplyDamage(shooterId, enemyId, detMask, cardinalDir, players, dir);
 
             int newHp = game?.State?.RobotHp.GetValueOrDefault(enemyId, 0) ?? 0;
             Debug.Log($"[IrSlot]   damage={damage} newHp={newHp}/{maxHp}");
@@ -265,17 +266,40 @@ public class IrSlotScheduler : MonoBehaviour
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    // Direction priority: S(4) > SW(5) > SE(3) > all others (ascending bit order).
-    private static readonly string[] DirNames = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+    private static readonly string[] DirNames  = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+    private static readonly float[]  DirAngles = { 90f, 45f, 0f, -45f, -90f, -135f, 180f, 135f };
 
-    private static string ResolveBestDirection(byte mask)
+    // Circular mean of all hit sensors snapped to the nearest cardinal (N/E/S/W).
+    // Tie-break priority: N > (E,W) > S — so NE→N, NW→N, SE→E, SW→W.
+    private static string ResolveAveragedCardinal(byte mask)
     {
-        if ((mask & (1 << 4)) != 0) return "S";
-        if ((mask & (1 << 5)) != 0) return "SW";
-        if ((mask & (1 << 3)) != 0) return "SE";
+        if (mask == 0) return "N";
+
+        float sinSum = 0f, cosSum = 0f;
         for (int i = 0; i < 8; i++)
-            if ((mask & (1 << i)) != 0) return DirNames[i];
-        return "";
+        {
+            if ((mask & (1 << i)) == 0) continue;
+            float rad = DirAngles[i] * Mathf.Deg2Rad;
+            sinSum += Mathf.Sin(rad);
+            cosSum += Mathf.Cos(rad);
+        }
+
+        // Zero vector (e.g. N+S or E+W cancel) → default North
+        if (Mathf.Approximately(sinSum, 0f) && Mathf.Approximately(cosSum, 0f))
+            return "N";
+
+        float meanDeg = Mathf.Atan2(sinSum, cosSum) * Mathf.Rad2Deg;
+        if (meanDeg < 0f) meanDeg += 360f;  // normalise to [0, 360)
+
+        // Boundaries chosen so ties favour front:
+        //   [45, 135]  → N  (NE=45° and NW=135° both → N)
+        //   (135, 225] → W  (SW=225° → W, not S)
+        //   (225, 315) → S
+        //   [0,45) ∪ [315,360) → E  (SE=315° → E)
+        if (meanDeg >= 45f && meanDeg <= 135f)  return "N";
+        if (meanDeg > 135f && meanDeg <= 225f)  return "W";
+        if (meanDeg > 225f && meanDeg < 315f)   return "S";
+        return "E";
     }
 
     private static string MaskToDirs(byte mask)
