@@ -69,6 +69,55 @@ public:
     }
 
     // =========================================================
+    // Handshake emit/listen API (ACK-driven, no clock sync)
+    // =========================================================
+
+    // Fire left barrel (GPIO39) only. Call after motors.enable(false).
+    // ACK is sent by the caller (main.cpp) after this returns.
+    void beginEmitLeft()
+    {
+        _setupLedc();
+        _led1On();
+        _emitting = true;
+    }
+
+    // Switch to right barrel (GPIO40). LEDC already set up by beginEmitLeft.
+    void beginEmitRight()
+    {
+        _led2On();
+    }
+
+    // Start a timed listen window. Call updateWindow() each loop tick.
+    // When isWindowDone() is true, call takeWindowMask() for the 8-bit hit mask.
+    void beginListenWindow(uint32_t durationMs)
+    {
+        _pca->readPort0();        // flush any pre-existing INT
+        g_pca9555IntFired = false;
+        _winMask = 0;
+        _winEnd  = millis() + durationMs;
+        _inWin   = true;
+        _winDone = false;
+    }
+
+    void updateWindow(uint32_t now)
+    {
+        if (!_inWin) return;
+        if (g_pca9555IntFired) {
+            g_pca9555IntFired = false;
+            _winMask |= (~_pca->readPort0() & 0xFF);
+        }
+        if ((int32_t)(now - _winEnd) >= 0) {
+            _inWin   = false;
+            _winDone = true;
+            _pca->readPort0(); // flush INT after window
+            Serial.printf("[IR] handshake window done mask=0x%02X\n", _winMask);
+        }
+    }
+
+    bool    isWindowDone()  const { return _winDone; }
+    uint8_t takeWindowMask()      { _winDone = false; return _winMask; }
+
+    // =========================================================
     // Legacy emit API — kept so onWsClose() can call stopEmit()
     // =========================================================
 
@@ -336,6 +385,12 @@ public:
 private:
     MotorController_PCA9555* _pca = nullptr;
 
+    // ---- Handshake window state ----
+    bool     _inWin   = false;
+    bool     _winDone = false;
+    uint32_t _winEnd  = 0;
+    uint8_t  _winMask = 0;
+
     // ---- Legacy emit state ----
     bool _emitting = false;
 
@@ -383,6 +438,16 @@ private:
     void _led1On()  { ledcWrite(IR_LEDC_CH1, 128); ledcWrite(IR_LEDC_CH2, 0);   } // burst 1: left barrel only
     void _led2On()  { ledcWrite(IR_LEDC_CH1, 0);   ledcWrite(IR_LEDC_CH2, 128); } // burst 2: right barrel only
     void _ledOff()  { ledcWrite(IR_LEDC_CH1, 0);   ledcWrite(IR_LEDC_CH2, 0);   }
+
+    void _setupLedc()
+    {
+        ledcSetup(IR_LEDC_CH1, IR_FREQ_HZ, IR_LEDC_BITS);
+        ledcSetup(IR_LEDC_CH2, IR_FREQ_HZ, IR_LEDC_BITS);
+        ledcAttachPin(IR_TX1_PIN, IR_LEDC_CH1);
+        ledcAttachPin(IR_TX2_PIN, IR_LEDC_CH2);
+        ledcWrite(IR_LEDC_CH1, 0);
+        ledcWrite(IR_LEDC_CH2, 0);
+    }
 
     void _forceLedsOff()
     {

@@ -746,6 +746,30 @@ static void handleWsText(const String& s)
         return;
     }
 
+    // ---- Handshake IR emit (ACK-driven, no clock sync) ----
+
+    if (strcmp(cmd, "ir_emit_left") == 0) {
+        motors.enable(false);
+        ir.beginEmitLeft();
+        ws.send("{\"cmd\":\"ir_emit_ack\"}");
+        Serial.println("[IR] emit_left → ir_emit_ack sent");
+        return;
+    }
+
+    if (strcmp(cmd, "ir_emit_right") == 0) {
+        ir.beginEmitRight();
+        ws.send("{\"cmd\":\"ir_emit_ack\"}");
+        Serial.println("[IR] emit_right → ir_emit_ack sent");
+        return;
+    }
+
+    if (strcmp(cmd, "ir_listen_window") == 0) {
+        int ms = doc["ms"] | 100;
+        ir.beginListenWindow((uint32_t)(ms > 0 ? ms : 100));
+        Serial.printf("[IR] listen_window %d ms\n", ms);
+        return;
+    }
+
     // ---- Ping (connectivity test) ----
 
     if (strcmp(cmd, "ping") == 0) {
@@ -1028,6 +1052,18 @@ void loop()
             Serial.print("[IR] slot result: "); Serial.println(resp);
         }
         motors.enable(true);
+    }
+
+    // ---- IR: handshake listen window (ir_listen_window command) ----
+    ir.updateWindow(now);
+    if (ir.isWindowDone()) {
+        uint8_t mask = ir.takeWindowMask();
+        if (g_wsOpen) {
+            String resp = String("{\"cmd\":\"ir_window_result\",\"mask\":") +
+                          String(mask) + "}";
+            ws.send(resp);
+            Serial.printf("[IR] window result mask=0x%02X\n", mask);
+        }
     }
 
     // ---- Wi-Fi health check ----
