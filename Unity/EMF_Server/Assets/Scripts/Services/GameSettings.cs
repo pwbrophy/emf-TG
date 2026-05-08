@@ -76,6 +76,19 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Send motors_off to all robots involved in a shot before the detection window, then motors_on after. Stops motor electrical noise from triggering IR receivers.")]
     public bool DisableMotorsWhileDetecting = true;
 
+    [Header("Handshake IR Mode")]
+    [Tooltip("Use ACK-driven handshake protocol instead of time-sync slots. Eliminates missed shots caused by ping spikes.")]
+    public bool UseHandshakeIr = false;
+
+    [Tooltip("Duration (ms) of each listen window in handshake mode. The enemy robot listens for this long after receiving ir_listen_window.")]
+    public int HandshakeWindowMs = 100;
+
+    [Tooltip("Timeout (ms) waiting for ir_emit_ack from the shooter. If exceeded the shot is aborted.")]
+    public int HandshakeAckTimeoutMs = 300;
+
+    [Tooltip("Timeout (ms) waiting for ir_window_result from each enemy. Enemies that don't respond are treated as misses.")]
+    public int HandshakeWindowTimeoutMs = 300;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────────
 
     private void Awake()
@@ -112,6 +125,10 @@ public class GameSettings : MonoBehaviour
                 resultBufferSeconds         = ResultBufferSeconds,
                 disableCameraWhileDetecting = DisableCameraWhileDetecting,
                 disableMotorsWhileDetecting = DisableMotorsWhileDetecting,
+                useHandshakeIr              = UseHandshakeIr,
+                handshakeWindowMs           = HandshakeWindowMs,
+                handshakeAckTimeoutMs       = HandshakeAckTimeoutMs,
+                handshakeWindowTimeoutMs    = HandshakeWindowTimeoutMs,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -148,6 +165,10 @@ public class GameSettings : MonoBehaviour
             if (data.resultBufferSeconds  > 0) ResultBufferSeconds  = data.resultBufferSeconds;
             DisableCameraWhileDetecting = data.disableCameraWhileDetecting;
             DisableMotorsWhileDetecting = data.disableMotorsWhileDetecting;
+            UseHandshakeIr              = data.useHandshakeIr;
+            if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
+            if (data.handshakeAckTimeoutMs    > 0) HandshakeAckTimeoutMs    = data.handshakeAckTimeoutMs;
+            if (data.handshakeWindowTimeoutMs > 0) HandshakeWindowTimeoutMs = data.handshakeWindowTimeoutMs;
 
             Debug.Log("[GameSettings] Loaded from " + SavePath);
         }
@@ -178,5 +199,9 @@ public class GameSettings : MonoBehaviour
         public float resultBufferSeconds;
         public bool  disableCameraWhileDetecting;
         public bool  disableMotorsWhileDetecting;
+        public bool  useHandshakeIr;
+        public int   handshakeWindowMs;
+        public int   handshakeAckTimeoutMs;
+        public int   handshakeWindowTimeoutMs;
     }
 }

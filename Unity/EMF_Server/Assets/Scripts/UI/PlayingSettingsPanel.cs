@@ -29,6 +29,7 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField resultBufField;
     [SerializeField] private Toggle         disableCameraToggle;
     [SerializeField] private Toggle         disableMotorsToggle;
+    [SerializeField] private Toggle         useHandshakeIrToggle;
 
     [Header("Computed display")]
     [SerializeField] private TMP_Text totalTimeLabel;
@@ -69,8 +70,9 @@ public class PlayingSettingsPanel : MonoBehaviour
         Set(repGapField,     _settings.RepGapMs.ToString());
         Set(repsField,       _settings.Reps.ToString());
         Set(resultBufField,  _settings.ResultBufferSeconds.ToString("F2"));
-        SetToggle(disableCameraToggle, _settings.DisableCameraWhileDetecting);
-        SetToggle(disableMotorsToggle, _settings.DisableMotorsWhileDetecting);
+        SetToggle(disableCameraToggle,  _settings.DisableCameraWhileDetecting);
+        SetToggle(disableMotorsToggle,  _settings.DisableMotorsWhileDetecting);
+        SetToggle(useHandshakeIrToggle, _settings.UseHandshakeIr);
 
         UpdateTotal();
     }
@@ -90,10 +92,18 @@ public class PlayingSettingsPanel : MonoBehaviour
     private void UpdateTotal()
     {
         if (totalTimeLabel == null || _settings == null) return;
-        int   perRep   = _settings.B1DurMs + _settings.Gap12Ms + _settings.B2DurMs + _settings.RepGapMs;
-        int   slotMs   = _settings.Reps * perRep - _settings.RepGapMs;
-        float totalSec = (_settings.SlotFutureMs + slotMs) / 1000f + _settings.ResultBufferSeconds;
-        totalTimeLabel.text = $"Total: {totalSec:F2}s";
+        if (_settings.UseHandshakeIr)
+        {
+            int estMs = _settings.HandshakeWindowMs * 2 + 200; // 2 windows + ~4 RTTs at 50ms each
+            totalTimeLabel.text = $"Total: ~{estMs}ms (handshake)";
+        }
+        else
+        {
+            int   perRep   = _settings.B1DurMs + _settings.Gap12Ms + _settings.B2DurMs + _settings.RepGapMs;
+            int   slotMs   = _settings.Reps * perRep - _settings.RepGapMs;
+            float totalSec = (_settings.SlotFutureMs + slotMs) / 1000f + _settings.ResultBufferSeconds;
+            totalTimeLabel.text = $"Total: {totalSec:F2}s (slot)";
+        }
     }
 
     // ── Listeners ────────────────────────────────────────────────────────────────
@@ -116,8 +126,9 @@ public class PlayingSettingsPanel : MonoBehaviour
         Reg(repGapField,      OnRepGapChanged);
         Reg(repsField,        OnRepsChanged);
         Reg(resultBufField,   OnResultBufChanged);
-        RegToggle(disableCameraToggle, OnDisableCameraChanged);
-        RegToggle(disableMotorsToggle, OnDisableMotorsChanged);
+        RegToggle(disableCameraToggle,  OnDisableCameraChanged);
+        RegToggle(disableMotorsToggle,  OnDisableMotorsChanged);
+        RegToggle(useHandshakeIrToggle, OnUseHandshakeIrChanged);
     }
 
     private void RemoveListeners()
@@ -138,8 +149,9 @@ public class PlayingSettingsPanel : MonoBehaviour
         Unreg(repGapField,      OnRepGapChanged);
         Unreg(repsField,        OnRepsChanged);
         Unreg(resultBufField,   OnResultBufChanged);
-        UnregToggle(disableCameraToggle, OnDisableCameraChanged);
-        UnregToggle(disableMotorsToggle, OnDisableMotorsChanged);
+        UnregToggle(disableCameraToggle,  OnDisableCameraChanged);
+        UnregToggle(disableMotorsToggle,  OnDisableMotorsChanged);
+        UnregToggle(useHandshakeIrToggle, OnUseHandshakeIrChanged);
     }
 
     private static void Reg(TMP_InputField f, UnityEngine.Events.UnityAction<string> cb)
@@ -272,6 +284,14 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (_settings == null) return;
         _settings.DisableMotorsWhileDetecting = v;
         Save();
+    }
+
+    private void OnUseHandshakeIrChanged(bool v)
+    {
+        if (_settings == null) return;
+        _settings.UseHandshakeIr = v;
+        Save();
+        UpdateTotal();
     }
 
     private void Save()

@@ -61,6 +61,10 @@ public class RobotWebSocketServer : MonoBehaviour
     // Args: robotId, slotId, b1Mask, b2Mask
     public event Action<string, int, byte, byte> OnIrSlotResult;
 
+    // Handshake IR protocol events.
+    public event Action<string>       OnIrEmitAck;      // robot started emitting (ir_emit_left/right ACK)
+    public event Action<string, byte> OnIrWindowResult; // robot finished a listen window; byte = hit mask
+
     // Fired when a robot scans an RFID tag.
     // Args: robotId, uid
     public event Action<string, string> OnRfidTag;
@@ -377,6 +381,27 @@ public class RobotWebSocketServer : MonoBehaviour
             return;
         }
 
+        if (cmd == "ir_emit_ack")
+        {
+            if (!_bySession.TryGetValue(sid, out var info)) return;
+            string robotId = info.RobotId;
+            if (string.IsNullOrEmpty(robotId)) return;
+            Debug.Log($"[WS<-Robot] ir_emit_ack -> {robotId}");
+            OnIrEmitAck?.Invoke(robotId);
+            return;
+        }
+
+        if (cmd == "ir_window_result")
+        {
+            if (!_bySession.TryGetValue(sid, out var info)) return;
+            string robotId = info.RobotId;
+            if (string.IsNullOrEmpty(robotId)) return;
+            byte mask = (byte)ExtractInt(json, "mask");
+            Debug.Log($"[WS<-Robot] ir_window_result mask=0x{mask:X2} -> {robotId}");
+            OnIrWindowResult?.Invoke(robotId, mask);
+            return;
+        }
+
         if (cmd == "rfid")
         {
             if (!_bySession.TryGetValue(sid, out var info)) return;
@@ -655,6 +680,33 @@ public class RobotWebSocketServer : MonoBehaviour
         bool ok = SendJsonToRobot(robotId, json);
         Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} slot_start={slotStartUt} -> {robotId}"
                      : $"[WS->Robot] FAILED ir_listen_slot -> {robotId}");
+        return ok;
+    }
+
+    // ===== Handshake IR commands =====
+
+    public bool SendIrEmitLeft(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"ir_emit_left\"}");
+        Debug.Log(ok ? $"[WS->Robot] ir_emit_left -> {robotId}" : $"[WS->Robot] FAILED ir_emit_left -> {robotId}");
+        return ok;
+    }
+
+    public bool SendIrEmitRight(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"ir_emit_right\"}");
+        Debug.Log(ok ? $"[WS->Robot] ir_emit_right -> {robotId}" : $"[WS->Robot] FAILED ir_emit_right -> {robotId}");
+        return ok;
+    }
+
+    public bool SendIrListenWindow(string robotId, int ms)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"ir_listen_window\",\"ms\":{ms}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok ? $"[WS->Robot] ir_listen_window ms={ms} -> {robotId}" : $"[WS->Robot] FAILED ir_listen_window -> {robotId}");
         return ok;
     }
 
