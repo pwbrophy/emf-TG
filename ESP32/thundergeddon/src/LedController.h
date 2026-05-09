@@ -167,30 +167,19 @@ private:
         if (_effect == Effect::None) return;
 
         if (_effect == Effect::FireSeq) {
-            // Timing: 300 ms ease-in ramp | 100 ms gap (hold white) | 150 ms blast → 550 ms total
+            // Forward launch sweep: all white at t=0, extinguish front→back over 150 ms.
+            // Matches the buzzer static BANG duration for immediate tactile sync.
             uint32_t elapsed = now - _seqStart;
-            if (elapsed >= 550) {
+            if (elapsed >= 200) {
                 _effect = Effect::None;
                 _drawHpBar();
                 return;
             }
-            if (elapsed < 300) {
-                // Phase 1: quadratic ease-in ramp from dark to full white.
-                float t = (float)elapsed / 300.0f;
-                uint8_t bright = (uint8_t)(t * t * 255.0f);
-                for (int i = 0; i < LED_STRIP_COUNT; i++)
-                    _strip.setPixelColor(i, _strip.Color(bright, bright, bright));
-                _strip.show();
-            } else if (elapsed >= 400) {
-                // Phase 2 (after 100 ms gap): extinguish LEDs front-first (5→0), 25 ms each.
-                int ledsOff = (int)((elapsed - 400u) / 25u);
-                _strip.clear();
-                int lit = LED_STRIP_COUNT - ledsOff;
-                for (int i = 0; i < lit; i++)
-                    _strip.setPixelColor(i, _strip.Color(255, 255, 255));
-                _strip.show();
-            }
-            // Gap (300–400 ms): LEDs hold at full white from the last phase-1 write.
+            int ledsOff = (int)(elapsed * LED_STRIP_COUNT / 200);
+            _strip.clear();
+            for (int i = 0; i < LED_STRIP_COUNT - ledsOff; i++)
+                _strip.setPixelColor(i, _strip.Color(255, 255, 255));
+            _strip.show();
             return;
         }
 

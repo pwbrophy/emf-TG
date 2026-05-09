@@ -130,21 +130,18 @@ static void updateBuzzer(uint32_t now)
 }
 
 // ---- Buzzer fire effect ----
-// Phase 1 (0–300 ms):   quadratic ease-in sweep 300→3000 Hz, volume 0→128.
-// Phase 2 (300–400 ms): gap — buzzer silent, LEDs hold white.
-// Phase 3 (400–900 ms): static that fades out; centre frequency slides 8000→150 Hz
-//                        so the blast sounds like it's leaving the tank.
-static uint8_t  g_buzzerFirePhase     = 0; // 0=off, 1=ramp, 2=gap, 3=blast
-static uint32_t g_buzzerFireStart     = 0;
-static uint32_t g_buzzerFireNextNoise = 0;
-static uint32_t g_buzzerFireLastUp    = 0;
+// Phase 1 (0–200 ms):   staccato crackle — alternating 2–5 ms tone bursts and silence gaps at ~3.5 kHz.
+// Phase 2 (200–600 ms): smooth exponential pitch-down 3000→100 Hz, volume decays to silence.
+static uint8_t  g_buzzerFirePhase  = 0; // 0=off, 1=bang, 2=tail
+static uint32_t g_buzzerFireStart  = 0;
+static uint32_t g_buzzerFireLastUp = 0;
 
 static void startBuzzerFireEffect()
 {
     g_buzzerActive = false; // cancel any plain tone
-    ledcSetup(BUZZER_LEDC_CH, 300, 8);
+    ledcSetup(BUZZER_LEDC_CH, 3500, 8);
     ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
-    ledcWrite(BUZZER_LEDC_CH, 0);
+    ledcWrite(BUZZER_LEDC_CH, 128);
     g_buzzerFirePhase  = 1;
     g_buzzerFireStart  = millis();
     g_buzzerFireLastUp = millis();
@@ -156,65 +153,49 @@ static void updateBuzzerFireEffect(uint32_t now)
 
     uint32_t elapsed = now - g_buzzerFireStart;
 
-    // ---- Phase 1: ease-in sweep ----
+    // ---- Phase 1: pixelated static BANG (200 ms) ----
     if (g_buzzerFirePhase == 1) {
-        if (elapsed >= 300) {
-            ledcWrite(BUZZER_LEDC_CH, 0); // silence on transition
-            g_buzzerFirePhase = 2;
+        if (elapsed >= 200) {
+            g_buzzerFirePhase  = 2;
+            g_buzzerFireLastUp = now;
             return;
         }
-        if ((int32_t)(now - g_buzzerFireLastUp) >= 10) {
-            g_buzzerFireLastUp = now;
-            float t  = (float)elapsed / 300.0f;
-            float t2 = t * t; // quadratic ease-in
-            uint32_t freq = 300u + (uint32_t)(t2 * 2700.0f);
-            uint8_t  duty = (uint8_t)(t2 * 128.0f);
-            ledcSetup(BUZZER_LEDC_CH, freq, 8);
-            ledcWrite(BUZZER_LEDC_CH, duty);
+        if ((int32_t)(now - g_buzzerFireLastUp) >= 0) {
+            if (random(2) == 0) {
+                // tone burst — random pitch around 3.5 kHz, ±100 % spread
+                float centre = 3500.0f;
+                int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * centre);
+                int32_t raw  = (int32_t)centre + rnd;
+                if (raw < 40)    raw = 40;
+                if (raw > 20000) raw = 20000;
+                ledcSetup(BUZZER_LEDC_CH, (uint32_t)raw, 8);
+                ledcWrite(BUZZER_LEDC_CH, 128);
+            } else {
+                // silence gap — creates the staccato crackle texture
+                ledcWrite(BUZZER_LEDC_CH, 0);
+            }
+            g_buzzerFireLastUp = now + 2u + (uint32_t)(random(4)); // 2–5 ms per block
         }
         return;
     }
 
-    // ---- Phase 2: 100 ms gap (silent) ----
+    // ---- Phase 2: smooth exponential pitch-down (400 ms) ----
     if (g_buzzerFirePhase == 2) {
-        if (elapsed >= 400) {
-            g_buzzerFirePhase     = 3;
-            g_buzzerFireNextNoise = now;
-        }
-        return;
-    }
-
-    // ---- Phase 3: blocky static fading out with descending pitch (500 ms) ----
-    if (g_buzzerFirePhase == 3) {
-        uint32_t ph3 = elapsed - 400u;
-        if (ph3 >= 500u) {
+        uint32_t ph2 = elapsed - 200u;
+        if (ph2 >= 400u) {
             silenceBuzzer();
             g_buzzerFirePhase = 0;
             return;
         }
-        if ((int32_t)(now - g_buzzerFireNextNoise) >= 0) {
-            float t = (float)ph3 / 500.0f; // 0 → 1 over 500 ms
-
-            // Centre frequency slides 8000 → 150 Hz — blast pitching down as it leaves.
-            float centre = 8000.0f - t * 7850.0f;
-
-            // Wide random spread ±100 % of centre for aggressive jumps.
-            float spread = centre;
-            int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * spread);
-            int32_t raw  = (int32_t)centre + rnd;
-            if (raw < 40)    raw = 40;
-            if (raw > 20000) raw = 20000;
-            uint32_t freq = (uint32_t)raw;
-
-            // Linear fade-out from full to silent.
-            uint8_t duty = (uint8_t)((1.0f - t) * 128.0f);
-
-            ledcSetup(BUZZER_LEDC_CH, freq, 8);
-            ledcWrite(BUZZER_LEDC_CH, duty);
-            // Block length shrinks 20 ms → 1 ms as blast fades out.
-            uint32_t blockMs = 1u + (uint32_t)((1.0f - t) * 19.0f);
-            g_buzzerFireNextNoise = now + blockMs;
+        if ((int32_t)(now - g_buzzerFireLastUp) >= 10) {
+            g_buzzerFireLastUp = now;
+            float t    = (float)ph2 / 400.0f;          // 0 → 1
+            float freq = 3000.0f * expf(-3.4f * t);    // 3000 → ~100 Hz
+            float duty = 128.0f  * expf(-5.0f  * t);   // 128  → ~0
+            ledcSetup(BUZZER_LEDC_CH, (uint32_t)freq, 8);
+            ledcWrite(BUZZER_LEDC_CH, (uint8_t)duty);
         }
+        return;
     }
 }
 
