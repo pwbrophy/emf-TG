@@ -37,6 +37,7 @@ public class RobotListPanel : MonoBehaviour
         public Image           FillImg;
         public TextMeshProUGUI HpLabel;
         public TextMeshProUGUI PlayerLabel;
+        public TextMeshProUGUI PingLabel;
         public IrCompassWidget Compass;
         public Image           Highlight;
         public Image           CamIndicator;
@@ -46,6 +47,15 @@ public class RobotListPanel : MonoBehaviour
 
     // Camera streaming state — true by default (cameras on when game starts)
     private readonly Dictionary<string, bool> _cameraStreaming = new Dictionary<string, bool>();
+
+    // Auto-ping state
+    private RobotWebSocketServer _ws;
+    private readonly Dictionary<string, float> _pingSentAt    = new Dictionary<string, float>();
+    private readonly Dictionary<string, float> _pongReceivedAt = new Dictionary<string, float>();
+    private float _nextPingTime = 0f;
+    private const float PingInterval = 5f;   // seconds between pings per robot
+    private const float PingStagger  = 1f;   // stagger between robots
+    private const float PingTimeout  = 6f;   // show "---" if no pong within this window
 
     // ── Services ──────────────────────────────────────────────────────────────
     private GameService     _game;
@@ -61,6 +71,7 @@ public class RobotListPanel : MonoBehaviour
         _flow    = ServiceLocator.GameFlow;
         _dir     = ServiceLocator.RobotDirectory;
         _players = ServiceLocator.Players;
+        _ws      = ServiceLocator.RobotServer;
 
         if (_game != null)
         {
@@ -71,7 +82,10 @@ public class RobotListPanel : MonoBehaviour
         }
         if (_flow != null)
             _flow.OnPhaseChanged += HandlePhaseChanged;
+        if (_ws != null)
+            _ws.OnPong += HandlePong;
 
+        _nextPingTime = Time.time + PingInterval;
         StartCoroutine(RebuildNextFrame());
     }
 
@@ -92,6 +106,42 @@ public class RobotListPanel : MonoBehaviour
         }
         if (_flow != null)
             _flow.OnPhaseChanged -= HandlePhaseChanged;
+        if (_ws != null)
+            _ws.OnPong -= HandlePong;
+    }
+
+    // ── Auto-ping ─────────────────────────────────────────────────────────────
+
+    private void Update()
+    {
+        if (_ws == null || _rows.Count == 0) return;
+        if (Time.time < _nextPingTime) return;
+
+        _nextPingTime = Time.time + PingInterval;
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            var rid = _rows[i].RobotId;
+            float sendAt = Time.time + i * PingStagger;
+            // Schedule staggered sends — use a coroutine per robot
+            StartCoroutine(SendPingDelayed(rid, i * PingStagger));
+        }
+    }
+
+    private System.Collections.IEnumerator SendPingDelayed(string robotId, float delay)
+    {
+        if (delay > 0f) yield return new WaitForSeconds(delay);
+        _pingSentAt[robotId] = Time.time;
+        _ws?.SendPing(robotId);
+    }
+
+    private void HandlePong(string robotId)
+    {
+        if (!_pingSentAt.TryGetValue(robotId, out float sentAt)) return;
+        float rtt = (Time.time - sentAt) * 1000f;
+        _pongReceivedAt[robotId] = Time.time;
+        var row = FindRow(robotId);
+        if (row?.PingLabel != null)
+            row.PingLabel.text = $"{Mathf.RoundToInt(rtt)}ms";
     }
 
     // ── Rebuild ───────────────────────────────────────────────────────────────
@@ -266,6 +316,19 @@ public class RobotListPanel : MonoBehaviour
         var hpLE = hpGO.AddComponent<LayoutElement>();
         hpLE.preferredWidth = 36f;
 
+        // ── Ping label ────────────────────────────────────────────────────────
+        var pingGO = new GameObject("Ping");
+        pingGO.AddComponent<RectTransform>();
+        pingGO.transform.SetParent(row.transform, false);
+        var pingTmp = pingGO.AddComponent<TextMeshProUGUI>();
+        pingTmp.text      = "---";
+        pingTmp.font      = font;
+        pingTmp.fontSize  = 9f;
+        pingTmp.color     = C_DIM;
+        pingTmp.alignment = TextAlignmentOptions.MidlineRight;
+        var pingLE = pingGO.AddComponent<LayoutElement>();
+        pingLE.preferredWidth = 36f;
+
         // ── IR compass widget ─────────────────────────────────────────────────
         var compassGO = new GameObject("IrCompass");
         compassGO.AddComponent<RectTransform>();
@@ -284,6 +347,7 @@ public class RobotListPanel : MonoBehaviour
             FillImg      = fillImg,
             HpLabel      = hpTmp,
             PlayerLabel  = playerTmp,
+            PingLabel    = pingTmp,
             Compass      = widget,
             Highlight    = hlImg,
             CamIndicator = camDotImg,

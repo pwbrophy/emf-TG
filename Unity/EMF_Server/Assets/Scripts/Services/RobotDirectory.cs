@@ -232,6 +232,16 @@ public class RobotDirectory : IRobotDirectory
         OnRobotUpdated?.Invoke(r);
     }
 
+    public void SetDriveConfig(string robotId, bool invThrottle, bool invSteer, bool invTurret)
+    {
+        if (!_byId.TryGetValue(robotId, out var r)) return;
+        if (r.InvThrottle == invThrottle && r.InvSteer == invSteer && r.InvTurret == invTurret) return;
+        r.InvThrottle = invThrottle;
+        r.InvSteer    = invSteer;
+        r.InvTurret   = invTurret;
+        OnRobotUpdated?.Invoke(r);
+    }
+
     public void ClearAssignedPlayer(string robotId)
     {
         if (!_byId.TryGetValue(robotId, out var r)) return;

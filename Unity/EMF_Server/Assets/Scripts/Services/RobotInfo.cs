@@ -7,4 +7,7 @@ public class RobotInfo
     public string AssignedPlayer;  // "Player1" or "Player2" for now
     public bool   HFlip;           // camera horizontal mirror (reported by robot in hello)
     public bool   VFlip;           // camera vertical flip (reported by robot in hello)
+    public bool   InvThrottle;     // drive: forward/backward inverted (saved to robot NVS)
+    public bool   InvSteer;        // drive: left/right inverted (saved to robot NVS)
+    public bool   InvTurret;       // turret: rotation direction inverted (saved to robot NVS)
 }

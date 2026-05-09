@@ -85,6 +85,11 @@ static bool     g_wsOpen  = false;
 static int      g_hflip = 1;
 static int      g_vflip = 1;
 
+// Drive inversion state — loaded from NVS on boot, updated by set_drive_config command.
+static int g_inv_throttle = 0;
+static int g_inv_steer    = 0;
+static int g_inv_turret   = 0;
+
 // Offset between Unity clock (ms) and local millis(). Set by time_sync command.
 // To convert a Unity timestamp to local millis: localMs = unityMs - g_unityTimeOffset
 static int32_t  g_unityTimeOffset = 0;
@@ -628,12 +633,15 @@ static void handleWsText(const String& s)
     if (strcmp(cmd, "drive") == 0) {
         float l = doc["l"] | 0.0f;
         float r = doc["r"] | 0.0f;
-        motors.setLeftRight(r, l); // motors swapped after hardware change
+        if (g_inv_throttle) { l = -l; r = -r; }
+        if (g_inv_steer)    { float t = l; l = r; r = t; }
+        motors.setLeftRight(r, l); // hardware swap: left track wired to turret connector
         return;
     }
 
     if (strcmp(cmd, "turret") == 0) {
         float v = doc["speed"] | 0.0f;
+        if (g_inv_turret) v = -v;
         motors.setTurret(v);
         return;
     }
@@ -682,6 +690,21 @@ static void handleWsText(const String& s)
         prefs.putInt("vflip", g_vflip);
         prefs.end();
         Serial.printf("[CAM] flip set hflip=%d vflip=%d\n", g_hflip, g_vflip);
+        return;
+    }
+
+    if (strcmp(cmd, "set_drive_config") == 0) {
+        g_inv_throttle = doc["inv_throttle"] | g_inv_throttle;
+        g_inv_steer    = doc["inv_steer"]    | g_inv_steer;
+        g_inv_turret   = doc["inv_turret"]   | g_inv_turret;
+        Preferences prefs;
+        prefs.begin("tg_drv", false);
+        prefs.putInt("inv_throttle", g_inv_throttle);
+        prefs.putInt("inv_steer",    g_inv_steer);
+        prefs.putInt("inv_turret",   g_inv_turret);
+        prefs.end();
+        Serial.printf("[DRV] config set inv_throttle=%d inv_steer=%d inv_turret=%d\n",
+                      g_inv_throttle, g_inv_steer, g_inv_turret);
         return;
     }
 
@@ -847,8 +870,11 @@ static void connectWebSocket()
             // hello includes IP and flip state so the server can sync its UI
             String hello = String("{\"cmd\":\"hello\",\"id\":\"") + g_robotId +
                            "\",\"ip\":\"" + WiFi.localIP().toString() +
-                           "\",\"hflip\":" + String(g_hflip) +
-                           ",\"vflip\":"  + String(g_vflip) + "}";
+                           "\",\"hflip\":"       + String(g_hflip) +
+                           ",\"vflip\":"         + String(g_vflip) +
+                           ",\"inv_throttle\":"  + String(g_inv_throttle) +
+                           ",\"inv_steer\":"     + String(g_inv_steer) +
+                           ",\"inv_turret\":"    + String(g_inv_turret) + "}";
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
             Serial.println("[WS] opened");
@@ -935,6 +961,18 @@ void setup()
         prefs.end();
         cam.applyFlip(g_vflip != 0, g_hflip != 0);
         Serial.printf("[CAM] flip loaded hflip=%d vflip=%d\n", g_hflip, g_vflip);
+    }
+
+    // Load drive inversion prefs from NVS
+    {
+        Preferences prefs;
+        prefs.begin("tg_drv", true);
+        g_inv_throttle = prefs.getInt("inv_throttle", 0);
+        g_inv_steer    = prefs.getInt("inv_steer",    0);
+        g_inv_turret   = prefs.getInt("inv_turret",   0);
+        prefs.end();
+        Serial.printf("[DRV] config loaded inv_throttle=%d inv_steer=%d inv_turret=%d\n",
+                      g_inv_throttle, g_inv_steer, g_inv_turret);
     }
 
     // Wi-Fi: blocking until connected

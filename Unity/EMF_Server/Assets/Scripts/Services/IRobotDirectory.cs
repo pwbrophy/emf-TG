@@ -22,6 +22,7 @@ public interface IRobotDirectory
     void SetAssignedPlayer(string robotId, string playerName);
     void ClearAssignedPlayer(string robotId);
     void SetFlip(string robotId, bool hflip, bool vflip);
+    void SetDriveConfig(string robotId, bool invThrottle, bool invSteer, bool invTurret);
 
     // Robot is gone (disconnected or timed out) -> remove from registry
     bool Remove(string robotId);

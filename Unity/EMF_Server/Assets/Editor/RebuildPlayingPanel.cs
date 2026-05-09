@@ -1,13 +1,15 @@
 // RebuildPlayingPanel.cs — menu: Thundergeddon / 9 Rebuild Playing Panel
 // Layout (top→bottom):
-//   Header (58px)  — THUNDERGEDDON title + timer
-//   Body (fills)   — VLG:
-//     TeamPointsBar (44px)
-//     EventLog      (82px)
-//     Columns HLG   (flex)
-//       LeftColumn  (flex 1.5)  — TeamRosterPanel in scroll
-//       RightColumn (130px)     — 3 capture-point indicators
-//   Footer (54px)  — END GAME button
+//   Header (58px)
+//   Body (VLG):
+//     TopArea (HLG, 130px)
+//       VpAndLog (flex VLG)  — TeamPointsBar + EventLog
+//       CaptureColumn (90px) — Capture-point buttons
+//     Columns (HLG, flex)
+//       LeftColumn (flex)    — label + 2-row ActionButtonsPanel + RosterScroll
+//       GameSettingsColumn (210px)
+//       ShotTimingColumn (210px)
+//   Footer (54px)
 
 using UnityEngine;
 using UnityEditor;
@@ -29,6 +31,10 @@ public static class RebuildPlayingPanel
     static readonly Color C_RED    = new Color(1.000f, 0.420f, 0.210f);
     static readonly Color C_DKRED  = new Color(0.550f, 0.100f, 0.100f);
     static readonly Color C_DKBLUE = new Color(0.100f, 0.240f, 0.440f);
+    static readonly Color C_DKGRN  = new Color(0.100f, 0.350f, 0.100f);
+    static readonly Color C_DKPUR  = new Color(0.150f, 0.150f, 0.300f);
+    static readonly Color C_DKBLU2 = new Color(0.100f, 0.180f, 0.280f);
+    static readonly Color C_CAPNTR = new Color(0.200f, 0.200f, 0.200f);
 
     static TMP_FontAsset _font;
 
@@ -38,7 +44,6 @@ public static class RebuildPlayingPanel
         _font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(
             "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF.asset");
 
-        // GameObject.Find skips inactive objects, so search via the Canvas transform instead.
         var canvas = GameObject.Find("Canvas");
         if (canvas == null) { Debug.LogError("[RebuildPlaying] Canvas not found."); return; }
         var ppTransform = canvas.transform.Find("PlayingPanel");
@@ -50,12 +55,14 @@ public static class RebuildPlayingPanel
             Object.DestroyImmediate(pp.transform.GetChild(i).gameObject);
 
         // Remove old presenter components that are no longer needed
-        var pim = pp.GetComponent<PlayerInputMonitor>();
-        if (pim != null) Object.DestroyImmediate(pim);
-        var rhp = pp.GetComponent<RobotHpPanel>();
-        if (rhp != null) Object.DestroyImmediate(rhp);
-        var oldTrp = pp.GetComponent<TeamRosterPanel>();
-        if (oldTrp != null) Object.DestroyImmediate(oldTrp);
+        RemoveIfPresent<PlayerInputMonitor>(pp);
+        RemoveIfPresent<RobotHpPanel>(pp);
+        RemoveIfPresent<TeamRosterPanel>(pp);
+        RemoveIfPresent<HealButton>(pp);
+        RemoveIfPresent<TestDamageButton>(pp);
+        RemoveIfPresent<RobotPingButton>(pp);
+        RemoveIfPresent<ToggleCameraButton>(pp);
+        RemoveIfPresent<FlipVideoButtons>(pp);
 
         // ── 2. Panel background ───────────────────────────────────────────────
         var bgImg = pp.GetComponent<Image>();
@@ -92,7 +99,7 @@ public static class RebuildPlayingPanel
         var endGameBtn = MakeButton(footer.transform, "EndGameButton", "END GAME", C_DKRED, C_TEXT, 13f);
         Anchor(endGameBtn, 0.75f, 0, 0.75f, 1, -90, 7, 90, -7);
 
-        // ── 5. Body (between header and footer) ───────────────────────────────
+        // ── 5. Body ───────────────────────────────────────────────────────────
         var body = MakeRect(pp.transform, "Body");
         Anchor(body, 0, 0, 1, 1, 8, 58, -8, -62);
 
@@ -105,12 +112,35 @@ public static class RebuildPlayingPanel
         bodyVLG.childControlHeight     = true;
         bodyVLG.childAlignment         = TextAnchor.UpperLeft;
 
-        // ── 6. Team points bar ────────────────────────────────────────────────
-        var tpBar = MakeRect(body.transform, "TeamPointsBar");
+        // ── 6. TopArea (TeamPointsBar + EventLog + CaptureColumn) ─────────────
+        var topArea = MakeRect(body.transform, "TopArea");
+        topArea.AddComponent<LayoutElement>().preferredHeight = 130f;
+
+        var topHLG = topArea.AddComponent<HorizontalLayoutGroup>();
+        topHLG.spacing             = 6f;
+        topHLG.childForceExpandWidth  = false;
+        topHLG.childForceExpandHeight = true;
+        topHLG.childControlWidth      = true;
+        topHLG.childControlHeight     = true;
+        topHLG.childAlignment         = TextAnchor.UpperLeft;
+
+        // ── 6a. VpAndLog — TeamPointsBar + EventLog ───────────────────────────
+        var vpAndLog = MakeRect(topArea.transform, "VpAndLog");
+        vpAndLog.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
+        var vpVLG = vpAndLog.AddComponent<VerticalLayoutGroup>();
+        vpVLG.spacing             = 6f;
+        vpVLG.childForceExpandWidth  = true;
+        vpVLG.childForceExpandHeight = false;
+        vpVLG.childControlWidth      = true;
+        vpVLG.childControlHeight     = true;
+        vpVLG.childAlignment         = TextAnchor.UpperLeft;
+
+        // Team points bar
+        var tpBar = MakeRect(vpAndLog.transform, "TeamPointsBar");
         tpBar.AddComponent<Image>().color = C_PANEL;
         tpBar.AddComponent<LayoutElement>().preferredHeight = 44f;
 
-        // Label row
         var tpLabels = MakeRect(tpBar.transform, "Labels");
         Anchor(tpLabels, 0, 0.5f, 1, 1, 10, 0, -10, 0);
         var tpLabelHLG = tpLabels.AddComponent<HorizontalLayoutGroup>();
@@ -124,24 +154,22 @@ public static class RebuildPlayingPanel
         var tpLabel1 = MakeTmp(tpLabels.transform, "Label1", "0 PTS — ALLIANCE 2",
                                 C_RED,  10f, TextAlignmentOptions.MidlineRight, bold: true);
 
-        // Track
         var tpTrack = MakeRect(tpBar.transform, "Track");
         Anchor(tpTrack, 0, 0, 1, 0.5f, 10, 4, -10, 0);
         tpTrack.AddComponent<Image>().color = new Color(0.067f, 0.067f, 0.067f);
 
         var fill0 = MakeRect(tpTrack.transform, "Fill0");
         fill0.AddComponent<Image>().color = C_BLUE;
-        Anchor(fill0, 0, 0, 0, 1, 0, 0, 0, 0); // starts at 0 width
+        Anchor(fill0, 0, 0, 0, 1, 0, 0, 0, 0);
 
         var fill1 = MakeRect(tpTrack.transform, "Fill1");
         fill1.AddComponent<Image>().color = C_RED;
-        Anchor(fill1, 1, 0, 1, 1, 0, 0, 0, 0); // starts at 0 width from right
+        Anchor(fill1, 1, 0, 1, 1, 0, 0, 0, 0);
 
         var centreLine = MakeRect(tpTrack.transform, "Centre");
         Anchor(centreLine, 0.5f, 0, 0.5f, 1, -1, 0, 1, 0);
         centreLine.AddComponent<Image>().color = new Color(0.25f, 0.25f, 0.25f);
 
-        // Wire TeamPointsBarUI
         var tpBarUI = pp.GetComponent<TeamPointsBarUI>();
         if (tpBarUI == null) tpBarUI = pp.AddComponent<TeamPointsBarUI>();
         {
@@ -153,8 +181,8 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
-        // ── 7. Event log ──────────────────────────────────────────────────────
-        var evtGo = MakeRect(body.transform, "EventLog");
+        // Event log
+        var evtGo = MakeRect(vpAndLog.transform, "EventLog");
         evtGo.AddComponent<Image>().color = C_PANEL;
         evtGo.AddComponent<LayoutElement>().preferredHeight = 82f;
 
@@ -176,7 +204,33 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
-        // ── 8. Columns area ───────────────────────────────────────────────────
+        // ── 6b. CaptureColumn ─────────────────────────────────────────────────
+        var capCol = MakeRect(topArea.transform, "CaptureColumn");
+        capCol.AddComponent<Image>().color = C_PANEL;
+        var capColLE = capCol.AddComponent<LayoutElement>();
+        capColLE.preferredWidth = 90f;
+        capColLE.flexibleWidth  = 0f;
+        capColLE.flexibleHeight = 1f;
+
+        var capColVLG = capCol.AddComponent<VerticalLayoutGroup>();
+        capColVLG.spacing             = 4f;
+        capColVLG.padding             = new RectOffset(6, 6, 6, 6);
+        capColVLG.childForceExpandWidth  = true;
+        capColVLG.childForceExpandHeight = false;
+        capColVLG.childControlWidth      = true;
+        capColVLG.childControlHeight     = true;
+        capColVLG.childAlignment         = TextAnchor.UpperCenter;
+
+        var capLbl = MakeTmp(capCol.transform, "LblCapture", "CAPTURE POINTS",
+                              C_CYAN, 8f, TextAlignmentOptions.Center, bold: true);
+        capLbl.characterSpacing = 1f;
+        capLbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 14f;
+
+        var capNorthBtn  = MakeCaptureButton(capCol.transform, "CaptureNorthBtn",  "NORTH");
+        var capCentreBtn = MakeCaptureButton(capCol.transform, "CaptureCentreBtn", "CENTRE");
+        var capSouthBtn  = MakeCaptureButton(capCol.transform, "CaptureSouthBtn",  "SOUTH");
+
+        // ── 7. Columns area ───────────────────────────────────────────────────
         var columns = MakeRect(body.transform, "Columns");
         columns.AddComponent<LayoutElement>().flexibleHeight = 1f;
 
@@ -188,7 +242,7 @@ public static class RebuildPlayingPanel
         colHLG.childControlHeight     = true;
         colHLG.childAlignment         = TextAnchor.UpperLeft;
 
-        // ── 8a. Left column — team roster ─────────────────────────────────────
+        // ── 7a. Left column — robot roster + action buttons ───────────────────
         var leftCol = MakeRect(columns.transform, "LeftColumn");
         var leftLE = leftCol.AddComponent<LayoutElement>();
         leftLE.flexibleWidth  = 1f;
@@ -202,42 +256,66 @@ public static class RebuildPlayingPanel
         leftVLG.childControlHeight     = true;
         leftVLG.childAlignment         = TextAnchor.UpperLeft;
 
-        // Section label
         var rosterLbl = MakeTmp(leftCol.transform, "LblRoster", "ROBOTS & PLAYERS",
                                  C_CYAN, 10f, TextAlignmentOptions.MidlineLeft, bold: true);
         rosterLbl.characterSpacing = 1.5f;
         rosterLbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 22f;
 
-        // Controls row (PING + DAMAGE 10%)
-        var ctrlRow = MakeRect(leftCol.transform, "ControlsRow");
-        ctrlRow.AddComponent<LayoutElement>().preferredHeight = 36f;
+        // Action buttons panel — 2 rows
+        var actionPanel = MakeRect(leftCol.transform, "ActionButtonsPanel");
+        actionPanel.AddComponent<LayoutElement>().preferredHeight = 76f;
+        var apVLG = actionPanel.AddComponent<VerticalLayoutGroup>();
+        apVLG.spacing             = 4f;
+        apVLG.childForceExpandWidth  = true;
+        apVLG.childForceExpandHeight = false;
+        apVLG.childControlWidth      = true;
+        apVLG.childControlHeight     = true;
 
-        var ctrlHLG = ctrlRow.AddComponent<HorizontalLayoutGroup>();
-        ctrlHLG.spacing                = 6f;
-        ctrlHLG.childForceExpandWidth  = true;
-        ctrlHLG.childForceExpandHeight = false; // prevents HLG reporting flexibleHeight=1 to parent VLG
-        ctrlHLG.childControlWidth      = true;
-        ctrlHLG.childControlHeight     = true;
+        // Row 1: Damage group — Hit Front | Hit Side | Hit Rear | Heal
+        var dmgRow = MakeRect(actionPanel.transform, "DamageRow");
+        dmgRow.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var dmgHLG = dmgRow.AddComponent<HorizontalLayoutGroup>();
+        dmgHLG.spacing             = 4f;
+        dmgHLG.childForceExpandWidth  = true;
+        dmgHLG.childForceExpandHeight = false;
+        dmgHLG.childControlWidth      = true;
+        dmgHLG.childControlHeight     = true;
 
-        var pingBtn  = MakeButton(ctrlRow.transform, "PingButton",    "PING",        C_DKBLUE, C_TEXT, 12f);
-        pingBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var dmgBtn   = MakeButton(ctrlRow.transform, "DamageButton",  "DAMAGE 10%",  C_DKRED,  C_TEXT, 12f);
-        dmgBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var healBtn  = MakeButton(ctrlRow.transform, "HealButton",    "HEAL",        new Color(0.10f, 0.35f, 0.10f), C_TEXT, 12f);
-        healBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var camBtn   = MakeButton(ctrlRow.transform, "ToggleCamButton", "TOGGLE CAM", new Color(0.10f, 0.25f, 0.35f), C_TEXT, 12f);
-        camBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var hFlipBtn = MakeButton(ctrlRow.transform, "HFlipButton",   "H FLIP",      new Color(0.15f, 0.15f, 0.30f), C_TEXT, 12f);
-        hFlipBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var vFlipBtn = MakeButton(ctrlRow.transform, "VFlipButton",   "V FLIP",      new Color(0.15f, 0.15f, 0.30f), C_TEXT, 12f);
-        vFlipBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var hitFrontBtn = MakeButton(dmgRow.transform, "HitFrontBtn",  "HIT F",     C_DKRED,  C_TEXT, 11f);
+        var hitSideBtn  = MakeButton(dmgRow.transform, "HitSideBtn",   "HIT S",     C_DKRED,  C_TEXT, 11f);
+        var hitRearBtn  = MakeButton(dmgRow.transform, "HitRearBtn",   "HIT R×3",   new Color(0.7f, 0.05f, 0.05f), C_TEXT, 11f);
+        var healBtn     = MakeButton(dmgRow.transform, "HealBtn",      "HEAL",      C_DKGRN,  C_TEXT, 11f);
+
+        foreach (var b in new[] { hitFrontBtn, hitSideBtn, hitRearBtn, healBtn })
+            b.AddComponent<LayoutElement>().preferredHeight = 34f;
+
+        // Row 2: Drive + Camera groups
+        var drvCamRow = MakeRect(actionPanel.transform, "DriveCamRow");
+        drvCamRow.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var drvCamHLG = drvCamRow.AddComponent<HorizontalLayoutGroup>();
+        drvCamHLG.spacing             = 4f;
+        drvCamHLG.childForceExpandWidth  = true;
+        drvCamHLG.childForceExpandHeight = false;
+        drvCamHLG.childControlWidth      = true;
+        drvCamHLG.childControlHeight     = true;
+
+        var revThBtn  = MakeButton(drvCamRow.transform, "RevThrottleBtn", "REV THROTTLE: OFF", C_DKBLU2, C_TEXT, 9f);
+        var revStBtn  = MakeButton(drvCamRow.transform, "RevSteerBtn",    "REV STEER: OFF",    C_DKBLU2, C_TEXT, 9f);
+        var revTuBtn  = MakeButton(drvCamRow.transform, "RevTurretBtn",   "REV TURRET: OFF",   C_DKBLU2, C_TEXT, 9f);
+        var flipHBtn  = MakeButton(drvCamRow.transform, "FlipHBtn",       "FLIP H",            C_DKPUR,  C_TEXT, 10f);
+        var flipVBtn  = MakeButton(drvCamRow.transform, "FlipVBtn",       "FLIP V",            C_DKPUR,  C_TEXT, 10f);
+        var camTogBtn = MakeButton(drvCamRow.transform, "CamToggleBtn",   "CAM ON/OFF",        new Color(0.10f, 0.25f, 0.35f), C_TEXT, 10f);
+
+        foreach (var b in new[] { revThBtn, revStBtn, revTuBtn, flipHBtn, flipVBtn, camTogBtn })
+            b.AddComponent<LayoutElement>().preferredHeight = 34f;
+
         // Roster scroll
         RectTransform rosterContent;
         var rosterScroll = CreateScrollCard(leftCol.transform, "RosterScroll", out rosterContent);
         rosterScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
         rosterScroll.GetComponent<Image>().color = C_PANEL;
 
-        // Remove stale TeamRosterPanel if still present, then add RobotListPanel
+        // RobotListPanel
         var stale = pp.GetComponent<TeamRosterPanel>();
         if (stale != null) Object.DestroyImmediate(stale);
 
@@ -249,54 +327,7 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
-        // ── 8b. Right column — capture points ─────────────────────────────────
-        var rightCol = MakeRect(columns.transform, "RightColumn");
-        var rightLE  = rightCol.AddComponent<LayoutElement>();
-        rightLE.preferredWidth = 130f;
-        rightLE.flexibleHeight = 1f;
-        rightCol.AddComponent<Image>().color = C_PANEL;
-
-        rightLE.flexibleWidth = 0f; // prevent VLG's childForceExpandWidth from stealing flex space
-
-        var rightVLG = rightCol.AddComponent<VerticalLayoutGroup>();
-        rightVLG.spacing             = 8f;
-        rightVLG.padding             = new RectOffset(8, 8, 8, 8);
-        rightVLG.childForceExpandWidth  = false; // prevent reporting flexibleWidth=1 to parent HLG
-        rightVLG.childForceExpandHeight = false;
-        rightVLG.childControlWidth      = true;
-        rightVLG.childControlHeight     = true;
-        rightVLG.childAlignment         = TextAnchor.UpperCenter;
-
-        // Section label
-        var cpLbl = MakeTmp(rightCol.transform, "LblCapture", "CAPTURE POINTS",
-                             C_CYAN, 9f, TextAlignmentOptions.Center, bold: true);
-        cpLbl.characterSpacing = 1f;
-        cpLbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
-
-        // Three capture point blocks: North, Centre, South
-        Image cpCircle0 = MakeCpBlock(rightCol.transform, "CpNorth",  "NORTH");
-        Image cpCircle1 = MakeCpBlock(rightCol.transform, "CpCentre", "CENTRE");
-        Image cpCircle2 = MakeCpBlock(rightCol.transform, "CpSouth",  "SOUTH");
-
-        System.Type cpType = null;
-        foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
-        {
-            cpType = asm.GetType("CapturePointsPanelUI");
-            if (cpType != null) break;
-        }
-        if (cpType != null)
-        {
-            var cpUI = pp.GetComponent(cpType);
-            if (cpUI == null) cpUI = pp.AddComponent(cpType);
-            var so = new SerializedObject(cpUI);
-            SetProp(so, "circle0", cpCircle0);
-            SetProp(so, "circle1", cpCircle1);
-            SetProp(so, "circle2", cpCircle2);
-            so.ApplyModifiedProperties();
-        }
-        else Debug.LogWarning("[RebuildPlaying] CapturePointsPanelUI type not found.");
-
-        // ── 8c. Game settings column ──────────────────────────────────────────
+        // ── 7b. Game settings column ──────────────────────────────────────────
         var gameSettingsCol = MakeSettingsColumn(columns.transform, "GameSettingsColumn", "GAME SETTINGS");
         RectTransform gameSettingsContent;
         var gameSettingsScroll = CreateScrollCard(gameSettingsCol.transform, "GameSettingsScroll", out gameSettingsContent);
@@ -311,7 +342,7 @@ public static class RebuildPlayingPanel
         var f_teamPts    = MakeSettingsRow(gameSettingsContent, "Team Pts",    "Points needed for instant tug-of-war win.");
         var f_ptsKill    = MakeSettingsRow(gameSettingsContent, "Pts/Kill",    "Team points awarded per robot destroyed.");
 
-        // ── 8d. Shot timing column ────────────────────────────────────────────
+        // ── 7c. Shot timing column ────────────────────────────────────────────
         var shotTimingCol = MakeSettingsColumn(columns.transform, "ShotTimingColumn", "SHOT TIMING");
         RectTransform shotTimingContent;
         var shotTimingScroll = CreateScrollCard(shotTimingCol.transform, "ShotTimingScroll", out shotTimingContent);
@@ -330,43 +361,13 @@ public static class RebuildPlayingPanel
         var t_disableCam    = MakeSettingsToggle(shotTimingContent, "Disable Cam",    "Pause camera streams during IR slot to reduce Wi-Fi congestion.");
         var t_disableMotors = MakeSettingsToggle(shotTimingContent, "Disable Motors", "Stop motors during IR slot to cut electrical noise on receivers.");
 
-        // Total time read-only label
         var totalRow = MakeRect(shotTimingContent.transform, "TotalRow");
         totalRow.AddComponent<LayoutElement>().preferredHeight = 26f;
         var totalLbl = MakeTmp(totalRow.transform, "TotalLabel", "Total: --",
                                 C_CYAN, 12f, TextAlignmentOptions.MidlineLeft, bold: true);
         Anchor(totalLbl.gameObject, 0, 0, 1, 1, 0, 0, 0, 0);
 
-        // Wire PlayingSettingsPanel
-        var psp = pp.GetComponent<PlayingSettingsPanel>();
-        if (psp == null) psp = pp.AddComponent<PlayingSettingsPanel>();
-        {
-            var so = new SerializedObject(psp);
-            SetProp(so, "maxHpField",      f_maxHp);
-            SetProp(so, "damageField",     f_damage);
-            SetProp(so, "rearMultField",   f_rearMult);
-            SetProp(so, "durationField",   f_duration);
-            SetProp(so, "maxPlayersField", f_maxPl);
-            SetProp(so, "maxTeamPtsField", f_teamPts);
-            SetProp(so, "ptsPerKillField", f_ptsKill);
-            SetProp(so, "cooldownField",   f_cooldown);
-            SetProp(so, "slotFutureField", f_slotFuture);
-            SetProp(so, "listenDelayField",f_listenDly);
-            SetProp(so, "b1DurField",      f_b1);
-            SetProp(so, "gap12Field",      f_gap12);
-            SetProp(so, "b2DurField",      f_b2);
-            SetProp(so, "repGapField",     f_repGap);
-            SetProp(so, "repsField",       f_reps);
-            SetProp(so, "resultBufField",       f_resBuf);
-            SetProp(so, "disableCameraToggle",  t_disableCam);
-            SetProp(so, "disableMotorsToggle",  t_disableMotors);
-            // Wire totalTimeLabel (TMP_Text, not TMP_InputField — use FindProperty directly)
-            var prop = so.FindProperty("totalTimeLabel");
-            if (prop != null) prop.objectReferenceValue = totalLbl;
-            so.ApplyModifiedProperties();
-        }
-
-        // ── 9. Wire existing components ───────────────────────────────────────
+        // ── 8. Wire components ────────────────────────────────────────────────
 
         var pgb = pp.GetComponent<PauseGameButton>();
         if (pgb == null) pgb = pp.AddComponent<PauseGameButton>();
@@ -402,66 +403,100 @@ public static class RebuildPlayingPanel
             so.ApplyModifiedProperties();
         }
 
-        var hb = pp.GetComponent<HealButton>();
-        if (hb == null) hb = pp.AddComponent<HealButton>();
+        // Wire RobotActionButtons — the new unified component
+        var rab = pp.GetComponent<RobotActionButtons>();
+        if (rab == null) rab = pp.AddComponent<RobotActionButtons>();
         {
-            var so = new SerializedObject(hb);
-            SetProp(so, "healButton",     healBtn.GetComponent<Button>());
-            SetProp(so, "robotListPanel", rlp);
+            var so = new SerializedObject(rab);
+            SetProp(so, "robotListPanel",  rlp);
+            SetProp(so, "hitFrontBtn",     hitFrontBtn.GetComponent<Button>());
+            SetProp(so, "hitSideBtn",      hitSideBtn.GetComponent<Button>());
+            SetProp(so, "hitRearBtn",      hitRearBtn.GetComponent<Button>());
+            SetProp(so, "healBtn",         healBtn.GetComponent<Button>());
+            SetProp(so, "revThrottleBtn",  revThBtn.GetComponent<Button>());
+            SetProp(so, "revSteerBtn",     revStBtn.GetComponent<Button>());
+            SetProp(so, "revTurretBtn",    revTuBtn.GetComponent<Button>());
+            SetProp(so, "flipHBtn",        flipHBtn.GetComponent<Button>());
+            SetProp(so, "flipVBtn",        flipVBtn.GetComponent<Button>());
+            SetProp(so, "camToggleBtn",    camTogBtn.GetComponent<Button>());
+            SetProp(so, "captureNorthBtn",  capNorthBtn.GetComponent<Button>());
+            SetProp(so, "captureCentreBtn", capCentreBtn.GetComponent<Button>());
+            SetProp(so, "captureSouthBtn",  capSouthBtn.GetComponent<Button>());
             so.ApplyModifiedProperties();
         }
 
-        var tdb = pp.GetComponent<TestDamageButton>();
-        if (tdb == null) tdb = pp.AddComponent<TestDamageButton>();
+        // Wire CapturePointsPanelUI for the circle indicators (still used by the
+        // colour-only display logic, separate from the clickable buttons)
+        System.Type cpType = null;
+        foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
         {
-            var so = new SerializedObject(tdb);
-            SetProp(so, "damageButton",   dmgBtn.GetComponent<Button>());
-            SetProp(so, "robotListPanel", rlp);
+            cpType = asm.GetType("CapturePointsPanelUI");
+            if (cpType != null) break;
+        }
+        if (cpType != null)
+        {
+            // CapturePointsPanelUI driven from capture buttons' Image components
+            var cpUI = pp.GetComponent(cpType);
+            if (cpUI == null) cpUI = pp.AddComponent(cpType);
+            var so = new SerializedObject(cpUI);
+            SetProp(so, "circle0", capNorthBtn.GetComponent<Image>());
+            SetProp(so, "circle1", capCentreBtn.GetComponent<Image>());
+            SetProp(so, "circle2", capSouthBtn.GetComponent<Image>());
             so.ApplyModifiedProperties();
         }
+        else Debug.LogWarning("[RebuildPlaying] CapturePointsPanelUI type not found.");
 
-        var rpb = pp.GetComponent<RobotPingButton>();
-        if (rpb == null) rpb = pp.AddComponent<RobotPingButton>();
-        {
-            var so = new SerializedObject(rpb);
-            SetProp(so, "pingButton",     pingBtn.GetComponent<Button>());
-            SetProp(so, "resultLabel",    null);
-            SetProp(so, "robotListPanel", rlp);
-            so.ApplyModifiedProperties();
-        }
-
-        var tcb = pp.GetComponent<ToggleCameraButton>();
-        if (tcb == null) tcb = pp.AddComponent<ToggleCameraButton>();
-        {
-            var so = new SerializedObject(tcb);
-            SetProp(so, "button",         camBtn.GetComponent<Button>());
-            SetProp(so, "robotListPanel", rlp);
-            so.ApplyModifiedProperties();
-        }
-
-        var fvb = pp.GetComponent<FlipVideoButtons>();
-        if (fvb == null) fvb = pp.AddComponent<FlipVideoButtons>();
-        {
-            var so = new SerializedObject(fvb);
-            SetProp(so, "robotListPanel", rlp);
-            SetProp(so, "hFlipButton",    hFlipBtn.GetComponent<Button>());
-            SetProp(so, "vFlipButton",    vFlipBtn.GetComponent<Button>());
-            so.ApplyModifiedProperties();
-        }
-
+        // RobotControlsGroup — greys robot-specific buttons when nothing is selected.
+        // Capture buttons are excluded (they work regardless of selection).
         var rcg = pp.GetComponent<RobotControlsGroup>();
         if (rcg == null) rcg = pp.AddComponent<RobotControlsGroup>();
         {
             var so = new SerializedObject(rcg);
             SetProp(so, "robotListPanel", rlp);
             var arr = so.FindProperty("buttons");
-            arr.arraySize = 6;
-            arr.GetArrayElementAtIndex(0).objectReferenceValue = pingBtn.GetComponent<Button>();
-            arr.GetArrayElementAtIndex(1).objectReferenceValue = dmgBtn.GetComponent<Button>();
-            arr.GetArrayElementAtIndex(2).objectReferenceValue = healBtn.GetComponent<Button>();
-            arr.GetArrayElementAtIndex(3).objectReferenceValue = camBtn.GetComponent<Button>();
-            arr.GetArrayElementAtIndex(4).objectReferenceValue = hFlipBtn.GetComponent<Button>();
-            arr.GetArrayElementAtIndex(5).objectReferenceValue = vFlipBtn.GetComponent<Button>();
+            var robotBtns = new[] {
+                hitFrontBtn.GetComponent<Button>(),
+                hitSideBtn.GetComponent<Button>(),
+                hitRearBtn.GetComponent<Button>(),
+                healBtn.GetComponent<Button>(),
+                revThBtn.GetComponent<Button>(),
+                revStBtn.GetComponent<Button>(),
+                revTuBtn.GetComponent<Button>(),
+                flipHBtn.GetComponent<Button>(),
+                flipVBtn.GetComponent<Button>(),
+                camTogBtn.GetComponent<Button>(),
+            };
+            arr.arraySize = robotBtns.Length;
+            for (int i = 0; i < robotBtns.Length; i++)
+                arr.GetArrayElementAtIndex(i).objectReferenceValue = robotBtns[i];
+            so.ApplyModifiedProperties();
+        }
+
+        // Wire PlayingSettingsPanel
+        var psp = pp.GetComponent<PlayingSettingsPanel>();
+        if (psp == null) psp = pp.AddComponent<PlayingSettingsPanel>();
+        {
+            var so = new SerializedObject(psp);
+            SetProp(so, "maxHpField",      f_maxHp);
+            SetProp(so, "damageField",     f_damage);
+            SetProp(so, "rearMultField",   f_rearMult);
+            SetProp(so, "durationField",   f_duration);
+            SetProp(so, "maxPlayersField", f_maxPl);
+            SetProp(so, "maxTeamPtsField", f_teamPts);
+            SetProp(so, "ptsPerKillField", f_ptsKill);
+            SetProp(so, "cooldownField",   f_cooldown);
+            SetProp(so, "slotFutureField", f_slotFuture);
+            SetProp(so, "listenDelayField",f_listenDly);
+            SetProp(so, "b1DurField",      f_b1);
+            SetProp(so, "gap12Field",      f_gap12);
+            SetProp(so, "b2DurField",      f_b2);
+            SetProp(so, "repGapField",     f_repGap);
+            SetProp(so, "repsField",       f_reps);
+            SetProp(so, "resultBufField",       f_resBuf);
+            SetProp(so, "disableCameraToggle",  t_disableCam);
+            SetProp(so, "disableMotorsToggle",  t_disableMotors);
+            var prop = so.FindProperty("totalTimeLabel");
+            if (prop != null) prop.objectReferenceValue = totalLbl;
             so.ApplyModifiedProperties();
         }
 
@@ -488,39 +523,33 @@ public static class RebuildPlayingPanel
         Debug.Log("[RebuildPlaying] Done.");
     }
 
-    // ── Capture point block helper ────────────────────────────────────────────
+    // ── Capture button helper ─────────────────────────────────────────────────
 
-    static Image MakeCpBlock(Transform parent, string name, string label)
+    static GameObject MakeCaptureButton(Transform parent, string name, string label)
     {
-        var block = MakeRect(parent, name);
-        block.AddComponent<LayoutElement>().preferredHeight = 70f;
-
-        var blockVLG = block.AddComponent<VerticalLayoutGroup>();
-        blockVLG.spacing             = 4f;
-        blockVLG.childForceExpandWidth  = true;
-        blockVLG.childForceExpandHeight = false;
-        blockVLG.childControlWidth      = true;
-        blockVLG.childControlHeight     = true;
-        blockVLG.childAlignment         = TextAnchor.UpperCenter;
-
-        // Circle (square indicator)
-        var circleGo = MakeRect(block.transform, "Circle");
-        var circleLE = circleGo.AddComponent<LayoutElement>();
-        circleLE.preferredHeight = 48f;
-        circleLE.flexibleWidth   = 0f;
-        var img = circleGo.AddComponent<Image>();
+        var go = new GameObject(name);
+        go.AddComponent<RectTransform>();
+        go.transform.SetParent(parent, false);
+        var img = go.AddComponent<Image>();
         img.color = new Color(0.20f, 0.20f, 0.20f);
+        go.AddComponent<Button>();
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredHeight = 30f;
 
-        // Label
-        var lbl = MakeTmp(block.transform, "Label", label,
-                           new Color(0.40f, 0.40f, 0.40f), 9f, TextAlignmentOptions.Center, bold: true);
-        lbl.characterSpacing = 1f;
-        lbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 16f;
-
-        return img;
+        var lbl = MakeTmp(go.transform, "Label", label + "\n—",
+                           C_TEXT, 9f, TextAlignmentOptions.Center, bold: true);
+        Anchor(lbl.gameObject, 0, 0, 1, 1, 2, 2, -2, -2);
+        return go;
     }
 
-    // Null-safe SerializedObject property setter — logs a warning if property not found.
+    // ── Generic helpers ───────────────────────────────────────────────────────
+
+    static void RemoveIfPresent<T>(GameObject go) where T : Component
+    {
+        var c = go.GetComponent<T>();
+        if (c != null) Object.DestroyImmediate(c);
+    }
+
     static void SetProp(SerializedObject so, string propName, UnityEngine.Object value)
     {
         var prop = so.FindProperty(propName);
@@ -529,8 +558,6 @@ public static class RebuildPlayingPanel
         else
             prop.objectReferenceValue = value;
     }
-
-    // ── Generic helpers ───────────────────────────────────────────────────────
 
     static GameObject MakeRect(Transform parent, string name)
     {
@@ -572,7 +599,6 @@ public static class RebuildPlayingPanel
         return tmp;
     }
 
-    // Button with full-fill rect (caller anchors after if needed).
     static GameObject MakeButton(Transform parent, string name, string label,
                                   Color bgColor, Color textColor, float fontSize)
     {
@@ -585,7 +611,6 @@ public static class RebuildPlayingPanel
         return go;
     }
 
-    // ── Settings column helper ────────────────────────────────────────────────────
     static GameObject MakeSettingsColumn(Transform parent, string name, string header)
     {
         var col = MakeRect(parent, name);
@@ -612,9 +637,6 @@ public static class RebuildPlayingPanel
         return col;
     }
 
-    // ── Settings row helper ───────────────────────────────────────────────────────
-    // Returns the TMP_InputField. Each row is a VLG block: top sub-row (label+input)
-    // + description line below.
     static TMP_InputField MakeSettingsRow(RectTransform parent, string labelText, string description)
     {
         var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
@@ -626,7 +648,6 @@ public static class RebuildPlayingPanel
         rowVLG.childControlHeight     = true;
         row.AddComponent<LayoutElement>().preferredHeight = 50f;
 
-        // Top sub-row: label + input field
         var topRow = MakeRect(row.transform, "TopRow");
         var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
         topHLG.spacing             = 4f;
@@ -642,7 +663,6 @@ public static class RebuildPlayingPanel
 
         var inputField = MakeTmpInputField(topRow.transform, "Field");
 
-        // Description line
         var desc = MakeTmp(row.transform, "Desc", description,
                             new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
         desc.enableWordWrapping = true;
@@ -662,7 +682,6 @@ public static class RebuildPlayingPanel
 
         var field = go.AddComponent<TMP_InputField>();
 
-        // Text area child
         var textArea = new GameObject("Text Area");
         textArea.AddComponent<RectTransform>();
         textArea.transform.SetParent(go.transform, false);
@@ -673,7 +692,6 @@ public static class RebuildPlayingPanel
         taRT.offsetMax = new Vector2(-4f, 0f);
         textArea.AddComponent<RectMask2D>();
 
-        // Text child
         var textGo = new GameObject("Text");
         textGo.AddComponent<RectTransform>();
         textGo.transform.SetParent(textArea.transform, false);
@@ -699,9 +717,6 @@ public static class RebuildPlayingPanel
         return field;
     }
 
-    // ── Settings toggle row helper ────────────────────────────────────────────────
-    // Returns the Toggle. Row layout matches MakeSettingsRow: top sub-row (checkbox+label)
-    // + description line below.
     static Toggle MakeSettingsToggle(RectTransform parent, string labelText, string description)
     {
         var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
@@ -713,7 +728,6 @@ public static class RebuildPlayingPanel
         rowVLG.childControlHeight     = true;
         row.AddComponent<LayoutElement>().preferredHeight = 50f;
 
-        // Top sub-row: checkbox + label
         var topRow = MakeRect(row.transform, "TopRow");
         var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
         topHLG.spacing             = 6f;
@@ -723,7 +737,6 @@ public static class RebuildPlayingPanel
         topHLG.childControlHeight     = true;
         topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        // Checkbox background
         var checkboxGo = MakeRect(topRow.transform, "Toggle");
         var checkboxLE = checkboxGo.AddComponent<LayoutElement>();
         checkboxLE.preferredWidth  = 24f;
@@ -734,7 +747,6 @@ public static class RebuildPlayingPanel
         var toggle = checkboxGo.AddComponent<Toggle>();
         toggle.targetGraphic = bgImg;
 
-        // Checkmark (filled cyan square inset)
         var checkmarkGo = MakeRect(checkboxGo.transform, "Checkmark");
         var checkmarkRT = checkmarkGo.GetComponent<RectTransform>();
         checkmarkRT.anchorMin = new Vector2(0.15f, 0.15f);
@@ -745,26 +757,16 @@ public static class RebuildPlayingPanel
         checkImg.color = C_CYAN;
         toggle.graphic = checkImg;
 
-        // Label
         var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
                            new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
         lbl.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
 
-        // Description line
         var desc = MakeTmp(row.transform, "Desc", description,
                             new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
         desc.enableWordWrapping = true;
         desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
 
         return toggle;
-    }
-
-    static void MakeSectionLabel(RectTransform parent, string name, string text)
-    {
-        var lbl = MakeTmp(parent.transform, name, text,
-                           new Color(0.45f, 0.45f, 0.45f), 8f, TextAlignmentOptions.MidlineLeft, bold: true);
-        lbl.characterSpacing = 1f;
-        lbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
     }
 
     static GameObject CreateScrollCard(Transform parent, string name, out RectTransform content)

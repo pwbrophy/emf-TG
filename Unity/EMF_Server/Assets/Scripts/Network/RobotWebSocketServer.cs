@@ -285,6 +285,11 @@ public class RobotWebSocketServer : MonoBehaviour
             bool vflip = ExtractInt(json, "vflip") != 0;
             _dir?.SetFlip(id, hflip, vflip);
 
+            bool invThrottle = ExtractInt(json, "inv_throttle") != 0;
+            bool invSteer    = ExtractInt(json, "inv_steer")    != 0;
+            bool invTurret   = ExtractInt(json, "inv_turret")   != 0;
+            _dir?.SetDriveConfig(id, invThrottle, invSteer, invTurret);
+
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
             return;
         }
@@ -519,6 +524,18 @@ public class RobotWebSocketServer : MonoBehaviour
     public void RestoreStreams(HashSet<string> toRestore)
     {
         foreach (var id in toRestore) SendStreamOn(id);
+    }
+
+    public bool SendDriveConfig(string robotId, bool invThrottle, bool invSteer, bool invTurret)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"set_drive_config\",\"inv_throttle\":{(invThrottle ? 1 : 0)}" +
+                      $",\"inv_steer\":{(invSteer ? 1 : 0)},\"inv_turret\":{(invTurret ? 1 : 0)}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok
+            ? $"[WS->Robot] set_drive_config th={invThrottle} st={invSteer} tu={invTurret} -> {robotId}"
+            : $"[WS->Robot] FAILED set_drive_config -> {robotId}");
+        return ok;
     }
 
     public bool SendVideoFlip(string robotId, bool hflip, bool vflip)

@@ -133,6 +133,36 @@ public sealed class GameService
     }
 
     /// <summary>
+    /// Apply directional damage from an operator button (no shooter/alliance credit).
+    /// Applies the rear multiplier for "S" hits. Returns new HP, or -1 if not in game / already dead.
+    /// </summary>
+    public int ApplyDirectDamageWithDir(string targetId, string cardinalDir)
+    {
+        if (State == null) return -1;
+        if (State.DeadRobots.Contains(targetId) || State.RespawningRobots.Contains(targetId)) return -1;
+        if (!State.RobotHp.ContainsKey(targetId)) return -1;
+
+        var settings  = ServiceLocator.GameSettings;
+        int baseDamage = settings != null ? settings.DamagePerHit  : 25;
+        float rearMult = settings != null ? settings.RearMultiplier : 3f;
+        int damage     = Mathf.RoundToInt(baseDamage * (IsRearHit(cardinalDir) ? rearMult : 1f));
+
+        int newHp = Mathf.Max(0, State.RobotHp[targetId] - damage);
+        State.RobotHp[targetId] = newHp;
+
+        OnHpChanged?.Invoke(targetId, newHp);
+        OnRobotHitDirection?.Invoke(targetId, 0, cardinalDir);
+
+        if (newHp <= 0)
+        {
+            State.DeadRobots.Add(targetId);
+            OnRobotDied?.Invoke(targetId);
+        }
+
+        return newHp;
+    }
+
+    /// <summary>
     /// Restore a robot to full HP (base heal for alive robots). No-op if dead/respawning.
     /// </summary>
     public void RestoreHp(string robotId)

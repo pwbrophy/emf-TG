@@ -80,6 +80,20 @@ public sealed class CapturePointService
     }
 
     /// <summary>
+    /// Operator override: force a capture point to a given alliance (or -1 for neutral).
+    /// Fires OnPointCaptured so UI and VP ticking update immediately.
+    /// </summary>
+    public void ForceCapture(int pointIndex, int allianceIndex)
+    {
+        var gs = ServiceLocator.Game?.State;
+        if (gs == null) return;
+        if (pointIndex < 0 || pointIndex >= gs.CapturePointOwners.Length) return;
+        gs.CapturePointOwners[pointIndex] = allianceIndex;
+        string name = pointIndex < PointNames.Length ? PointNames[pointIndex] : pointIndex.ToString();
+        OnPointCaptured?.Invoke(pointIndex, allianceIndex, name);
+    }
+
+    /// <summary>
     /// Award kill points to the given alliance. Call from GameService.OnRobotDied.
     /// </summary>
     public void AwardKillPoints(int allianceIndex)
