@@ -268,7 +268,15 @@ public class PlayerWebSocketServer : MonoBehaviour
         _connToPlayer[connId] = name;
         if (_sessionToConns.TryGetValue(sessionId, out var conns)) conns.Add(connId);
 
-        ServiceLocator.Players?.AddPlayer(name, 0);
+        // Skip AddPlayer if already listed — preserves the correct alliance index
+        // when a phone reconnects during an active game (HandleLeave keeps the entry).
+        bool alreadyListed = false;
+        var existingList = ServiceLocator.Players?.GetAll();
+        if (existingList != null)
+            foreach (var p in existingList)
+                if (p.Name == name) { alreadyListed = true; break; }
+        if (!alreadyListed)
+            ServiceLocator.Players?.AddPlayer(name, 0);
         Debug.Log("[PlayerWS] Player joined: " + name + " (conn=" + connId + ")");
 
         // Auto-assign the first available (unassigned) robot to the new player.
@@ -307,6 +315,11 @@ public class PlayerWebSocketServer : MonoBehaviour
         // Player already rejoined with a new connection — don't evict them.
         foreach (var v in _connToPlayer.Values)
             if (v == playerName) return;
+
+        // During active gameplay keep the player in PlayersService so alliance
+        // lookups in IrSlotScheduler stay valid for their (still-connected) robot.
+        // SignalR's onreconnected handler will call JoinLobby again automatically.
+        if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing) return;
 
         var players = ServiceLocator.Players?.GetAll();
         if (players == null) return;
