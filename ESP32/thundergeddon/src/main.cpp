@@ -749,7 +749,6 @@ static void handleWsText(const String& s)
     // ---- Handshake IR emit (ACK-driven, no clock sync) ----
 
     if (strcmp(cmd, "ir_emit_left") == 0) {
-        motors.enable(false);
         ir.beginEmitLeft();
         ws.send("{\"cmd\":\"ir_emit_ack\"}");
         Serial.println("[IR] emit_left → ir_emit_ack sent");
@@ -1053,6 +1052,9 @@ void loop()
         }
         motors.enable(true);
     }
+
+    // ---- IR: handshake emit burst (beginEmitLeft/Right autonomous 25/15ms cycling) ----
+    ir.updateEmitBurst(now);
 
     // ---- IR: handshake listen window (ir_listen_window command) ----
     ir.updateWindow(now);

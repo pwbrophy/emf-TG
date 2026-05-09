@@ -81,7 +81,7 @@ public class GameSettings : MonoBehaviour
     public bool UseHandshakeIr = false;
 
     [Tooltip("Duration (ms) of each listen window in handshake mode. The enemy robot listens for this long after receiving ir_listen_window.")]
-    public int HandshakeWindowMs = 100;
+    public int HandshakeWindowMs = 10;
 
     [Tooltip("Timeout (ms) waiting for ir_emit_ack from the shooter. If exceeded the shot is aborted.")]
     public int HandshakeAckTimeoutMs = 300;

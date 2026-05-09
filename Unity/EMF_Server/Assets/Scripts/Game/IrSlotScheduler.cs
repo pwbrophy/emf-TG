@@ -255,8 +255,11 @@ public class IrSlotScheduler : MonoBehaviour
             int newHp = game?.State?.RobotHp.GetValueOrDefault(enemyId, 0) ?? 0;
             Debug.Log($"[IrSlot]   damage={damage} newHp={newHp}/{maxHp}");
 
-            // Flash red + play damage buzzer only if damage was actually dealt
-            if (damage > 0)
+            // flash_hit only if the robot survived — if it died, OnRobotDied already
+            // sent flash_death (synchronously inside ApplyDamage above). Sending flash_hit
+            // after flash_death would reconfigure the LEDC channel mid-animation and cut
+            // the 5-second death explosion short.
+            if (damage > 0 && newHp > 0)
                 server.SendFlashHit(enemyId);
 
             // Update HP bar LEDs on hit robot
@@ -359,18 +362,11 @@ public class IrSlotScheduler : MonoBehaviour
         }
 
         int ackTimeoutMs    = settings != null ? settings.HandshakeAckTimeoutMs    : 300;
-        int windowMs        = settings != null ? settings.HandshakeWindowMs        : 100;
+        int windowMs        = settings != null ? settings.HandshakeWindowMs        : 10;
         int windowTimeoutMs = settings != null ? settings.HandshakeWindowTimeoutMs : 300;
-        bool disableCam     = settings != null && settings.DisableCameraWhileDetecting;
-        bool disableMotors  = settings != null && settings.DisableMotorsWhileDetecting;
 
-        HashSet<string> wasStreaming = disableCam ? server.PauseAllStreams() : null;
-
-        // Motors: the shooter disables its own motors when it receives ir_emit_left.
-        // Optionally disable enemy motors to reduce electrical noise on their receivers.
-        if (disableMotors)
-            for (int i = 0; i < enemies.Count; i++)
-                server.SendMotorsOff(enemies[i].RobotId);
+        // Motors and cameras are NOT disabled in handshake mode — disabling is
+        // too disruptive to gameplay. The shooter keeps moving while emitting.
 
         // ── Track ACK and window results via events ────────────────────────────
         bool  ackReceived  = false;
@@ -425,11 +421,20 @@ public class IrSlotScheduler : MonoBehaviour
             float winDeadline = Time.time + (windowMs + windowTimeoutMs) / 1000f;
             while (b1Masks.Count < enemies.Count && Time.time < winDeadline) yield return null;
             Debug.Log($"[IrHs] Shot {slotId} — b1 done: {b1Masks.Count}/{enemies.Count} results");
+        }
 
-            // Early exit: if no enemy detected the left LED, b2 can't possibly count
-            bool anyB1Hit = false;
-            foreach (var kv in b1Masks) if (kv.Value != 0) { anyB1Hit = true; break; }
-            if (!anyB1Hit && b1Masks.Count > 0)
+        // ── Build b2Enemies: only enemies that detected the left LED ──────────
+        // Enemies with b1 == 0 cannot score a hit (requires b1 AND b2 non-zero),
+        // so they are released from the shot sequence immediately.
+        var b2Enemies = new List<RobotInfo>();
+        if (!aborted)
+        {
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                b1Masks.TryGetValue(enemies[i].RobotId, out byte b1);
+                if (b1 != 0) b2Enemies.Add(enemies[i]);
+            }
+            if (b2Enemies.Count == 0)
             {
                 Debug.Log($"[IrHs] Shot {slotId} — all b1 == 0, early exit (miss)");
                 server.SendIrEmitStop(shooterId);
@@ -438,34 +443,25 @@ public class IrSlotScheduler : MonoBehaviour
         }
 
         // ── Phase 2: right LED ────────────────────────────────────────────────
+        // Send ir_emit_right and b2 listen windows simultaneously — no ACK wait.
+        // Both messages travel the same Wi-Fi path and arrive at their robots at
+        // essentially the same time, so the shooter switches barrels while enemies
+        // start their window. The 3ms burst cycle ensures a right-barrel pulse
+        // fires within ≤3ms of the window opening.
         if (!aborted)
         {
             collectingB2 = true;
-            ackReceived  = false;
             server.SendIrEmitRight(shooterId);
-            Debug.Log($"[IrHs] Shot {slotId} — ir_emit_right sent, waiting for ack...");
 
-            ackDeadline = Time.time + ackTimeoutMs / 1000f;
-            while (!ackReceived && Time.time < ackDeadline) yield return null;
+            Debug.Log($"[IrHs] Shot {slotId} — ir_emit_right + b2 listen_window sent to {b2Enemies.Count} enemy(ies) (no ACK wait)");
+            for (int i = 0; i < b2Enemies.Count; i++)
+                server.SendIrListenWindow(b2Enemies[i].RobotId, windowMs);
 
-            if (!ackReceived)
-            {
-                Debug.LogWarning($"[IrHs] Shot {slotId} ABORTED — no ack for ir_emit_right (timeout)");
-                server.SendIrEmitStop(shooterId);
-                aborted = true;
-            }
-            else
-            {
-                Debug.Log($"[IrHs] Shot {slotId} — ir_emit_ack received; sending ir_listen_window for b2");
-                for (int i = 0; i < enemies.Count; i++)
-                    server.SendIrListenWindow(enemies[i].RobotId, windowMs);
+            float winDeadline = Time.time + (windowMs + windowTimeoutMs) / 1000f;
+            while (b2Masks.Count < b2Enemies.Count && Time.time < winDeadline) yield return null;
+            Debug.Log($"[IrHs] Shot {slotId} — b2 done: {b2Masks.Count}/{b2Enemies.Count} results");
 
-                float winDeadline = Time.time + (windowMs + windowTimeoutMs) / 1000f;
-                while (b2Masks.Count < enemies.Count && Time.time < winDeadline) yield return null;
-                Debug.Log($"[IrHs] Shot {slotId} — b2 done: {b2Masks.Count}/{enemies.Count} results");
-
-                server.SendIrEmitStop(shooterId);
-            }
+            server.SendIrEmitStop(shooterId);
         }
 
         // ── Resolve hits ──────────────────────────────────────────────────────
@@ -508,7 +504,10 @@ public class IrSlotScheduler : MonoBehaviour
                 int newHp = game?.State?.RobotHp.GetValueOrDefault(enemyId, 0) ?? 0;
                 Debug.Log($"[IrHs]   damage={damage} newHp={newHp}/{maxHp}");
 
-                if (damage > 0)
+                // flash_hit only if the robot survived — if it died, OnRobotDied already
+                // sent flash_death. Sending flash_hit after flash_death cuts the 5-second
+                // death explosion short by reconfiguring the LEDC buzzer channel.
+                if (damage > 0 && newHp > 0)
                     server.SendFlashHit(enemyId);
 
                 server.SendSetHp(enemyId, newHp, maxHp);
@@ -523,11 +522,6 @@ public class IrSlotScheduler : MonoBehaviour
         server.OnIrEmitAck      -= OnAck;
         server.OnIrWindowResult -= OnWindow;
 
-        if (disableMotors)
-            for (int i = 0; i < enemies.Count; i++)
-                server.SendMotorsOn(enemies[i].RobotId);
-
-        if (wasStreaming != null) server.RestoreStreams(wasStreaming);
         _busy = false;
     }
 
