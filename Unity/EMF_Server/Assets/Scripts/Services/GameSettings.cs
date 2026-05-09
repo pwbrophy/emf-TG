@@ -10,16 +10,16 @@ using UnityEngine;
 public class GameSettings : MonoBehaviour
 {
     [Header("Match Parameters")]
-    [Tooltip("Starting hit points for every robot. At default damage (10) a robot takes 10 direct hits or ~3-4 rear hits to destroy.")]
+    [Tooltip("Starting hit points for every robot.")]
     public int MaxHp = 100;
 
     [Tooltip("Base damage dealt per successful IR hit. Multiplied by RearMultiplier for rear-sector hits (S/SE/SW).")]
     public int DamagePerHit = 10;
 
-    [Tooltip("Rear-sector damage multiplier (hit from S / SE / SW). Default 3x rewards flanking manoeuvres.")]
+    [Tooltip("Rear-sector damage multiplier (hit from S / SE / SW). Default 3x rewards flanking.")]
     public float RearMultiplier = 3f;
 
-    [Tooltip("Match duration in seconds. At expiry the team with the most surviving robots wins; damage breaks ties.")]
+    [Tooltip("Match duration in seconds.")]
     public float MatchDurationSeconds = 600f;
 
     [Header("Lobby")]
@@ -43,50 +43,16 @@ public class GameSettings : MonoBehaviour
     public string[] SouthPointUids  = new string[0];
 
     [Header("Shot Timing")]
-    [Tooltip("Minimum seconds between shots for the same robot. Set longer than the total shot time.")]
+    [Tooltip("Minimum seconds between shots for the same robot.")]
     public float FireCooldownSeconds = 3f;
 
-    [Tooltip("How many ms after receiving the ir_fire_slot command the shooter waits before emitting IR. Gives listeners time to get ready. Reduce to speed up the sequence; increase if enemies consistently miss the window.")]
-    public int SlotFutureMs = 50;
-
-    [Tooltip("Extra delay (ms) added to the listener start time relative to the fire command. Currently 0. Could offset the listen window if the shooter fires early.")]
-    public int ListenDelayMs = 50;
-
-    [Tooltip("Duration of the first IR burst within each repetition. Longer = more chance of detection; too long wastes time with diminishing returns.")]
-    public int B1DurMs = 90;
-
-    [Tooltip("Silent gap between Burst 1 and Burst 2 within each rep. The two-burst design lets the receiver disambiguate which reps triggered.")]
-    public int Gap12Ms = 15;
-
-    [Tooltip("Duration of the second IR burst within each repetition. Should match B1DurMs unless intentionally asymmetric.")]
-    public int B2DurMs = 90;
-
-    [Tooltip("Silent gap between consecutive repetitions. Shortening packs more reps into the same window; lengthening helps slow receivers reset.")]
-    public int RepGapMs = 20;
-
-    [Tooltip("Number of IR burst-pairs emitted per shot. 2 reps with 90ms burst windows gives reliable interrupt-driven detection. Increase if getting missed hits; decrease if you need a shorter shot cycle.")]
-    public int Reps = 2;
-
-    [Tooltip("Fallback ceiling: Unity waits at most this long after the slot ends for any remaining results. With interrupt-driven early exit the wait usually ends well before this. 0.1s covers Wi-Fi round-trip.")]
-    public float ResultBufferSeconds = 0.1f;
-
-    [Tooltip("Pause all robot camera streams for the duration of the IR detection window. Reduces Wi-Fi congestion so slot commands arrive on time.")]
-    public bool DisableCameraWhileDetecting = true;
-
-    [Tooltip("Send motors_off to all robots involved in a shot before the detection window, then motors_on after. Stops motor electrical noise from triggering IR receivers.")]
-    public bool DisableMotorsWhileDetecting = true;
-
-    [Header("Handshake IR Mode")]
-    [Tooltip("Use ACK-driven handshake protocol instead of time-sync slots. Eliminates missed shots caused by ping spikes.")]
-    public bool UseHandshakeIr = false;
-
-    [Tooltip("Duration (ms) of each listen window in handshake mode. The enemy robot listens for this long after receiving ir_listen_window.")]
+    [Tooltip("Duration (ms) of each listen window per phase. Enemy listens for this long after receiving ir_listen_window.")]
     public int HandshakeWindowMs = 10;
 
     [Tooltip("Timeout (ms) waiting for ir_emit_ack from the shooter. If exceeded the shot is aborted.")]
     public int HandshakeAckTimeoutMs = 300;
 
-    [Tooltip("Timeout (ms) waiting for ir_window_result from each enemy. Enemies that don't respond are treated as misses.")]
+    [Tooltip("Timeout (ms) waiting for ir_window_result from each enemy. Non-responding enemies are treated as misses.")]
     public int HandshakeWindowTimeoutMs = 300;
 
     // ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -107,28 +73,17 @@ public class GameSettings : MonoBehaviour
         {
             var data = new SaveData
             {
-                maxHp                       = MaxHp,
-                damagePerHit                = DamagePerHit,
-                rearMultiplier              = RearMultiplier,
-                matchDurationSeconds        = MatchDurationSeconds,
-                maxPlayers                  = MaxPlayers,
-                maxTeamPoints               = MaxTeamPoints,
-                teamPointsPerKill           = TeamPointsPerKill,
-                fireCooldownSeconds         = FireCooldownSeconds,
-                slotFutureMs                = SlotFutureMs,
-                listenDelayMs               = ListenDelayMs,
-                b1DurMs                     = B1DurMs,
-                gap12Ms                     = Gap12Ms,
-                b2DurMs                     = B2DurMs,
-                repGapMs                    = RepGapMs,
-                reps                        = Reps,
-                resultBufferSeconds         = ResultBufferSeconds,
-                disableCameraWhileDetecting = DisableCameraWhileDetecting,
-                disableMotorsWhileDetecting = DisableMotorsWhileDetecting,
-                useHandshakeIr              = UseHandshakeIr,
-                handshakeWindowMs           = HandshakeWindowMs,
-                handshakeAckTimeoutMs       = HandshakeAckTimeoutMs,
-                handshakeWindowTimeoutMs    = HandshakeWindowTimeoutMs,
+                maxHp                    = MaxHp,
+                damagePerHit             = DamagePerHit,
+                rearMultiplier           = RearMultiplier,
+                matchDurationSeconds     = MatchDurationSeconds,
+                maxPlayers               = MaxPlayers,
+                maxTeamPoints            = MaxTeamPoints,
+                teamPointsPerKill        = TeamPointsPerKill,
+                fireCooldownSeconds      = FireCooldownSeconds,
+                handshakeWindowMs        = HandshakeWindowMs,
+                handshakeAckTimeoutMs    = HandshakeAckTimeoutMs,
+                handshakeWindowTimeoutMs = HandshakeWindowTimeoutMs,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -146,26 +101,14 @@ public class GameSettings : MonoBehaviour
             var data = JsonUtility.FromJson<SaveData>(File.ReadAllText(SavePath));
             if (data == null) return;
 
-            if (data.maxHp                > 0) MaxHp                = data.maxHp;
-            if (data.damagePerHit         > 0) DamagePerHit         = data.damagePerHit;
-            if (data.rearMultiplier       > 0) RearMultiplier       = data.rearMultiplier;
-            if (data.matchDurationSeconds > 0) MatchDurationSeconds = data.matchDurationSeconds;
-            if (data.maxPlayers           > 0) MaxPlayers           = data.maxPlayers;
-            if (data.maxTeamPoints        > 0) MaxTeamPoints        = data.maxTeamPoints;
-            if (data.teamPointsPerKill    > 0) TeamPointsPerKill    = data.teamPointsPerKill;
-            if (data.fireCooldownSeconds  > 0) FireCooldownSeconds  = data.fireCooldownSeconds;
-            if (data.slotFutureMs         > 0) SlotFutureMs         = data.slotFutureMs;
-            // listenDelayMs may legitimately be 0, preserve default if saved value is also 0
-            ListenDelayMs = data.listenDelayMs;
-            if (data.b1DurMs              > 0) B1DurMs              = data.b1DurMs;
-            if (data.gap12Ms              > 0) Gap12Ms              = data.gap12Ms;
-            if (data.b2DurMs              > 0) B2DurMs              = data.b2DurMs;
-            if (data.repGapMs             > 0) RepGapMs             = data.repGapMs;
-            if (data.reps                 > 0) Reps                 = data.reps;
-            if (data.resultBufferSeconds  > 0) ResultBufferSeconds  = data.resultBufferSeconds;
-            DisableCameraWhileDetecting = data.disableCameraWhileDetecting;
-            DisableMotorsWhileDetecting = data.disableMotorsWhileDetecting;
-            UseHandshakeIr              = data.useHandshakeIr;
+            if (data.maxHp                    > 0) MaxHp                    = data.maxHp;
+            if (data.damagePerHit             > 0) DamagePerHit             = data.damagePerHit;
+            if (data.rearMultiplier           > 0) RearMultiplier           = data.rearMultiplier;
+            if (data.matchDurationSeconds     > 0) MatchDurationSeconds     = data.matchDurationSeconds;
+            if (data.maxPlayers               > 0) MaxPlayers               = data.maxPlayers;
+            if (data.maxTeamPoints            > 0) MaxTeamPoints            = data.maxTeamPoints;
+            if (data.teamPointsPerKill        > 0) TeamPointsPerKill        = data.teamPointsPerKill;
+            if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
             if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
             if (data.handshakeAckTimeoutMs    > 0) HandshakeAckTimeoutMs    = data.handshakeAckTimeoutMs;
             if (data.handshakeWindowTimeoutMs > 0) HandshakeWindowTimeoutMs = data.handshakeWindowTimeoutMs;
@@ -189,17 +132,6 @@ public class GameSettings : MonoBehaviour
         public int   maxTeamPoints;
         public int   teamPointsPerKill;
         public float fireCooldownSeconds;
-        public int   slotFutureMs;
-        public int   listenDelayMs;
-        public int   b1DurMs;
-        public int   gap12Ms;
-        public int   b2DurMs;
-        public int   repGapMs;
-        public int   reps;
-        public float resultBufferSeconds;
-        public bool  disableCameraWhileDetecting;
-        public bool  disableMotorsWhileDetecting;
-        public bool  useHandshakeIr;
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;
         public int   handshakeWindowTimeoutMs;

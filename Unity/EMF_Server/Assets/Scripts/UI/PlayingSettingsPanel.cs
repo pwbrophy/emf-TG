@@ -1,11 +1,8 @@
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
-// Exposes all GameSettings (match params + shot timing) as editable fields on the
-// Playing screen. Values auto-save to disk on each change via GameSettings.SaveToDisk().
-// The IrSlotScheduler reads GameSettings live on each shot, so changes take effect
-// immediately without restarting.
+// Exposes GameSettings (match params) as editable fields on the Playing screen.
+// Values auto-save to disk on each change via GameSettings.SaveToDisk().
 public class PlayingSettingsPanel : MonoBehaviour
 {
     [Header("Game Settings fields")]
@@ -16,23 +13,6 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField maxPlayersField;
     [SerializeField] private TMP_InputField maxTeamPtsField;
     [SerializeField] private TMP_InputField ptsPerKillField;
-
-    [Header("Shot Timing fields")]
-    [SerializeField] private TMP_InputField cooldownField;
-    [SerializeField] private TMP_InputField slotFutureField;
-    [SerializeField] private TMP_InputField listenDelayField;
-    [SerializeField] private TMP_InputField b1DurField;
-    [SerializeField] private TMP_InputField gap12Field;
-    [SerializeField] private TMP_InputField b2DurField;
-    [SerializeField] private TMP_InputField repGapField;
-    [SerializeField] private TMP_InputField repsField;
-    [SerializeField] private TMP_InputField resultBufField;
-    [SerializeField] private Toggle         disableCameraToggle;
-    [SerializeField] private Toggle         disableMotorsToggle;
-    [SerializeField] private Toggle         useHandshakeIrToggle;
-
-    [Header("Computed display")]
-    [SerializeField] private TMP_Text totalTimeLabel;
 
     private GameSettings _settings;
 
@@ -49,8 +29,6 @@ public class PlayingSettingsPanel : MonoBehaviour
         RemoveListeners();
     }
 
-    // ── Population ────────────────────────────────────────────────────────────────
-
     private void PopulateAll()
     {
         Set(maxHpField,      _settings.MaxHp.ToString());
@@ -60,21 +38,6 @@ public class PlayingSettingsPanel : MonoBehaviour
         Set(maxPlayersField, _settings.MaxPlayers.ToString());
         Set(maxTeamPtsField, _settings.MaxTeamPoints.ToString());
         Set(ptsPerKillField, _settings.TeamPointsPerKill.ToString());
-
-        Set(cooldownField,   _settings.FireCooldownSeconds.ToString("F1"));
-        Set(slotFutureField, _settings.SlotFutureMs.ToString());
-        Set(listenDelayField,_settings.ListenDelayMs.ToString());
-        Set(b1DurField,      _settings.B1DurMs.ToString());
-        Set(gap12Field,      _settings.Gap12Ms.ToString());
-        Set(b2DurField,      _settings.B2DurMs.ToString());
-        Set(repGapField,     _settings.RepGapMs.ToString());
-        Set(repsField,       _settings.Reps.ToString());
-        Set(resultBufField,  _settings.ResultBufferSeconds.ToString("F2"));
-        SetToggle(disableCameraToggle,  _settings.DisableCameraWhileDetecting);
-        SetToggle(disableMotorsToggle,  _settings.DisableMotorsWhileDetecting);
-        SetToggle(useHandshakeIrToggle, _settings.UseHandshakeIr);
-
-        UpdateTotal();
     }
 
     private static void Set(TMP_InputField f, string v)
@@ -82,76 +45,26 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (f != null) f.SetTextWithoutNotify(v);
     }
 
-    private static void SetToggle(Toggle t, bool v)
-    {
-        if (t != null) t.SetIsOnWithoutNotify(v);
-    }
-
-    // ── Total time computation ────────────────────────────────────────────────────
-
-    private void UpdateTotal()
-    {
-        if (totalTimeLabel == null || _settings == null) return;
-        if (_settings.UseHandshakeIr)
-        {
-            int estMs = _settings.HandshakeWindowMs * 2 + 200; // 2 windows + ~4 RTTs at 50ms each
-            totalTimeLabel.text = $"Total: ~{estMs}ms (handshake)";
-        }
-        else
-        {
-            int   perRep   = _settings.B1DurMs + _settings.Gap12Ms + _settings.B2DurMs + _settings.RepGapMs;
-            int   slotMs   = _settings.Reps * perRep - _settings.RepGapMs;
-            float totalSec = (_settings.SlotFutureMs + slotMs) / 1000f + _settings.ResultBufferSeconds;
-            totalTimeLabel.text = $"Total: {totalSec:F2}s (slot)";
-        }
-    }
-
-    // ── Listeners ────────────────────────────────────────────────────────────────
-
     private void AddListeners()
     {
-        Reg(maxHpField,       OnMaxHpChanged);
-        Reg(damageField,      OnDamageChanged);
-        Reg(rearMultField,    OnRearMultChanged);
-        Reg(durationField,    OnDurationChanged);
-        Reg(maxPlayersField,  OnMaxPlayersChanged);
-        Reg(maxTeamPtsField,  OnMaxTeamPtsChanged);
-        Reg(ptsPerKillField,  OnPtsPerKillChanged);
-        Reg(cooldownField,    OnCooldownChanged);
-        Reg(slotFutureField,  OnSlotFutureChanged);
-        Reg(listenDelayField, OnListenDelayChanged);
-        Reg(b1DurField,       OnB1DurChanged);
-        Reg(gap12Field,       OnGap12Changed);
-        Reg(b2DurField,       OnB2DurChanged);
-        Reg(repGapField,      OnRepGapChanged);
-        Reg(repsField,        OnRepsChanged);
-        Reg(resultBufField,   OnResultBufChanged);
-        RegToggle(disableCameraToggle,  OnDisableCameraChanged);
-        RegToggle(disableMotorsToggle,  OnDisableMotorsChanged);
-        RegToggle(useHandshakeIrToggle, OnUseHandshakeIrChanged);
+        Reg(maxHpField,      OnMaxHpChanged);
+        Reg(damageField,     OnDamageChanged);
+        Reg(rearMultField,   OnRearMultChanged);
+        Reg(durationField,   OnDurationChanged);
+        Reg(maxPlayersField, OnMaxPlayersChanged);
+        Reg(maxTeamPtsField, OnMaxTeamPtsChanged);
+        Reg(ptsPerKillField, OnPtsPerKillChanged);
     }
 
     private void RemoveListeners()
     {
-        Unreg(maxHpField,       OnMaxHpChanged);
-        Unreg(damageField,      OnDamageChanged);
-        Unreg(rearMultField,    OnRearMultChanged);
-        Unreg(durationField,    OnDurationChanged);
-        Unreg(maxPlayersField,  OnMaxPlayersChanged);
-        Unreg(maxTeamPtsField,  OnMaxTeamPtsChanged);
-        Unreg(ptsPerKillField,  OnPtsPerKillChanged);
-        Unreg(cooldownField,    OnCooldownChanged);
-        Unreg(slotFutureField,  OnSlotFutureChanged);
-        Unreg(listenDelayField, OnListenDelayChanged);
-        Unreg(b1DurField,       OnB1DurChanged);
-        Unreg(gap12Field,       OnGap12Changed);
-        Unreg(b2DurField,       OnB2DurChanged);
-        Unreg(repGapField,      OnRepGapChanged);
-        Unreg(repsField,        OnRepsChanged);
-        Unreg(resultBufField,   OnResultBufChanged);
-        UnregToggle(disableCameraToggle,  OnDisableCameraChanged);
-        UnregToggle(disableMotorsToggle,  OnDisableMotorsChanged);
-        UnregToggle(useHandshakeIrToggle, OnUseHandshakeIrChanged);
+        Unreg(maxHpField,      OnMaxHpChanged);
+        Unreg(damageField,     OnDamageChanged);
+        Unreg(rearMultField,   OnRearMultChanged);
+        Unreg(durationField,   OnDurationChanged);
+        Unreg(maxPlayersField, OnMaxPlayersChanged);
+        Unreg(maxTeamPtsField, OnMaxTeamPtsChanged);
+        Unreg(ptsPerKillField, OnPtsPerKillChanged);
     }
 
     private static void Reg(TMP_InputField f, UnityEngine.Events.UnityAction<string> cb)
@@ -163,18 +76,6 @@ public class PlayingSettingsPanel : MonoBehaviour
     {
         if (f != null) f.onValueChanged.RemoveListener(cb);
     }
-
-    private static void RegToggle(Toggle t, UnityEngine.Events.UnityAction<bool> cb)
-    {
-        if (t != null) t.onValueChanged.AddListener(cb);
-    }
-
-    private static void UnregToggle(Toggle t, UnityEngine.Events.UnityAction<bool> cb)
-    {
-        if (t != null) t.onValueChanged.RemoveListener(cb);
-    }
-
-    // ── Change handlers ───────────────────────────────────────────────────────────
 
     private void OnMaxHpChanged(string v)
     {
@@ -218,84 +119,5 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (int.TryParse(v, out int n) && n > 0) { _settings.TeamPointsPerKill = n; Save(); }
     }
 
-    private void OnCooldownChanged(string v)
-    {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n > 0) { _settings.FireCooldownSeconds = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnSlotFutureChanged(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n >= 0) { _settings.SlotFutureMs = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnListenDelayChanged(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n >= 0) { _settings.ListenDelayMs = n; Save(); }
-    }
-
-    private void OnB1DurChanged(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n > 0) { _settings.B1DurMs = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnGap12Changed(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n >= 0) { _settings.Gap12Ms = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnB2DurChanged(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n > 0) { _settings.B2DurMs = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnRepGapChanged(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n >= 0) { _settings.RepGapMs = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnRepsChanged(string v)
-    {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n > 0) { _settings.Reps = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnResultBufChanged(string v)
-    {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n >= 0) { _settings.ResultBufferSeconds = n; Save(); UpdateTotal(); }
-    }
-
-    private void OnDisableCameraChanged(bool v)
-    {
-        if (_settings == null) return;
-        _settings.DisableCameraWhileDetecting = v;
-        Save();
-    }
-
-    private void OnDisableMotorsChanged(bool v)
-    {
-        if (_settings == null) return;
-        _settings.DisableMotorsWhileDetecting = v;
-        Save();
-    }
-
-    private void OnUseHandshakeIrChanged(bool v)
-    {
-        if (_settings == null) return;
-        _settings.UseHandshakeIr = v;
-        Save();
-        UpdateTotal();
-    }
-
-    private void Save()
-    {
-        _settings.SaveToDisk();
-    }
+    private void Save() => _settings.SaveToDisk();
 }

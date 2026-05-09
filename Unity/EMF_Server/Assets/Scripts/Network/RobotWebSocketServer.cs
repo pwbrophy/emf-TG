@@ -50,20 +50,9 @@ public class RobotWebSocketServer : MonoBehaviour
     // Fired when a robot replies to a ping.  Arg: robotId.
     public event Action<string> OnPong;
 
-    // Fired when a robot finishes preparing to emit IR.
-    public event Action<string> OnIrEmitReady;
-
-    // Fired when a robot completes an IR listen-and-report window.
-    // Args: robotId, hit, direction (compass string e.g. "SE", or "" if no hit)
-    public event Action<string, bool, string> OnIrResult;
-
-    // Fired when a robot sends ir_slot_result.
-    // Args: robotId, slotId, b1Mask, b2Mask
-    public event Action<string, int, byte, byte> OnIrSlotResult;
-
     // Handshake IR protocol events.
-    public event Action<string>       OnIrEmitAck;      // robot started emitting (ir_emit_left/right ACK)
-    public event Action<string, byte> OnIrWindowResult; // robot finished a listen window; byte = hit mask
+    public event Action<string>       OnIrEmitAck;      // shooter acknowledged ir_emit_left/right
+    public event Action<string, byte> OnIrWindowResult; // enemy finished a listen window; byte = hit mask
 
     // Fired when a robot scans an RFID tag.
     // Args: robotId, uid
@@ -315,77 +304,6 @@ public class RobotWebSocketServer : MonoBehaviour
             return;
         }
 
-        if (cmd == "ir_emit_ready")
-        {
-            if (!_bySession.TryGetValue(sid, out var info)) return;
-
-            string robotId = info.RobotId;
-            if (string.IsNullOrEmpty(robotId)) return;
-
-            Debug.Log($"[WS<-Robot] ir_emit_ready -> {robotId}");
-            OnIrEmitReady?.Invoke(robotId);
-            return;
-        }
-
-        if (cmd == "ir_result")
-        {
-            if (!_bySession.TryGetValue(sid, out var info)) return;
-
-            string robotId = info.RobotId;
-            if (string.IsNullOrEmpty(robotId)) return;
-
-            bool   hit = false;
-            string dir = "";
-            try
-            {
-                // Parse "hit" field
-                int k = json.IndexOf("\"hit\"", StringComparison.Ordinal);
-                if (k >= 0)
-                {
-                    int colon = json.IndexOf(':', k);
-                    if (colon >= 0)
-                    {
-                        string tail = json.Substring(colon + 1).Trim(' ', '\t', '\r', '\n', ',', '}');
-                        if (int.TryParse(tail, out var val))
-                            hit = (val != 0);
-                    }
-                }
-
-                // Parse optional "dir" field e.g. "dir":"SE"
-                int dk = json.IndexOf("\"dir\"", StringComparison.Ordinal);
-                if (dk >= 0)
-                {
-                    int colon = json.IndexOf(':', dk);
-                    if (colon >= 0)
-                    {
-                        int q1 = json.IndexOf('"', colon + 1);
-                        int q2 = q1 >= 0 ? json.IndexOf('"', q1 + 1) : -1;
-                        if (q1 >= 0 && q2 > q1)
-                            dir = json.Substring(q1 + 1, q2 - q1 - 1);
-                    }
-                }
-            }
-            catch { /* Leave defaults if parsing failed */ }
-
-            Debug.Log($"[WS<-Robot] ir_result hit={(hit ? 1 : 0)} dir={dir} -> {robotId}");
-            OnIrResult?.Invoke(robotId, hit, dir);
-            return;
-        }
-
-        if (cmd == "ir_slot_result")
-        {
-            if (!_bySession.TryGetValue(sid, out var info)) return;
-            string robotId = info.RobotId;
-            if (string.IsNullOrEmpty(robotId)) return;
-            int  slotId = ExtractInt(json, "slot_id");
-            byte b1     = (byte)ExtractInt(json, "b1");
-            byte b2     = (byte)ExtractInt(json, "b2");
-
-            Debug.Log($"[WS<-Robot] ir_slot_result slot={slotId} b1=0x{b1:X2} b2=0x{b2:X2} -> {robotId}");
-            OnIrSlotResult?.Invoke(robotId, slotId, b1, b2);
-            return;
-        }
-
         if (cmd == "ir_emit_ack")
         {
             if (!_bySession.TryGetValue(sid, out var info)) return;
@@ -512,7 +430,7 @@ public class RobotWebSocketServer : MonoBehaviour
     }
 
     // Pauses all active camera streams; returns the set of robot IDs that were streaming.
-    public HashSet<string> PauseAllStreams()
+    HashSet<string> PauseAllStreams()
     {
         var was = new HashSet<string>(_activeStreams);
         _activeStreams.Clear();
@@ -520,8 +438,7 @@ public class RobotWebSocketServer : MonoBehaviour
         return was;
     }
 
-    // Re-enables streams for robots returned by PauseAllStreams.
-    public void RestoreStreams(HashSet<string> toRestore)
+    void RestoreStreams(HashSet<string> toRestore)
     {
         foreach (var id in toRestore) SendStreamOn(id);
     }
@@ -579,21 +496,6 @@ public class RobotWebSocketServer : MonoBehaviour
         return SendJsonToRobot(robotId, json);
     }
 
-    public bool SendIrEmitPrepare(string robotId)
-    {
-        if (string.IsNullOrEmpty(robotId))
-        {
-            Debug.LogWarning("[WS->Robot][IR] ir_emit_prepare: robotId null/empty");
-            return false;
-        }
-        string json = "{\"cmd\":\"ir_emit_prepare\"}";
-        bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] ir_emit_prepare -> {robotId}"
-            : $"[WS->Robot] FAILED ir_emit_prepare -> {robotId}");
-        return ok;
-    }
-
     public bool SendIrEmitStop(string robotId)
     {
         if (string.IsNullOrEmpty(robotId))
@@ -609,96 +511,6 @@ public class RobotWebSocketServer : MonoBehaviour
         return ok;
     }
 
-    public bool SendIrListenAndReport(string robotId, int ms)
-    {
-        if (string.IsNullOrEmpty(robotId))
-        {
-            Debug.LogWarning("[WS->Robot][IR] ir_listen_and_report: robotId null/empty");
-            return false;
-        }
-        if (ms < 1) ms = 1;
-        string json = "{\"cmd\":\"ir_listen_and_report\",\"ms\":" + ms + "}";
-        bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] ir_listen_and_report ms={ms} -> {robotId}"
-            : $"[WS->Robot] FAILED ir_listen_and_report -> {robotId}");
-        return ok;
-    }
-
-    public bool SendIrListen(string robotId, int ms)
-    {
-        if (string.IsNullOrEmpty(robotId))
-        {
-            Debug.LogWarning("[WS->Robot][IR] ir_listen: robotId is null/empty");
-            return false;
-        }
-        if (ms < 1) ms = 1;
-        string json = "{\"cmd\":\"ir_listen\",\"ms\":" + ms + "}";
-        Debug.Log("[WS->Robot] ir_listen ms=" + ms + " -> " + robotId);
-        return SendJsonToRobot(robotId, json);
-    }
-
-    public bool SendIrLedAll(string robotId, bool on)
-    {
-        if (string.IsNullOrEmpty(robotId))
-        {
-            Debug.LogWarning("[WS->Robot][IR] ir_led_all: robotId is null/empty");
-            return false;
-        }
-        string json = "{\"cmd\":\"ir_led_all\",\"on\":" + (on ? "1" : "0") + "}";
-        Debug.Log("[WS->Robot] ir_led_all on=" + (on ? "1" : "0") + " -> " + robotId);
-        return SendJsonToRobot(robotId, json);
-    }
-
-    public bool SendIrRead(string robotId)
-    {
-        if (string.IsNullOrEmpty(robotId))
-        {
-            Debug.LogWarning("[WS->Robot][IR] ir_read: robotId is null/empty");
-            return false;
-        }
-        Debug.Log("[WS->Robot] ir_read -> " + robotId);
-        return SendJsonToRobot(robotId, "{\"cmd\":\"ir_read\"}");
-    }
-
-    // ===== IR slot commands =====
-
-    public void SendTimeSyncAll(long unityMs)
-    {
-        var ids = new List<string>(_sessionByRobot.Keys);
-        string json = "{\"cmd\":\"time_sync\",\"ut\":" + unityMs + "}";
-        foreach (var rid in ids)
-            SendJsonToRobot(rid, json);
-        Debug.Log($"[WS->Robot] time_sync ut={unityMs} -> {ids.Count} robots");
-    }
-
-    public bool SendIrFireSlot(string robotId, int slotId, long slotStartUt,
-                               int b1Dur, int gap12, int b2Dur, int repGap, int reps)
-    {
-        if (string.IsNullOrEmpty(robotId)) return false;
-        string json = $"{{\"cmd\":\"ir_fire_slot\",\"slot_id\":{slotId}" +
-                      $",\"slot_start\":{slotStartUt}" +
-                      $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
-                      $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
-        bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_fire_slot slot={slotId} slot_start={slotStartUt} -> {robotId}"
-                     : $"[WS->Robot] FAILED ir_fire_slot -> {robotId}");
-        return ok;
-    }
-
-    public bool SendIrListenSlot(string robotId, int slotId, long slotStartUt,
-                                 int b1Dur, int gap12, int b2Dur, int repGap, int reps)
-    {
-        if (string.IsNullOrEmpty(robotId)) return false;
-        string json = $"{{\"cmd\":\"ir_listen_slot\",\"slot_id\":{slotId}" +
-                      $",\"slot_start\":{slotStartUt}" +
-                      $",\"b1_dur\":{b1Dur},\"b1_b2_gap\":{gap12}" +
-                      $",\"b2_dur\":{b2Dur},\"rep_gap\":{repGap},\"reps\":{reps}}}";
-        bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_listen_slot slot={slotId} slot_start={slotStartUt} -> {robotId}"
-                     : $"[WS->Robot] FAILED ir_listen_slot -> {robotId}");
-        return ok;
-    }
 
     // ===== Handshake IR commands =====
 

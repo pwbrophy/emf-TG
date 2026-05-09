@@ -172,6 +172,21 @@ EventSystem                  — InputSystemUIInputModule (new Input System)
 
 **Note:** `JoystickBase`, `TurretSlider`, `ShootButton`, `ShootResultLabel`, `CooldownLabel` have been removed from PlayingPanel — tank controls are now driven from phone clients. The operator view shows HP bars and live player inputs instead.
 
+### PlayingPanel runtime builder (`Assets/Scripts/UI/PlayingPanelBuilder.cs`)
+
+`PlayingPanelBuilder` is a `[ExecuteAlways]` `MonoBehaviour` attached to `Canvas/PlayingPanel`. It replaces all the old `RebuildPlayingPanel` editor menu steps — the layout is now built automatically and saved permanently into the scene file.
+
+**How it works:**
+- In **Edit mode**: on first load (or after a recompile), `OnValidate` checks for a hidden sentinel child named `__ppb_v1`. If the sentinel is absent, it destroys all existing children, rebuilds the full UI hierarchy, adds the sentinel, marks the scene dirty, and auto-saves it. Subsequent loads find the sentinel and skip the rebuild.
+- In **Play mode**: always rebuilds fresh (sentinel is ignored).
+- Uses `System.Reflection` (`BindingFlags`) to set `[SerializeField] private` fields on components — no `SerializedObject` needed at runtime.
+
+**To force a rebuild** (e.g. after changing the layout code): bump the constant `BUILT_SENTINEL` in `PlayingPanelBuilder.cs` (e.g. `"__ppb_v1"` → `"__ppb_v2"`). The next recompile will find no matching sentinel, rebuild, and auto-save.
+
+**Why `[ExecuteAlways]` + sentinel instead of `[MenuItem]`:** The old editor menu required a manual "Thundergeddon → 9 Rebuild Playing Panel" step after every layout change. The sentinel approach makes the rebuild fully automatic — it fires on the first recompile after attaching the component, saves the scene, and never touches it again until you explicitly bump the version.
+
+---
+
 ### Editor scripts (`Assets/Editor/`)
 
 These are utility scripts for scene setup — not part of the game build:

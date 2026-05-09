@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v3";
+    const string BUILT_SENTINEL = "__ppb_v4";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -295,31 +295,6 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_teamPts  = MakeSettingsRow(gameSettingsContent, "Team Pts",    "Points needed for instant tug-of-war win.");
         var f_ptsKill  = MakeSettingsRow(gameSettingsContent, "Pts/Kill",    "Team points awarded per robot destroyed.");
 
-        // ── Shot timing column ────────────────────────────────────────────────
-        var shotTimingCol = MakeSettingsColumn(columns.transform, "ShotTimingColumn", "SHOT TIMING");
-        RectTransform shotTimingContent;
-        var shotTimingScroll = CreateScrollCard(shotTimingCol.transform, "ShotTimingScroll", out shotTimingContent);
-        shotTimingScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
-        shotTimingScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
-
-        var f_cooldown   = MakeSettingsRow(shotTimingContent, "Cooldown s",  "Min seconds between shots per robot.");
-        var f_slotFuture = MakeSettingsRow(shotTimingContent, "Slot Future", "ms shooter waits before emitting IR.");
-        var f_listenDly  = MakeSettingsRow(shotTimingContent, "Listen Dly",  "Extra ms added to listener start time.");
-        var f_b1         = MakeSettingsRow(shotTimingContent, "Burst1 ms",   "IR burst 1 duration per rep.");
-        var f_gap12      = MakeSettingsRow(shotTimingContent, "Gap 1-2 ms",  "Silent gap between burst 1 and burst 2.");
-        var f_b2         = MakeSettingsRow(shotTimingContent, "Burst2 ms",   "IR burst 2 duration per rep.");
-        var f_repGap     = MakeSettingsRow(shotTimingContent, "Rep Gap ms",  "Silent gap between repetitions.");
-        var f_reps       = MakeSettingsRow(shotTimingContent, "Reps",        "Burst-pair repetitions per shot.");
-        var f_resBuf     = MakeSettingsRow(shotTimingContent, "Res Buf s",   "Seconds Unity waits for IR results.");
-        var t_disableCam    = MakeSettingsToggle(shotTimingContent, "Disable Cam",    "Pause camera streams during IR slot.");
-        var t_disableMotors = MakeSettingsToggle(shotTimingContent, "Disable Motors", "Stop motors during IR slot.");
-        var t_handshakeIr   = MakeSettingsToggle(shotTimingContent, "Handshake IR",   "ACK-driven: no clock sync, eliminates ping-spike misses.");
-
-        var totalRow = MakeRect(shotTimingContent.transform, "TotalRow");
-        totalRow.AddComponent<LayoutElement>().preferredHeight = 26f;
-        var totalLbl = MakeTmp(totalRow.transform, "TotalLabel", "Total: --",
-                                C_CYAN, 12f, TextAlignmentOptions.MidlineLeft, bold: true);
-        Anchor(totalLbl.gameObject, 0, 0, 1, 1, 0, 0, 0, 0);
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -368,26 +343,13 @@ public class PlayingPanelBuilder : MonoBehaviour
         });
 
         var psp = GetOrAdd<PlayingSettingsPanel>(pp);
-        Wire(psp, "maxHpField",          f_maxHp);
-        Wire(psp, "damageField",         f_damage);
-        Wire(psp, "rearMultField",       f_rearMult);
-        Wire(psp, "durationField",       f_duration);
-        Wire(psp, "maxPlayersField",     f_maxPl);
-        Wire(psp, "maxTeamPtsField",     f_teamPts);
-        Wire(psp, "ptsPerKillField",     f_ptsKill);
-        Wire(psp, "cooldownField",       f_cooldown);
-        Wire(psp, "slotFutureField",     f_slotFuture);
-        Wire(psp, "listenDelayField",    f_listenDly);
-        Wire(psp, "b1DurField",          f_b1);
-        Wire(psp, "gap12Field",          f_gap12);
-        Wire(psp, "b2DurField",          f_b2);
-        Wire(psp, "repGapField",         f_repGap);
-        Wire(psp, "repsField",           f_reps);
-        Wire(psp, "resultBufField",      f_resBuf);
-        Wire(psp, "disableCameraToggle",  t_disableCam);
-        Wire(psp, "disableMotorsToggle",  t_disableMotors);
-        Wire(psp, "useHandshakeIrToggle", t_handshakeIr);
-        Wire(psp, "totalTimeLabel",       totalLbl);
+        Wire(psp, "maxHpField",      f_maxHp);
+        Wire(psp, "damageField",     f_damage);
+        Wire(psp, "rearMultField",   f_rearMult);
+        Wire(psp, "durationField",   f_duration);
+        Wire(psp, "maxPlayersField", f_maxPl);
+        Wire(psp, "maxTeamPtsField", f_teamPts);
+        Wire(psp, "ptsPerKillField", f_ptsKill);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)
