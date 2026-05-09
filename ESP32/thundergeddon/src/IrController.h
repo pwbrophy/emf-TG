@@ -32,6 +32,11 @@ static constexpr uint8_t IR_LEDC_CH2   = 5;
 static constexpr uint32_t IR_FREQ_HZ   = 38000;
 static constexpr uint8_t IR_LEDC_BITS  = 8;    // 50% duty = 128/256
 
+// Handshake burst timing. Short 3ms on / 3ms off keeps the TSOP AGC from
+// saturating while maximising pulse density across a short listen window.
+static constexpr int HS_BURST_ON_MS  = 3;
+static constexpr int HS_BURST_OFF_MS = 3;
+
 // PCA9555 Port 0 bit index → compass string (bit 0=N, clockwise)
 static const char* const IR_DIR_NAMES[8] = {
     "N", "NE", "E", "SE", "S", "SW", "W", "NW"
@@ -72,19 +77,46 @@ public:
     // Handshake emit/listen API (ACK-driven, no clock sync)
     // =========================================================
 
-    // Fire left barrel (GPIO39) only. Call after motors.enable(false).
-    // ACK is sent by the caller (main.cpp) after this returns.
+    // Fire left barrel (GPIO39) using a 25ms on / 15ms off burst pattern.
+    // The burst repeats autonomously; call updateEmitBurst() every loop tick.
+    // Burst pattern prevents TSOP AGC saturation (AGC suppresses continuous >~50ms).
+    // ACK is sent by the caller (main.cpp) immediately after this returns.
     void beginEmitLeft()
     {
         _setupLedc();
+        _burstLed   = 1;
+        _burstEnd   = millis() + (uint32_t)HS_BURST_ON_MS;
+        _burstPhase = BurstPhase::On;
         _led1On();
-        _emitting = true;
+        _emitting   = true;
     }
 
     // Switch to right barrel (GPIO40). LEDC already set up by beginEmitLeft.
+    // Inherits the running burst pattern — ACK sent by caller immediately.
     void beginEmitRight()
     {
+        _burstLed   = 2;
+        _burstEnd   = millis() + (uint32_t)HS_BURST_ON_MS;
+        _burstPhase = BurstPhase::On;
         _led2On();
+    }
+
+    // Drive the handshake burst state machine. Call every loop tick while
+    // in handshake emit phase (beginEmitLeft / beginEmitRight are active).
+    // Stops automatically when stopEmit() is called (clears _burstPhase).
+    void updateEmitBurst(uint32_t now)
+    {
+        if (_burstPhase == BurstPhase::Idle) return;
+        if ((int32_t)(now - _burstEnd) < 0) return;
+        if (_burstPhase == BurstPhase::On) {
+            _ledOff();
+            _burstEnd   = now + (uint32_t)HS_BURST_OFF_MS;
+            _burstPhase = BurstPhase::Off;
+        } else { // Off
+            if (_burstLed == 1) _led1On(); else _led2On();
+            _burstEnd   = now + (uint32_t)HS_BURST_ON_MS;
+            _burstPhase = BurstPhase::On;
+        }
     }
 
     // Start a timed listen window. Call updateWindow() each loop tick.
@@ -105,12 +137,20 @@ public:
         if (g_pca9555IntFired) {
             g_pca9555IntFired = false;
             _winMask |= (~_pca->readPort0() & 0xFF);
+            // Early exit on first detection — no point waiting for _winEnd
+            if (_winMask != 0) {
+                _inWin   = false;
+                _winDone = true;
+                _pca->readPort0(); // flush INT line
+                Serial.printf("[IR] window early-exit mask=0x%02X\n", _winMask);
+                return;
+            }
         }
         if ((int32_t)(now - _winEnd) >= 0) {
             _inWin   = false;
             _winDone = true;
             _pca->readPort0(); // flush INT after window
-            Serial.printf("[IR] handshake window done mask=0x%02X\n", _winMask);
+            Serial.printf("[IR] window timeout mask=0x%02X\n", _winMask);
         }
     }
 
@@ -141,6 +181,7 @@ public:
         _emitting   = false;
         _fireActive = false;
         _firePhase  = FirePhase::Idle;
+        _burstPhase = BurstPhase::Idle; // clear handshake burst state
     }
 
     // True while a legacy emit or a fire slot is active.
@@ -202,6 +243,11 @@ public:
     void scheduleFireSlot(int slotId, int32_t slotStartMs,
                           int b1Dur, int gap12, int b2Dur, int repGap, int reps)
     {
+        // Clear any leftover handshake state so a timed-out handshake shot
+        // never leaves _emitting=true and blocks motor re-enable in slot mode.
+        _emitting   = false;
+        _burstPhase = BurstPhase::Idle;
+
         _fireSlotId  = slotId;
         _fireStart   = (uint32_t)slotStartMs;
         _fb1Dur      = b1Dur;
@@ -390,6 +436,12 @@ private:
     bool     _winDone = false;
     uint32_t _winEnd  = 0;
     uint8_t  _winMask = 0;
+
+    // ---- Handshake burst state (beginEmitLeft/Right + updateEmitBurst) ----
+    enum class BurstPhase : uint8_t { Idle, On, Off };
+    BurstPhase _burstPhase = BurstPhase::Idle;
+    uint32_t   _burstEnd   = 0;
+    uint8_t    _burstLed   = 0; // 1 = left (GPIO39), 2 = right (GPIO40)
 
     // ---- Legacy emit state ----
     bool _emitting = false;
