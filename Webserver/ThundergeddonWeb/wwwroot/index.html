@@ -267,39 +267,32 @@
       transition: background 0.1s;
     }
 
-    /* ── Turret control (bottom-right, 5% inset) ── */
-    #turret-base {
-      position: absolute;
-      right: 5vw;
-      bottom: calc(10vh + 22px);
-      width: 260px;
-      height: 44px;
-      border-radius: 22px;
-      background: rgba(255,255,255,0.12);
-      border: 2px solid rgba(255,255,255,0.3);
-      pointer-events: all;
-      touch-action: none;
-    }
-    #turret-thumb {
-      position: absolute;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.55);
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      transition: left 0.05s;
-    }
-    #turret-label {
+    /* ── Turret buttons (bottom-right, 5% inset) ── */
+    #turret-buttons {
       position: absolute;
       right: 5vw;
       bottom: 10vh;
-      width: 260px;
-      text-align: center;
-      font-size: 0.8rem;
-      color: rgba(255,255,255,0.5);
+      display: flex;
+      gap: 8px;
+      touch-action: none;
+    }
+    .turret-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      border: 2px solid rgba(255,255,255,0.35);
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      pointer-events: all;
+    }
+    .turret-btn:active {
+      background: rgba(255,255,255,0.30);
     }
 
     /* ── Rotate notice (portrait mode) ── */
@@ -575,11 +568,13 @@
       </div>
     </div>
 
-    <!-- Turret -->
-    <div id="turret-base">
-      <div id="turret-thumb"></div>
+    <!-- Turret buttons -->
+    <div id="turret-buttons">
+      <button class="turret-btn" id="tbtn-fl" data-speed="-1">&#171;</button>
+      <button class="turret-btn" id="tbtn-sl" data-speed="slow-neg">&#8249;</button>
+      <button class="turret-btn" id="tbtn-sr" data-speed="slow-pos">&#8250;</button>
+      <button class="turret-btn" id="tbtn-fr" data-speed="1">&#187;</button>
     </div>
-    <div id="turret-label">TURRET</div>
   </div>
 </div>
 
@@ -625,10 +620,7 @@ const DRIVE_HZ   = 20;  // max sends per second
 let lastDriveSend = 0;
 
 // Turret
-let turretActive = false;
-let turretOriginX = 0;
-let turretSpeed = 0;
-const TURRET_HALF = 90; // px of travel for full speed
+let slowTurretSpeed = 0.4; // updated from server via TurretSettings / game_started
 
 // Fire cooldown
 const FIRE_COOLDOWN_MS = 3000;
@@ -684,8 +676,9 @@ function buildConnection() {
     .withAutomaticReconnect([0, 2000, 5000, 10000])
     .build();
 
-  conn.on('LobbyUpdate',  players  => renderPlayerList(players));
-  conn.on('GameStarted',  data     => onGameStarted(data));
+  conn.on('LobbyUpdate',     players => renderPlayerList(players));
+  conn.on('GameStarted',     data    => onGameStarted(data));
+  conn.on('TurretSettings',  speed   => { slowTurretSpeed = speed; });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
   conn.on('YouAreDead',   ()       => onYouAreDead());
   conn.on('YouAreAlive',  ()       => onYouAreAlive());
@@ -782,8 +775,9 @@ function toggleFullscreen() {
 }
 
 function onGameStarted(data) {
-  maxHp      = data.maxHp || 100;
-  currentHp  = data.hp    || maxHp;
+  maxHp           = data.maxHp           || 100;
+  currentHp       = data.hp              || maxHp;
+  if (data.slowTurretSpeed) slowTurretSpeed = data.slowTurretSpeed;
   isDead     = false;
   isDeadWalk = false;
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
@@ -998,47 +992,22 @@ function updateJoy(cx, cy) {
 }
 
 // ════════════════════════════════════════════════════════
-// Turret control
+// Turret buttons
 // ════════════════════════════════════════════════════════
-const turBase  = document.getElementById('turret-base');
-const turThumb = document.getElementById('turret-thumb');
-
-turBase.addEventListener('pointerdown', e => {
-  e.preventDefault();
-  turBase.setPointerCapture(e.pointerId);
-  const rect    = turBase.getBoundingClientRect();
-  turretOriginX = rect.left + rect.width / 2;
-  turretActive  = true;
-  updateTurret(e.clientX);
+document.querySelectorAll('.turret-btn').forEach(btn => {
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    btn.setPointerCapture(e.pointerId);
+    const raw = btn.dataset.speed;
+    const spd = raw === 'slow-neg' ? -slowTurretSpeed
+              : raw === 'slow-pos' ?  slowTurretSpeed
+              : parseFloat(raw);
+    if (connection) connection.invoke('SendTurret', spd).catch(() => {});
+  });
+  const stop = () => { if (connection) connection.invoke('SendTurret', 0).catch(() => {}); };
+  btn.addEventListener('pointerup',     stop);
+  btn.addEventListener('pointercancel', stop);
 });
-
-turBase.addEventListener('pointermove', e => {
-  if (!turretActive) return;
-  updateTurret(e.clientX);
-});
-
-turBase.addEventListener('pointerup',     releaseTurret);
-turBase.addEventListener('pointercancel', releaseTurret);
-
-function releaseTurret(e) {
-  turretActive = false;
-  turretSpeed  = 0;
-  turThumb.style.left = '50%';
-  if (connection) connection.invoke('SendTurret', 0.0).catch(() => {});
-}
-
-function updateTurret(cx) {
-  const raw = cx - turretOriginX;
-  const clamped = clamp(raw, -TURRET_HALF, TURRET_HALF);
-  const linear = clamped / TURRET_HALF;
-  turretSpeed = -(linear * Math.abs(linear)); // square curve: fine control at low end; negated for motor direction
-
-  const rect   = turBase.getBoundingClientRect();
-  const pct    = ((clamped + TURRET_HALF) / (TURRET_HALF * 2)) * 100;
-  turThumb.style.left = pct + '%';
-
-  if (connection) connection.invoke('SendTurret', roundF(turretSpeed)).catch(() => {});
-}
 
 // ════════════════════════════════════════════════════════
 // Fire button

@@ -697,8 +697,9 @@ public class PlayerWebSocketServer : MonoBehaviour
             ip       = rInfo.Ip ?? "";
         }
 
-        int maxHp = ServiceLocator.GameSettings?.MaxHp ?? 100;
-        int hp    = GetCurrentHp(robotId, maxHp);
+        int maxHp   = ServiceLocator.GameSettings?.MaxHp ?? 100;
+        int hp      = GetCurrentHp(robotId, maxHp);
+        float slowT = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.4f;
 
         string videoUrl = string.IsNullOrEmpty(ip) ? "" : "http://" + ip + ":81/stream";
 
@@ -709,6 +710,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             ",\"videoUrl\":\""      + EscapeJson(videoUrl)  + "\"" +
             ",\"hp\":"              + hp                           +
             ",\"maxHp\":"           + maxHp                        +
+            ",\"slowTurretSpeed\":" + slowT.ToString("F3")         +
             "}";
 
         BroadcastRaw(json);
@@ -868,6 +870,13 @@ public class PlayerWebSocketServer : MonoBehaviour
     public void BroadcastDisplayEvent(string text)
     {
         string json = "{\"cmd\":\"display_event\",\"text\":\"" + EscapeJson(text) + "\"}";
+        BroadcastRaw(json);
+    }
+
+    public void BroadcastTurretSettings()
+    {
+        float slow = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.4f;
+        string json = "{\"cmd\":\"turret_settings\",\"slowSpeed\":" + slow.ToString("F3") + "}";
         BroadcastRaw(json);
     }
 

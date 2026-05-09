@@ -42,6 +42,10 @@ public class GameSettings : MonoBehaviour
     public string[] CentrePointUids = new string[0];
     public string[] SouthPointUids  = new string[0];
 
+    [Header("Phone Controls")]
+    [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]
+    public float SlowTurretSpeed = 0.4f;
+
     [Header("Shot Timing")]
     [Tooltip("Minimum seconds between shots for the same robot.")]
     public float FireCooldownSeconds = 3f;
@@ -80,6 +84,7 @@ public class GameSettings : MonoBehaviour
                 maxPlayers               = MaxPlayers,
                 maxTeamPoints            = MaxTeamPoints,
                 teamPointsPerKill        = TeamPointsPerKill,
+                slowTurretSpeed          = SlowTurretSpeed,
                 fireCooldownSeconds      = FireCooldownSeconds,
                 handshakeWindowMs        = HandshakeWindowMs,
                 handshakeAckTimeoutMs    = HandshakeAckTimeoutMs,
@@ -108,6 +113,7 @@ public class GameSettings : MonoBehaviour
             if (data.maxPlayers               > 0) MaxPlayers               = data.maxPlayers;
             if (data.maxTeamPoints            > 0) MaxTeamPoints            = data.maxTeamPoints;
             if (data.teamPointsPerKill        > 0) TeamPointsPerKill        = data.teamPointsPerKill;
+            if (data.slowTurretSpeed          > 0) SlowTurretSpeed          = data.slowTurretSpeed;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
             if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
             if (data.handshakeAckTimeoutMs    > 0) HandshakeAckTimeoutMs    = data.handshakeAckTimeoutMs;
@@ -131,6 +137,7 @@ public class GameSettings : MonoBehaviour
         public int   maxPlayers;
         public int   maxTeamPoints;
         public int   teamPointsPerKill;
+        public float slowTurretSpeed;
         public float fireCooldownSeconds;
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;
