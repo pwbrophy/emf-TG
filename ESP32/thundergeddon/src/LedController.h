@@ -144,17 +144,17 @@ public:
     }
 
     // OTA progress bar — bypasses the effect system (update() is not running during OTA).
-    // Fills LEDs 0→5 in dim blue proportional to pct (0–100).
+    // Fills LEDs 0→5 in dim purple proportional to pct (0–100).
     void showOtaProgress(uint8_t pct)
     {
         _strip.clear();
         float   ledsF    = (float)pct * LED_STRIP_COUNT / 100.0f;
         int     fullLeds = (int)ledsF;
         for (int i = 0; i < fullLeds; i++)
-            _strip.setPixelColor(i, _strip.Color(0, 0, DIM_BRIGHTNESS));
+            _strip.setPixelColor(i, _strip.Color(DIM_BRIGHTNESS, 0, DIM_BRIGHTNESS));
         uint8_t partial = (uint8_t)((ledsF - (float)fullLeds) * DIM_BRIGHTNESS);
         if (partial > 0 && fullLeds < LED_STRIP_COUNT)
-            _strip.setPixelColor(fullLeds, _strip.Color(0, 0, partial));
+            _strip.setPixelColor(fullLeds, _strip.Color(partial, 0, partial));
         _strip.show();
     }
 
