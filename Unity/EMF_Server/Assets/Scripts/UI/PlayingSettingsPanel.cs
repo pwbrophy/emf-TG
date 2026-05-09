@@ -13,6 +13,7 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField maxPlayersField;
     [SerializeField] private TMP_InputField maxTeamPtsField;
     [SerializeField] private TMP_InputField ptsPerKillField;
+    [SerializeField] private TMP_InputField slowTurretSpeedField;
 
     private GameSettings _settings;
 
@@ -36,8 +37,9 @@ public class PlayingSettingsPanel : MonoBehaviour
         Set(rearMultField,   _settings.RearMultiplier.ToString("F1"));
         Set(durationField,   _settings.MatchDurationSeconds.ToString("F0"));
         Set(maxPlayersField, _settings.MaxPlayers.ToString());
-        Set(maxTeamPtsField, _settings.MaxTeamPoints.ToString());
-        Set(ptsPerKillField, _settings.TeamPointsPerKill.ToString());
+        Set(maxTeamPtsField,       _settings.MaxTeamPoints.ToString());
+        Set(ptsPerKillField,       _settings.TeamPointsPerKill.ToString());
+        Set(slowTurretSpeedField,  _settings.SlowTurretSpeed.ToString("F2"));
     }
 
     private static void Set(TMP_InputField f, string v)
@@ -53,7 +55,8 @@ public class PlayingSettingsPanel : MonoBehaviour
         Reg(durationField,   OnDurationChanged);
         Reg(maxPlayersField, OnMaxPlayersChanged);
         Reg(maxTeamPtsField, OnMaxTeamPtsChanged);
-        Reg(ptsPerKillField, OnPtsPerKillChanged);
+        Reg(ptsPerKillField,      OnPtsPerKillChanged);
+        Reg(slowTurretSpeedField, OnSlowTurretSpeedChanged);
     }
 
     private void RemoveListeners()
@@ -64,7 +67,8 @@ public class PlayingSettingsPanel : MonoBehaviour
         Unreg(durationField,   OnDurationChanged);
         Unreg(maxPlayersField, OnMaxPlayersChanged);
         Unreg(maxTeamPtsField, OnMaxTeamPtsChanged);
-        Unreg(ptsPerKillField, OnPtsPerKillChanged);
+        Unreg(ptsPerKillField,      OnPtsPerKillChanged);
+        Unreg(slowTurretSpeedField, OnSlowTurretSpeedChanged);
     }
 
     private static void Reg(TMP_InputField f, UnityEngine.Events.UnityAction<string> cb)
@@ -117,6 +121,18 @@ public class PlayingSettingsPanel : MonoBehaviour
     {
         if (_settings == null) return;
         if (int.TryParse(v, out int n) && n > 0) { _settings.TeamPointsPerKill = n; Save(); }
+    }
+
+    private void OnSlowTurretSpeedChanged(string v)
+    {
+        if (_settings == null) return;
+        if (float.TryParse(v, out float n))
+        {
+            n = Mathf.Clamp(n, 0.1f, 0.9f);
+            _settings.SlowTurretSpeed = n;
+            Save();
+            ServiceLocator.PlayerServer?.BroadcastTurretSettings();
+        }
     }
 
     private void Save() => _settings.SaveToDisk();

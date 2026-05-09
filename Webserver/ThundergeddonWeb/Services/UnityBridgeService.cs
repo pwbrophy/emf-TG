@@ -140,6 +140,12 @@ public class UnityBridgeService : BackgroundService
                         await _hub.Clients.All.SendAsync("DisplayEvent", evtText);
                     break;
 
+                case "turret_settings":
+                    if (doc.RootElement.TryGetProperty("slowSpeed", out var ssEl)
+                        && ssEl.TryGetSingle(out float ss))
+                        await _hub.Clients.All.SendAsync("TurretSettings", ss);
+                    break;
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;
@@ -171,13 +177,14 @@ public class UnityBridgeService : BackgroundService
         string? connId   = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        string callsign = GetString(root, "callsign") ?? "";
-        string videoUrl = GetString(root, "videoUrl") ?? "";
-        int    hp       = GetInt(root, "hp");
-        int    maxHp    = GetInt(root, "maxHp", 100);
+        string callsign        = GetString(root, "callsign") ?? "";
+        string videoUrl        = GetString(root, "videoUrl") ?? "";
+        int    hp              = GetInt(root, "hp");
+        int    maxHp           = GetInt(root, "maxHp", 100);
+        float  slowTurretSpeed = GetFloat(root, "slowTurretSpeed", 0.4f);
 
         await _hub.Clients.Client(connId).SendAsync("GameStarted",
-            new { callsign, videoUrl, hp, maxHp });
+            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed });
 
         _logger.LogInformation("[Bridge] GameStarted → conn {c} (robot={r})", connId, callsign);
     }

@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v4";
+    const string BUILT_SENTINEL = "__ppb_v5";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -294,7 +294,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_maxPl    = MakeSettingsRow(gameSettingsContent, "Max Players", "Max slots on public display page.");
         var f_teamPts  = MakeSettingsRow(gameSettingsContent, "Team Pts",    "Points needed for instant tug-of-war win.");
         var f_ptsKill  = MakeSettingsRow(gameSettingsContent, "Pts/Kill",    "Team points awarded per robot destroyed.");
-
+        var f_slowTur  = MakeSettingsRow(gameSettingsContent, "Slow Turret", "Speed for slow turret buttons on phone (0.1–0.9).");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -349,7 +349,8 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "durationField",   f_duration);
         Wire(psp, "maxPlayersField", f_maxPl);
         Wire(psp, "maxTeamPtsField", f_teamPts);
-        Wire(psp, "ptsPerKillField", f_ptsKill);
+        Wire(psp, "ptsPerKillField",       f_ptsKill);
+        Wire(psp, "slowTurretSpeedField",  f_slowTur);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)
