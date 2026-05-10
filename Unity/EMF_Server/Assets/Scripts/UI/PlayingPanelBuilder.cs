@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v5";
+    const string BUILT_SENTINEL = "__ppb_v6";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -295,6 +295,10 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_teamPts  = MakeSettingsRow(gameSettingsContent, "Team Pts",    "Points needed for instant tug-of-war win.");
         var f_ptsKill  = MakeSettingsRow(gameSettingsContent, "Pts/Kill",    "Team points awarded per robot destroyed.");
         var f_slowTur  = MakeSettingsRow(gameSettingsContent, "Slow Turret", "Speed for slow turret buttons on phone (0.1–0.9).");
+        var f_driveAccel  = MakeSettingsRow(gameSettingsContent, "Drive Accel",  "Seconds to reach full drive speed from stopped. 0=instant.");
+        var f_driveDecel  = MakeSettingsRow(gameSettingsContent, "Drive Decel",  "Seconds to coast to stop when drive stick released. 0=instant.");
+        var f_turretAccel = MakeSettingsRow(gameSettingsContent, "Turret Accel", "Seconds to reach full turret speed from stopped. 0=instant.");
+        var f_turretDecel = MakeSettingsRow(gameSettingsContent, "Turret Decel", "Seconds to coast to stop when turret released. 0=instant.");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -351,6 +355,10 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "maxTeamPtsField", f_teamPts);
         Wire(psp, "ptsPerKillField",       f_ptsKill);
         Wire(psp, "slowTurretSpeedField",  f_slowTur);
+        Wire(psp, "driveAccelField",  f_driveAccel);
+        Wire(psp, "driveDecelField",  f_driveDecel);
+        Wire(psp, "turretAccelField", f_turretAccel);
+        Wire(psp, "turretDecelField", f_turretDecel);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)

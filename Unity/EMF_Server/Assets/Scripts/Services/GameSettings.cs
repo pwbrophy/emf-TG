@@ -46,6 +46,16 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]
     public float SlowTurretSpeed = 0.4f;
 
+    [Header("Tank Physics")]
+    [Tooltip("Seconds to ramp from stopped to full drive speed. 0 = instant response.")]
+    public float DriveAcceleration = 0f;
+    [Tooltip("Seconds to coast to a stop after drive input is released. 0 = instant stop.")]
+    public float DriveDeceleration = 0f;
+    [Tooltip("Seconds to ramp from stopped to full turret speed. 0 = instant response.")]
+    public float TurretAcceleration = 0f;
+    [Tooltip("Seconds to coast to a stop after turret input is released. 0 = instant stop.")]
+    public float TurretDeceleration = 0f;
+
     [Header("Shot Timing")]
     [Tooltip("Minimum seconds between shots for the same robot.")]
     public float FireCooldownSeconds = 3f;
@@ -85,6 +95,10 @@ public class GameSettings : MonoBehaviour
                 maxTeamPoints            = MaxTeamPoints,
                 teamPointsPerKill        = TeamPointsPerKill,
                 slowTurretSpeed          = SlowTurretSpeed,
+                driveAcceleration        = DriveAcceleration,
+                driveDeceleration        = DriveDeceleration,
+                turretAcceleration       = TurretAcceleration,
+                turretDeceleration       = TurretDeceleration,
                 fireCooldownSeconds      = FireCooldownSeconds,
                 handshakeWindowMs        = HandshakeWindowMs,
                 handshakeAckTimeoutMs    = HandshakeAckTimeoutMs,
@@ -114,6 +128,11 @@ public class GameSettings : MonoBehaviour
             if (data.maxTeamPoints            > 0) MaxTeamPoints            = data.maxTeamPoints;
             if (data.teamPointsPerKill        > 0) TeamPointsPerKill        = data.teamPointsPerKill;
             if (data.slowTurretSpeed          > 0) SlowTurretSpeed          = data.slowTurretSpeed;
+            // Physics params are valid at zero, so always restore them.
+            DriveAcceleration  = data.driveAcceleration;
+            DriveDeceleration  = data.driveDeceleration;
+            TurretAcceleration = data.turretAcceleration;
+            TurretDeceleration = data.turretDeceleration;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
             if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
             if (data.handshakeAckTimeoutMs    > 0) HandshakeAckTimeoutMs    = data.handshakeAckTimeoutMs;
@@ -138,6 +157,10 @@ public class GameSettings : MonoBehaviour
         public int   maxTeamPoints;
         public int   teamPointsPerKill;
         public float slowTurretSpeed;
+        public float driveAcceleration;
+        public float driveDeceleration;
+        public float turretAcceleration;
+        public float turretDeceleration;
         public float fireCooldownSeconds;
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;

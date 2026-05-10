@@ -76,6 +76,10 @@ public:
         if (on) {
             _port1 |= BIT_SLEEP;           // wake drivers
         } else {
+            // Zero targets AND currents so the tank stops instantly on disable,
+            // regardless of any in-progress inertia ramp.
+            _leftTarget = _rightTarget = _turretTarget = 0.0f;
+            _leftCurrent = _rightCurrent = _turretCurrent = 0.0f;
             _leftLevel   = 0;
             _rightLevel  = 0;
             _turretLevel = 0;
@@ -91,18 +95,30 @@ public:
 
     bool isEnabled() const { return _enabled; }
 
+    // Set acceleration/deceleration ramp times (seconds, 0 = instant).
+    // driveAccel/driveDecel apply to both tracks; turretAccel/turretDecel to the turret.
+    // "Accel" governs ramp-up when a non-zero target is commanded.
+    // "Decel" governs coasting when the target returns to zero (stick released).
+    void setPhysics(float driveAccel, float driveDecel, float turretAccel, float turretDecel)
+    {
+        _driveAccel  = driveAccel;
+        _driveDecel  = driveDecel;
+        _turretAccel = turretAccel;
+        _turretDecel = turretDecel;
+    }
+
     // Set left and right track speeds.  Values in [-1..1].
-    // Internally quantised to PWM_STEPS levels; output applied on next tick().
+    // Stores as float targets; tick() ramps the current value toward the target.
     void setLeftRight(float l, float r)
     {
-        _leftLevel  = _toLevel(l);
-        _rightLevel = _toLevel(r);
+        _leftTarget  = fmaxf(-1.0f, fminf(1.0f, l));
+        _rightTarget = fmaxf(-1.0f, fminf(1.0f, r));
     }
 
     // Set turret rotation speed.  Value in [-1..1].
     void setTurret(float v)
     {
-        _turretLevel = _toLevel(v);
+        _turretTarget = fmaxf(-1.0f, fminf(1.0f, v));
     }
 
     // Control the hull board test LED (IO1_7).
@@ -114,11 +130,19 @@ public:
     }
 
     // Advance the software PWM counter.  Call once per millisecond from loop().
-    // Builds the Port 1 byte and writes it only when the value changes,
-    // minimising I2C traffic during steady-state (e.g. full speed or stopped).
+    // Ramps current speed values toward their targets using the configured physics
+    // parameters, then builds the Port 1 byte and writes it only when it changes.
     void tick()
     {
         _pwmCounter = (_pwmCounter + 1) % PWM_STEPS;
+
+        // Ramp currents toward targets (runs even when disabled so state is clean).
+        _stepChannel(_leftCurrent,   _leftTarget,   _driveAccel,  _driveDecel);
+        _stepChannel(_rightCurrent,  _rightTarget,  _driveAccel,  _driveDecel);
+        _stepChannel(_turretCurrent, _turretTarget, _turretAccel, _turretDecel);
+        _leftLevel   = _toLevel(_leftCurrent);
+        _rightLevel  = _toLevel(_rightCurrent);
+        _turretLevel = _toLevel(_turretCurrent);
 
         if (!_enabled) return; // nothing to do; port already zeroed by enable(false)
 
@@ -155,6 +179,19 @@ private:
         return (int8_t)roundf(v * PWM_STEPS);
     }
 
+    // Advance 'cur' one tick (1 ms) toward 'tgt' using the appropriate ramp rate.
+    // target == 0 → use decel (stick released, coasting to stop).
+    // target != 0 → use accel (player is actively steering).
+    // param == 0  → instant (step of 2.0 covers the full [-1..1] range in one tick).
+    static void _stepChannel(float& cur, float tgt, float accel, float decel)
+    {
+        if (cur == tgt) return;
+        float param = (tgt == 0.0f) ? decel : accel;
+        float step  = (param <= 0.0f) ? 2.0f : (1.0f / (param * 1000.0f));
+        if (tgt > cur) cur = fminf(cur + step, tgt);
+        else           cur = fmaxf(cur - step, tgt);
+    }
+
     // Return the two INx output bits for one H-bridge at the current PWM phase.
     // level > 0 → forward (IN1=1, IN2=0)
     // level < 0 → reverse (IN1=0, IN2=1)
@@ -179,9 +216,23 @@ private:
 
     uint8_t  _addr        = 0x20;
     bool     _enabled     = false;
-    int8_t   _leftLevel   = 0;    // -PWM_STEPS..+PWM_STEPS
+    int8_t   _leftLevel   = 0;    // -PWM_STEPS..+PWM_STEPS (quantised from _leftCurrent)
     int8_t   _rightLevel  = 0;
     int8_t   _turretLevel = 0;
     uint8_t  _pwmCounter  = 0;    // 0..(PWM_STEPS-1)
     uint8_t  _port1       = 0x00; // shadow of PCA9555 Port 1 output register
+
+    // Float targets set by setLeftRight/setTurret.
+    float _leftTarget   = 0.0f;
+    float _rightTarget  = 0.0f;
+    float _turretTarget = 0.0f;
+    // Float currents ramped toward targets each tick by _stepChannel.
+    float _leftCurrent   = 0.0f;
+    float _rightCurrent  = 0.0f;
+    float _turretCurrent = 0.0f;
+    // Inertia parameters (seconds; 0 = instant).
+    float _driveAccel  = 0.0f;
+    float _driveDecel  = 0.0f;
+    float _turretAccel = 0.0f;
+    float _turretDecel = 0.0f;
 };
