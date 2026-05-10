@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using UnityEngine;
 using WebSocketSharp;
 using WebSocketSharp.Server;
@@ -279,6 +280,11 @@ public class RobotWebSocketServer : MonoBehaviour
             bool invTurret   = ExtractInt(json, "inv_turret")   != 0;
             _dir?.SetDriveConfig(id, invThrottle, invSteer, invTurret);
 
+            var gs = ServiceLocator.GameSettings;
+            if (gs != null)
+                SendPhysics(id, gs.DriveAcceleration, gs.DriveDeceleration,
+                            gs.TurretAcceleration, gs.TurretDeceleration);
+
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
             return;
         }
@@ -494,6 +500,27 @@ public class RobotWebSocketServer : MonoBehaviour
         string s = speed.ToString("F3", CultureInfo.InvariantCulture);
         string json = $"{{\"cmd\":\"turret\",\"speed\":{s}}}";
         return SendJsonToRobot(robotId, json);
+    }
+
+    public bool SendPhysics(string robotId, float driveAccel, float driveDecel,
+                            float turretAccel, float turretDecel)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string da = driveAccel.ToString("F3",  CultureInfo.InvariantCulture);
+        string dd = driveDecel.ToString("F3",  CultureInfo.InvariantCulture);
+        string ta = turretAccel.ToString("F3", CultureInfo.InvariantCulture);
+        string td = turretDecel.ToString("F3", CultureInfo.InvariantCulture);
+        string json = $"{{\"cmd\":\"set_physics\",\"drive_accel\":{da},\"drive_decel\":{dd}," +
+                      $"\"turret_accel\":{ta},\"turret_decel\":{td}}}";
+        return SendJsonToRobot(robotId, json);
+    }
+
+    public void BroadcastPhysicsToAll(GameSettings settings)
+    {
+        if (settings == null) return;
+        foreach (var robotId in _sessionByRobot.Keys.ToList())
+            SendPhysics(robotId, settings.DriveAcceleration, settings.DriveDeceleration,
+                        settings.TurretAcceleration, settings.TurretDeceleration);
     }
 
     public bool SendIrEmitStop(string robotId)

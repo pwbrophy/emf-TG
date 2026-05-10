@@ -684,6 +684,16 @@ static void handleWsText(const String& s)
         return;
     }
 
+    if (strcmp(cmd, "set_physics") == 0) {
+        float da = doc["drive_accel"]  | 0.0f;
+        float dd = doc["drive_decel"]  | 0.0f;
+        float ta = doc["turret_accel"] | 0.0f;
+        float td = doc["turret_decel"] | 0.0f;
+        motors.setPhysics(da, dd, ta, td);
+        Serial.printf("[PHYS] drive=%.2f/%.2f turret=%.2f/%.2f\n", da, dd, ta, td);
+        return;
+    }
+
     // ---- Game effects ----
 
     if (strcmp(cmd, "flash_fire") == 0) {
