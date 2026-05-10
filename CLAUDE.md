@@ -30,6 +30,8 @@ Each Claude Code session works on a dedicated branch (`claude/<random-name>`) in
 4. After merge, Unity and OTA both pick up changes from master automatically.
 5. Old `claude/` branches and their worktree directories can be deleted once their commits are reachable from master. Use `git log --oneline <branch> ^master` to verify before deleting.
 
+**Always commit and merge to master at the end of every session.** The user cannot see Unity C# changes or web client changes until they are on master. Never leave work only in the worktree branch — always finish by committing, merging to master, and confirming the merge succeeded. If the main tree has an unstaged copy of a file (e.g. from a compile-check copy), run `git restore <file>` in the main tree before merging.
+
 ### ESP32 firmware: always upload via OTA
 Never ask the user to connect a USB cable. After every firmware change, upload using the `thundergeddon_ota` PlatformIO environment, which pushes over Wi-Fi via ArduinoOTA:
 
