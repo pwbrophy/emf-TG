@@ -289,6 +289,7 @@
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
+      -webkit-touch-callout: none;
       pointer-events: all;
     }
     .turret-btn:active {
@@ -1008,6 +1009,10 @@ document.querySelectorAll('.turret-btn').forEach(btn => {
   btn.addEventListener('pointerup',     stop);
   btn.addEventListener('pointercancel', stop);
 });
+
+// Suppress browser context menu on the whole game screen (prevents Android
+// "save image" popup when long-pressing over the MJPEG video or any control)
+document.getElementById('screen-playing').addEventListener('contextmenu', e => e.preventDefault());
 
 // ════════════════════════════════════════════════════════
 // Fire button

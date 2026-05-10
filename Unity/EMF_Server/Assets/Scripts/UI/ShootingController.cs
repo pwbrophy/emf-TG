@@ -24,12 +24,22 @@ public class ShootingController : MonoBehaviour
     {
         if (shootButton != null)
             shootButton.onClick.AddListener(OnShootClicked);
+        var flow = ServiceLocator.GameFlow;
+        if (flow != null) flow.OnPhaseChanged += OnPhaseChanged;
     }
 
     private void OnDisable()
     {
         if (shootButton != null)
             shootButton.onClick.RemoveListener(OnShootClicked);
+        var flow = ServiceLocator.GameFlow;
+        if (flow != null) flow.OnPhaseChanged -= OnPhaseChanged;
+    }
+
+    private void OnPhaseChanged(GamePhase phase)
+    {
+        if (phase == GamePhase.Playing)
+            _nextFireTime.Clear();
     }
 
     private void Update()
