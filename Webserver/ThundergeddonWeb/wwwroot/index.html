@@ -1014,9 +1014,10 @@ document.querySelectorAll('.turret-btn').forEach(btn => {
   btn.addEventListener('pointercancel', stop);
 });
 
-// Suppress browser context menu on the whole game screen (prevents Android
-// "save image" popup when long-pressing over the MJPEG video or any control)
-document.getElementById('screen-playing').addEventListener('contextmenu', e => e.preventDefault());
+// Suppress browser context menu everywhere (prevents Android long-press
+// "save image / open in new tab" popup on any element during gameplay).
+// Capture phase (true) intercepts before any element handler fires.
+document.addEventListener('contextmenu', e => e.preventDefault(), true);
 
 // ════════════════════════════════════════════════════════
 // Fire button
