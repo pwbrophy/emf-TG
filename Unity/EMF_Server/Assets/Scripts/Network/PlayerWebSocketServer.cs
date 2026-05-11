@@ -489,6 +489,20 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
     }
 
+    public void SendFireResult(string shooterRobotId, string resultText)
+    {
+        foreach (var kvp in _connToPlayer)
+        {
+            if (PlayerToRobot(kvp.Value) != shooterRobotId) continue;
+            string json = "{\"cmd\":\"fire_result\"" +
+                          ",\"connectionId\":\"" + EscapeJson(kvp.Key) + "\"" +
+                          ",\"text\":\"" + EscapeJson(resultText) + "\"}";
+            BroadcastRaw(json);
+            Debug.Log($"[PlayerWS] fire_result → {kvp.Value}: {resultText}");
+            return;
+        }
+    }
+
     void OnRobotRespawned(string robotId)
     {
         // Notify the assigned player so their phone can exit the dead screen

@@ -385,6 +385,26 @@
     }
     #game-paused-overlay p { color: var(--muted); font-size: 0.9rem; letter-spacing: 0.06em; }
 
+    #fire-toast {
+      position: absolute;
+      left: 50%;
+      bottom: 38%;
+      transform: translateX(-50%);
+      z-index: 25;
+      background: rgba(0,0,0,0.72);
+      color: #fff;
+      font-size: 1.25rem;
+      font-weight: 700;
+      padding: 10px 22px;
+      border-radius: 24px;
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #fire-toast.visible { opacity: 1; }
+
     /* ═══════════════════════════════════════════════════
        SCREEN 4 — DEAD overlay (sits on top of playing)
     ═══════════════════════════════════════════════════ */
@@ -585,6 +605,9 @@
       <button class="turret-btn" id="tbtn-fr" data-speed="-1">&#187;</button>
     </div>
   </div>
+
+  <!-- Fire result toast -->
+  <div id="fire-toast"></div>
 </div>
 
 <!-- ── Game paused overlay ─────────────────────────────────────────── -->
@@ -646,6 +669,18 @@ function showScreen(id) {
   document.body.classList.toggle('game-active', id === 'screen-playing');
 }
 
+let _fireToastTimer = null;
+function showFireToast(text) {
+  const el = document.getElementById('fire-toast');
+  el.textContent = text;
+  el.classList.add('visible');
+  if (_fireToastTimer) clearTimeout(_fireToastTimer);
+  _fireToastTimer = setTimeout(() => {
+    el.classList.remove('visible');
+    _fireToastTimer = null;
+  }, 2500);
+}
+
 function showReconnectOverlay(msg) {
   document.getElementById('reconnect-msg').textContent = msg;
   document.getElementById('reconnect-overlay').classList.add('visible');
@@ -671,6 +706,8 @@ function returnToJoin(message) {
   document.getElementById('stream').src = '';
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
   document.getElementById('game-paused-overlay').classList.remove('active');
+  if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
+  document.getElementById('fire-toast').classList.remove('visible');
   document.getElementById('join-btn').disabled = false;
   showScreen('screen-join');
   if (message) setStatus(message, true);
@@ -695,6 +732,7 @@ function buildConnection() {
   conn.on('RfidTag',      uid      => onRfidTag(uid));
   conn.on('GamePaused',        ()   => document.getElementById('game-paused-overlay').classList.add('active'));
   conn.on('GameResumed',       ()   => document.getElementById('game-paused-overlay').classList.remove('active'));
+  conn.on('FireResult',    text    => showFireToast(text));
   conn.on('ServerDisconnected',()   => returnToJoin('Game server closed. Please rejoin.'));
 
   conn.onreconnecting(() => showReconnectOverlay('Trying to reconnect…'));

@@ -74,6 +74,9 @@ public class IrSlotScheduler : MonoBehaviour
             yield break;
         }
 
+        string fireResultText = "Miss";
+        var hitParts = new List<string>();
+
         var playerList = players.GetAll();
         int GetAllianceIndex(string playerName)
         {
@@ -246,6 +249,10 @@ public class IrSlotScheduler : MonoBehaviour
                     server.SendFlashHit(enemyId);
 
                 server.SendSetHp(enemyId, newHp, maxHp);
+
+                bool isKill = damage > 0 && newHp <= 0;
+                string dirLabel = cardinalDir == "S" ? "rear" : (cardinalDir == "N" ? "front" : "flank");
+                hitParts.Add(isKill ? $"You killed {enemyName}!" : $"Hit {enemyName} on {dirLabel}");
             }
             Debug.Log($"[IrHs] ===== Shot {slotId} DONE — {hitCount} hit(s) of {enemies.Count} =====");
         }
@@ -253,6 +260,10 @@ public class IrSlotScheduler : MonoBehaviour
         {
             Debug.Log($"[IrHs] ===== Shot {slotId} DONE — aborted ======");
         }
+
+        if (hitParts.Count > 0)
+            fireResultText = string.Join(" · ", hitParts);
+        ServiceLocator.PlayerServer?.SendFireResult(shooterId, fireResultText);
 
         server.OnIrEmitAck      -= OnAck;
         server.OnIrWindowResult -= OnWindow;
