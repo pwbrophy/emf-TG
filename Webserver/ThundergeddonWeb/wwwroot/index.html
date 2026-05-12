@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
   <title>Thundergeddon</title>
   <script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
   <style>
@@ -182,6 +184,18 @@
       user-select: none;
       -webkit-user-select: none;
     }
+    #stream-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      pointer-events: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
     #stream-placeholder {
       position: absolute;
       inset: 0;
@@ -254,7 +268,7 @@
     #joystick-base {
       position: absolute;
       left: 5vw;
-      bottom: 10vh;
+      bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
       width: 260px;
       height: 260px;
       border-radius: 50%;
@@ -279,7 +293,7 @@
     #turret-buttons {
       position: absolute;
       right: 5vw;
-      bottom: 10vh;
+      bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
       display: flex;
       gap: 8px;
       touch-action: none;
@@ -333,7 +347,7 @@
     #fire-btn {
       position: absolute;
       left: 50%;
-      bottom: 10vh;
+      bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
       transform: translateX(-50%);
       width: 88px;
       height: 88px;
@@ -564,6 +578,7 @@
 <!-- ── Screen 3: Playing ───────────────────────────────────────────── -->
 <div id="screen-playing" class="screen">
   <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
+  <canvas id="stream-canvas" style="display:none"></canvas>
   <div id="stream-placeholder" style="display:none">No video stream</div>
 
   <!-- HP bar -->
@@ -632,6 +647,14 @@
 
 <script>
 // ════════════════════════════════════════════════════════
+// Platform detection
+// ════════════════════════════════════════════════════════
+// true on ALL iOS browsers (Safari, Chrome/iOS, Firefox/iOS) — they share WebKit
+// and none support MJPEG in <img>. maxTouchPoints check catches iPadOS 13+.
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// ════════════════════════════════════════════════════════
 // State
 // ════════════════════════════════════════════════════════
 let myName      = '';
@@ -658,6 +681,92 @@ let slowTurretSpeed = 0.4; // updated from server via TurretSettings / game_star
 const FIRE_COOLDOWN_MS = 3000;
 let fireCooldownUntil  = 0;
 let fireCooldownTimer  = null;
+
+// ════════════════════════════════════════════════════════
+// JS MJPEG decoder (used on iOS/Safari which can't display MJPEG in <img>)
+// Fetches the multipart stream, finds JPEG SOI/EOI byte markers, and draws
+// each frame to #stream-canvas. CORS is already enabled on the ESP32.
+// ════════════════════════════════════════════════════════
+let _mjpegReader = null;
+
+function stopJsMjpeg() {
+  if (_mjpegReader) { _mjpegReader.cancel(); _mjpegReader = null; }
+}
+
+async function startJsMjpegDecoder(url) {
+  stopJsMjpeg();
+  const canvas = document.getElementById('stream-canvas');
+  const ctx    = canvas.getContext('2d');
+  let buf      = new Uint8Array(0);
+
+  let res;
+  try { res = await fetch(url, { mode: 'cors' }); }
+  catch (e) { console.warn('MJPEG fetch failed:', e); return; }
+
+  _mjpegReader = res.body.getReader();
+
+  const pump = async () => {
+    while (true) {
+      const { done, value } = await _mjpegReader.read();
+      if (done) break;
+
+      // Append incoming chunk to buffer
+      const merged = new Uint8Array(buf.length + value.length);
+      merged.set(buf); merged.set(value, buf.length);
+      buf = merged;
+
+      // Extract all complete JPEG frames (SOI=FF D8 … EOI=FF D9)
+      while (buf.length > 3) {
+        let soi = -1;
+        for (let i = 0; i < buf.length - 1; i++) {
+          if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
+        }
+        if (soi < 0) { buf = new Uint8Array(0); break; }
+
+        let eoi = -1;
+        for (let i = soi + 2; i < buf.length - 1; i++) {
+          if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
+        }
+        if (eoi < 0) { buf = buf.slice(soi); break; } // incomplete frame — wait
+
+        const jpeg    = buf.slice(soi, eoi);
+        buf           = buf.slice(eoi);
+
+        const blob    = new Blob([jpeg], { type: 'image/jpeg' });
+        const blobUrl = URL.createObjectURL(blob);
+        const img     = new Image();
+        img.onload = () => {
+          if (!canvas.width)  canvas.width  = img.naturalWidth  || canvas.offsetWidth;
+          if (!canvas.height) canvas.height = img.naturalHeight || canvas.offsetHeight;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(blobUrl);
+        };
+        img.src = blobUrl;
+      }
+    }
+  };
+
+  pump().catch(err => {
+    if (err && err.name !== 'AbortError') console.warn('MJPEG decode error:', err);
+  });
+}
+
+function startGameStream(url) {
+  if (!url) return;
+  if (IS_IOS) {
+    document.getElementById('stream').style.display              = 'none';
+    document.getElementById('stream-placeholder').style.display  = 'none';
+    const canvas = document.getElementById('stream-canvas');
+    canvas.style.display = '';
+    startJsMjpegDecoder(url);
+  } else {
+    document.getElementById('stream-canvas').style.display = 'none';
+    const img = document.getElementById('stream');
+    img.style.display = '';
+    img.src = url;
+    document.getElementById('stream-placeholder').style.display = 'none';
+  }
+}
 
 // ════════════════════════════════════════════════════════
 // Screen management
@@ -704,6 +813,9 @@ function returnToJoin(message) {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
   document.getElementById('stream').src = '';
+  stopJsMjpeg();
+  const _sc = document.getElementById('stream-canvas');
+  _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
   document.getElementById('game-paused-overlay').classList.remove('active');
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
@@ -834,12 +946,7 @@ function onGameStarted(data) {
 
   document.getElementById('robot-label').textContent = data.callsign || '';
 
-  if (data.videoUrl) {
-    const img = document.getElementById('stream');
-    img.style.display = '';
-    img.src = data.videoUrl;
-    document.getElementById('stream-placeholder').style.display = 'none';
-  }
+  startGameStream(data.videoUrl);
 
   updateHpBar();
   showScreen('screen-playing');
@@ -1116,13 +1223,15 @@ document.getElementById('name-input').addEventListener('keydown', e => {
 // ── Persist player name across sessions ────────────────
 (function () {
   const input = document.getElementById('name-input');
-  const saved = localStorage.getItem('tg_player_name');
-  if (saved) input.value = saved;
-  input.addEventListener('input', () => {
-    localStorage.setItem('tg_player_name', input.value);
-  });
+  try {
+    const saved = localStorage.getItem('tg_player_name');
+    if (saved) input.value = saved;
+    input.addEventListener('input', () => {
+      try { localStorage.setItem('tg_player_name', input.value); } catch (_) {}
+    });
+  } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v14</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v15</div>
 </body>
 </html>
