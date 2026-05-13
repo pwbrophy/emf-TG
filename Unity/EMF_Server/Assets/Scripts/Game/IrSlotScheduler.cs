@@ -224,11 +224,11 @@ public class IrSlotScheduler : MonoBehaviour
                 b1Masks.TryGetValue(enemyId, out byte b1);
                 b2Masks.TryGetValue(enemyId, out byte b2);
 
-                byte detMask = (byte)(b1 & b2);
+                byte detMask = (byte)(b1 | b2);
                 Debug.Log($"[IrHs]   {enemyName}: b1=0x{b1:X2} b2=0x{b2:X2} det=0x{detMask:X2} " +
-                           $"({MaskToDirs(detMask)}) → {(detMask != 0 ? "HIT" : "miss")}");
+                           $"({MaskToDirs(detMask)}) → {(b1 != 0 && b2 != 0 ? "HIT" : "miss")}");
 
-                if (detMask == 0) continue;
+                if (b1 == 0 || b2 == 0) continue;
 
                 string cardinalDir = ResolveAveragedCardinal(detMask);
                 Debug.Log($"[IrHs] *** HIT: {enemyName} cardinal={cardinalDir} {(cardinalDir == "S" ? "(REAR — 3×)" : "")} ***");
