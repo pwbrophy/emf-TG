@@ -219,7 +219,9 @@ public class IrSlotScheduler : MonoBehaviour
             for (int i = 0; i < enemies.Count; i++)
             {
                 string enemyId   = enemies[i].RobotId;
-                string enemyName = enemies[i].Callsign ?? enemyId;
+                string enemyName = !string.IsNullOrEmpty(enemies[i].AssignedPlayer)
+                    ? enemies[i].AssignedPlayer
+                    : (enemies[i].Callsign ?? enemyId);
 
                 b1Masks.TryGetValue(enemyId, out byte b1);
                 b2Masks.TryGetValue(enemyId, out byte b2);
