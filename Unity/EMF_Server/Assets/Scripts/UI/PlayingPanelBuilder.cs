@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v6";
+    const string BUILT_SENTINEL = "__ppb_v7";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -106,6 +106,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         RemoveIfPresent<RobotPingButton>(pp);
         RemoveIfPresent<ToggleCameraButton>(pp);
         RemoveIfPresent<FlipVideoButtons>(pp);
+        RemoveIfPresent<SpectateButtonController>(pp);
 
         var bgImg = pp.GetComponent<Image>() ?? pp.AddComponent<Image>();
         bgImg.color = C_BG;
@@ -270,6 +271,11 @@ public class PlayingPanelBuilder : MonoBehaviour
         var capSouthBtn  = MakeButton(capRow.transform, "CaptureSouthBtn",  "SOUTH\n—",  C_CAPNTR, C_TEXT, 9f);
         SetRowHeights(34f, capNorthBtn, capCentreBtn, capSouthBtn);
 
+        // FPV spectate button
+        var fpvRow = MakeActionRow(leftCol.transform, "FpvRow");
+        var fpvBtn = MakeButton(fpvRow.transform, "FpvButton", "FPV: OFF", C_DKBLU2, C_TEXT, 12f);
+        fpvBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+
         // Roster scroll
         RectTransform rosterContent;
         var rosterScroll = CreateScrollCard(leftCol.transform, "RosterScroll", out rosterContent);
@@ -279,6 +285,11 @@ public class PlayingPanelBuilder : MonoBehaviour
         RemoveIfPresent<TeamRosterPanel>(pp);
         var rlp = GetOrAdd<RobotListPanel>(pp);
         Wire(rlp, "rowContainer", rosterContent);
+
+        var sbc = GetOrAdd<SpectateButtonController>(pp);
+        Wire(sbc, "_fpvButton",     fpvBtn.GetComponent<Button>());
+        Wire(sbc, "_fpvLabel",      fpvBtn.GetComponentInChildren<TextMeshProUGUI>());
+        Wire(sbc, "_robotListPanel", rlp);
 
         // ── Game settings column ──────────────────────────────────────────────
         var gameSettingsCol = MakeSettingsColumn(columns.transform, "GameSettingsColumn", "GAME SETTINGS");
