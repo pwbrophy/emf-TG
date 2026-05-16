@@ -134,6 +134,10 @@ public class UnityBridgeService : BackgroundService
                     await _hub.Clients.All.SendAsync("DisplayUpdate", json);
                     break;
 
+                case "spectate_update":
+                    await _hub.Clients.All.SendAsync("SpectateUpdate", json);
+                    break;
+
                 case "display_event":
                     string? evtText = GetString(doc.RootElement, "text");
                     if (!string.IsNullOrEmpty(evtText))

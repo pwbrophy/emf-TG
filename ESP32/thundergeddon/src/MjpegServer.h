@@ -35,7 +35,7 @@ public:
         cfg.server_port     = 81;
         cfg.ctrl_port       = 32769;  // avoid clash with default 32768
         cfg.stack_size      = 8192;
-        cfg.max_open_sockets = 2;     // one viewer at a time is enough; allow a spare slot
+        cfg.max_open_sockets = 3;     // player phone + spectator display + spare slot
 
         if (httpd_start(&_server, &cfg) != ESP_OK) {
             Serial.println("[MJPEG] httpd_start failed");

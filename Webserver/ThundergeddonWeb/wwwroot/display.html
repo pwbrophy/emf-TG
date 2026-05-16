@@ -126,6 +126,42 @@
   /* Connection banner */
   #status-banner { position: fixed; bottom: 10px; right: 10px; background: #222;
     color: #888; font-size: 0.75em; padding: 4px 10px; border-radius: 4px; z-index: 20; }
+
+  /* ── FPV overlay ────────────────────────────────────────────────── */
+  #fpv-overlay { position: fixed; inset: 0; background: #000; z-index: 25; display: none;
+    flex-direction: column; }
+  #fpv-overlay.active { display: flex; }
+
+  /* Tug-of-war strip (reused from main layout, but inside the overlay) */
+  #fpv-teambar { background: var(--panel); padding: 8px 16px; flex-shrink: 0; }
+  #fpv-tp-labels { display: flex; justify-content: space-between; margin-bottom: 4px;
+    font-size: 0.8em; font-weight: 700; }
+  #fpv-tp-label-0 { color: var(--blue); }
+  #fpv-tp-label-1 { color: var(--red); }
+  #fpv-tp-track { position: relative; height: 20px; background: #111; border-radius: 10px; overflow: hidden; }
+  #fpv-tp-fill-0 { position: absolute; left: 0; top: 0; height: 100%; background: var(--blue);
+    transition: width 0.4s ease; }
+  #fpv-tp-fill-1 { position: absolute; right: 0; top: 0; height: 100%; background: var(--red);
+    transition: width 0.4s ease; }
+  #fpv-tp-centre { position: absolute; left: 50%; top: 0; width: 3px; height: 100%;
+    background: #fff; transform: translateX(-50%); z-index: 1; }
+
+  /* Player info strip */
+  #fpv-info { display: flex; align-items: center; gap: 14px;
+    background: var(--panel); padding: 6px 16px; flex-shrink: 0; }
+  #fpv-player-name { font-size: 1.2em; font-weight: 700; color: #fff; min-width: 120px; }
+  #fpv-hp-wrap { flex: 1; height: 18px; background: #111; border-radius: 9px; overflow: hidden; }
+  #fpv-hp-bar  { height: 100%; border-radius: 9px; background: var(--blue);
+    transition: width 0.3s ease; }
+  #fpv-hp-num  { font-size: 0.9em; color: var(--dim); min-width: 48px; text-align: right; }
+  #fpv-timer   { font-size: 1.4em; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: #fff; min-width: 60px; text-align: right; }
+  #fpv-timer.urgent { color: #ff4444; animation: flash 0.5s infinite alternate; }
+
+  /* Video area */
+  #fpv-video-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; background: #000; min-height: 0; }
+  #fpv-stream { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 </style>
 </head>
 <body>
@@ -197,6 +233,30 @@
   </div>
 </div>
 
+<!-- FPV overlay (shown when operator enables spectate for a robot) -->
+<div id="fpv-overlay">
+  <div id="fpv-teambar">
+    <div id="fpv-tp-labels">
+      <span id="fpv-tp-label-0">Alliance 1 — 0 pts</span>
+      <span id="fpv-tp-label-1">0 pts — Alliance 2</span>
+    </div>
+    <div id="fpv-tp-track">
+      <div id="fpv-tp-fill-0" style="width:0%"></div>
+      <div id="fpv-tp-fill-1" style="width:0%"></div>
+      <div id="fpv-tp-centre"></div>
+    </div>
+  </div>
+  <div id="fpv-info">
+    <span id="fpv-player-name">—</span>
+    <div id="fpv-hp-wrap"><div id="fpv-hp-bar" style="width:100%"></div></div>
+    <span id="fpv-hp-num">—</span>
+    <span id="fpv-timer" id="fpv-timer-lbl">—:——</span>
+  </div>
+  <div id="fpv-video-wrap">
+    <img id="fpv-stream" src="" alt="">
+  </div>
+</div>
+
 <div id="paused-overlay" class="hidden">
   <div id="paused-title">&#9646;&#9646; PAUSED</div>
   <div id="paused-sub">Game paused by operator</div>
@@ -253,6 +313,13 @@ conn.on('DisplayUpdate', rawJson => {
   } catch(e) { console.error('DisplayUpdate parse error', e); }
 });
 
+conn.on('SpectateUpdate', rawJson => {
+  try {
+    const data = (typeof rawJson === 'string') ? JSON.parse(rawJson) : rawJson;
+    applySpectateUpdate(data);
+  } catch(e) { console.error('SpectateUpdate parse error', e); }
+});
+
 conn.on('DisplayEvent', text => {
   addEvent(text);
   speak(text);
@@ -291,11 +358,42 @@ async function startConnection() {
 }
 startConnection();
 
+// ── Spectate state ────────────────────────────────────────────────────────
+let fpvState = { active: false, playerName: '', hp: 0, maxHp: 100, videoUrl: '' };
+
+function applySpectateUpdate(data) {
+  if (!data.enabled) {
+    fpvState.active = false;
+    document.getElementById('fpv-overlay').classList.remove('active');
+    document.getElementById('fpv-stream').src = '';
+    return;
+  }
+
+  fpvState = {
+    active:     true,
+    playerName: data.playerName || '—',
+    hp:         data.hp    != null ? data.hp    : 100,
+    maxHp:      data.maxHp != null ? data.maxHp : 100,
+    videoUrl:   data.videoUrl || ''
+  };
+
+  document.getElementById('fpv-overlay').classList.add('active');
+  document.getElementById('fpv-stream').src = fpvState.videoUrl;
+  renderFpv();
+}
+
 // ── Apply state update ────────────────────────────────────────────────────
 function applyDisplayUpdate(data) {
   state = Object.assign(state, data);
   document.getElementById('paused-overlay')
     .classList.toggle('hidden', !state.paused);
+
+  // Keep FPV HP strip in sync with live robot HP
+  if (fpvState.active && data.robots) {
+    const r = data.robots.find(x => x.player === fpvState.playerName);
+    if (r) { fpvState.hp = r.hp; fpvState.maxHp = r.maxHp || 100; }
+  }
+
   render();
 }
 
@@ -312,6 +410,33 @@ function render() {
   renderTeamBar();
   renderAlliances();
   renderCapturePoints();
+  if (fpvState.active) renderFpv();
+}
+
+function renderFpv() {
+  // Team points bar (mirrored inside FPV overlay)
+  const tp  = state.teamPoints || [0, 0];
+  const max = state.maxTeamPoints || 300;
+  const w0  = Math.min(50, (tp[0] / max) * 100);
+  const w1  = Math.min(50, (tp[1] / max) * 100);
+  document.getElementById('fpv-tp-fill-0').style.width = w0 + '%';
+  document.getElementById('fpv-tp-fill-1').style.width = w1 + '%';
+  document.getElementById('fpv-tp-label-0').textContent = `Alliance 1 — ${tp[0]} pts`;
+  document.getElementById('fpv-tp-label-1').textContent = `${tp[1]} pts — Alliance 2`;
+
+  // Player name + HP
+  document.getElementById('fpv-player-name').textContent = fpvState.playerName;
+  const pct = Math.max(0, Math.min(100, (fpvState.hp / (fpvState.maxHp || 100)) * 100));
+  document.getElementById('fpv-hp-bar').style.width = pct + '%';
+  document.getElementById('fpv-hp-num').textContent  = fpvState.hp + ' HP';
+
+  // Timer
+  const timerEl = document.getElementById('fpv-timer');
+  const s  = Math.ceil(state.timer);
+  const m  = Math.floor(s / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  timerEl.textContent = (state.phase === 'playing') ? `${m}:${ss}` : '--:--';
+  timerEl.classList.toggle('urgent', state.phase === 'playing' && s <= 10 && s > 0);
 }
 
 function renderLobbyOverlay() {

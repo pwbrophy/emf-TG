@@ -887,6 +887,36 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastRaw(json);
     }
 
+    public void SendSpectateUpdate(string robotId, bool enabled)
+    {
+        if (!enabled)
+        {
+            BroadcastRaw("{\"cmd\":\"spectate_update\",\"enabled\":false}");
+            return;
+        }
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null || string.IsNullOrEmpty(robotId) || !dir.TryGet(robotId, out var rInfo)) return;
+
+        string ip         = rInfo.Ip ?? "";
+        string playerName = rInfo.AssignedPlayer ?? "";
+        string videoUrl   = string.IsNullOrEmpty(ip) ? "" : "http://" + ip + ":81/stream";
+        int    maxHp      = ServiceLocator.GameSettings?.MaxHp ?? 100;
+        var    state      = ServiceLocator.Game?.State;
+        int    hp         = (state != null && state.RobotHp.TryGetValue(robotId, out int v)) ? v : maxHp;
+
+        string json =
+            "{\"cmd\":\"spectate_update\"" +
+            ",\"enabled\":true" +
+            ",\"videoUrl\":\""    + EscapeJson(videoUrl)    + "\"" +
+            ",\"playerName\":\"" + EscapeJson(playerName)  + "\"" +
+            ",\"hp\":"           + hp                             +
+            ",\"maxHp\":"        + maxHp                          +
+            "}";
+        BroadcastRaw(json);
+        Debug.Log("[PlayerWS] spectate_update → player=" + playerName + " url=" + videoUrl);
+    }
+
     public void BroadcastTurretSettings()
     {
         float slow = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.4f;
