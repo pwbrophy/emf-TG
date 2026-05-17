@@ -753,17 +753,20 @@ async function startJsMjpegDecoder(url) {
 
 function startGameStream(url) {
   if (!url) return;
+  // Route through the server-side fanout proxy so the robot only has one HTTP
+  // streaming client regardless of how many viewers (phone + display) are watching.
+  const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url);
   if (IS_IOS) {
     document.getElementById('stream').style.display              = 'none';
     document.getElementById('stream-placeholder').style.display  = 'none';
     const canvas = document.getElementById('stream-canvas');
     canvas.style.display = '';
-    startJsMjpegDecoder(url);
+    startJsMjpegDecoder(proxyUrl);
   } else {
     document.getElementById('stream-canvas').style.display = 'none';
     const img = document.getElementById('stream');
     img.style.display = '';
-    img.src = url;
+    img.src = proxyUrl;
     document.getElementById('stream-placeholder').style.display = 'none';
   }
 }

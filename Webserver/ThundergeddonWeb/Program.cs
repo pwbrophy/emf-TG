@@ -9,6 +9,7 @@ builder.Services.AddSignalR();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<UnityBridgeService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UnityBridgeService>());
+builder.Services.AddSingleton<RobotStreamService>();
 
 var app = builder.Build();
 
@@ -22,23 +23,16 @@ app.MapGet("/api/serverip", () =>
     return Results.Ok(new { ip, url = $"http://{ip}:5000" });
 });
 
-// Proxy the robot's MJPEG stream so the display browser never connects directly to the
-// robot (esp_http_server is single-threaded; a second direct client would block the first).
-app.MapGet("/api/spectate-stream", async (string url, IHttpClientFactory factory, HttpContext ctx, CancellationToken ct) =>
+// Fan-out MJPEG proxy: one connection to the robot, shared between all subscribers
+// (phone player + spectator display).  The robot always sees exactly one HTTP client.
+app.MapGet("/api/robot-stream", async (string url, RobotStreamService streamer, HttpContext ctx, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(url))
     {
         ctx.Response.StatusCode = 400;
         return;
     }
-    var client = factory.CreateClient();
-    using var resp = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-    ctx.Response.ContentType = resp.Content.Headers.ContentType?.ToString()
-        ?? "multipart/x-mixed-replace; boundary=frame";
-    ctx.Response.Headers["Cache-Control"]      = "no-cache";
-    ctx.Response.Headers["X-Accel-Buffering"]  = "no";
-    await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-    await stream.CopyToAsync(ctx.Response.Body, ct);
+    await streamer.StreamToSubscriber(url, ctx.Response, ct);
 });
 
 app.Run();
