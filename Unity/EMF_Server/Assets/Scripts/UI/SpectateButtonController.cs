@@ -14,8 +14,10 @@ public class SpectateButtonController : MonoBehaviour
 
     private bool _fpvActive;
 
-    private void Awake()
+    private void Start()
     {
+        // Wire here, not Awake — PlayingPanelBuilder sets _fpvButton via reflection
+        // after AddComponent fires Awake, so the field is null during Awake.
         if (_fpvButton != null)
             _fpvButton.onClick.AddListener(OnClick);
     }
