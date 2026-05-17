@@ -161,7 +161,7 @@
   /* Video area */
   #fpv-video-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
     overflow: hidden; background: #000; min-height: 0; }
-  #fpv-stream { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  #fpv-canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
 </style>
 </head>
 <body>
@@ -253,7 +253,7 @@
     <span id="fpv-timer" id="fpv-timer-lbl">—:——</span>
   </div>
   <div id="fpv-video-wrap">
-    <img id="fpv-stream" src="" alt="">
+    <canvas id="fpv-canvas"></canvas>
   </div>
 </div>
 
@@ -358,14 +358,76 @@ async function startConnection() {
 }
 startConnection();
 
+// ── JS MJPEG decoder (fetch + ReadableStream — works in all browsers) ─────
+let _fpvReader = null;
+
+function stopFpvStream() {
+  if (_fpvReader) { try { _fpvReader.cancel(); } catch(_) {} _fpvReader = null; }
+}
+
+async function startFpvStream(url) {
+  stopFpvStream();
+  const canvas = document.getElementById('fpv-canvas');
+  const ctx    = canvas.getContext('2d');
+  let buf      = new Uint8Array(0);
+
+  let res;
+  try { res = await fetch(url, { mode: 'cors' }); }
+  catch (e) { console.warn('[FPV] fetch failed:', e); return; }
+
+  _fpvReader = res.body.getReader();
+
+  const pump = async () => {
+    while (true) {
+      const { done, value } = await _fpvReader.read();
+      if (done) break;
+
+      const merged = new Uint8Array(buf.length + value.length);
+      merged.set(buf); merged.set(value, buf.length);
+      buf = merged;
+
+      while (buf.length > 3) {
+        let soi = -1;
+        for (let i = 0; i < buf.length - 1; i++)
+          if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
+        if (soi < 0) { buf = new Uint8Array(0); break; }
+
+        let eoi = -1;
+        for (let i = soi + 2; i < buf.length - 1; i++)
+          if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
+        if (eoi < 0) { buf = buf.slice(soi); break; }
+
+        const jpeg    = buf.slice(soi, eoi);
+        buf           = buf.slice(eoi);
+        const blob    = new Blob([jpeg], { type: 'image/jpeg' });
+        const blobUrl = URL.createObjectURL(blob);
+        const img     = new Image();
+        img.onload = () => {
+          if (!canvas.width || canvas.width !== img.naturalWidth)
+            canvas.width  = img.naturalWidth  || canvas.offsetWidth;
+          if (!canvas.height || canvas.height !== img.naturalHeight)
+            canvas.height = img.naturalHeight || canvas.offsetHeight;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(blobUrl);
+        };
+        img.src = blobUrl;
+      }
+    }
+  };
+
+  pump().catch(err => {
+    if (err && err.name !== 'AbortError') console.warn('[FPV] decode error:', err);
+  });
+}
+
 // ── Spectate state ────────────────────────────────────────────────────────
 let fpvState = { active: false, playerName: '', hp: 0, maxHp: 100, videoUrl: '' };
 
 function applySpectateUpdate(data) {
   if (!data.enabled) {
     fpvState.active = false;
+    stopFpvStream();
     document.getElementById('fpv-overlay').classList.remove('active');
-    document.getElementById('fpv-stream').src = '';
     return;
   }
 
@@ -378,7 +440,7 @@ function applySpectateUpdate(data) {
   };
 
   document.getElementById('fpv-overlay').classList.add('active');
-  document.getElementById('fpv-stream').src = fpvState.videoUrl;
+  startFpvStream(fpvState.videoUrl);
   renderFpv();
 }
 
