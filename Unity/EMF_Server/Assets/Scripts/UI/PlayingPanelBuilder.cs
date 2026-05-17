@@ -106,7 +106,9 @@ public class PlayingPanelBuilder : MonoBehaviour
         RemoveIfPresent<RobotPingButton>(pp);
         RemoveIfPresent<ToggleCameraButton>(pp);
         RemoveIfPresent<FlipVideoButtons>(pp);
-        RemoveIfPresent<SpectateButtonController>(pp);
+        // SpectateButtonController intentionally NOT removed here — Destroy() is deferred
+        // in play mode, causing GetOrAdd to return the same component which then gets
+        // destroyed after Start() wires the listener, silently breaking Button.onClick.
 
         var bgImg = pp.GetComponent<Image>() ?? pp.AddComponent<Image>();
         bgImg.color = C_BG;
