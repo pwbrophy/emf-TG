@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace ThundergeddonWeb.Services;
 
 /// <summary>
-/// Maintains one HTTP connection per robot MJPEG stream and fans raw bytes out to
+/// Maintains one HTTP connection per robot MJPEG stream and fans frames out to
 /// all active subscribers (phone player + spectator display).  The robot always
 /// sees exactly one streaming client regardless of how many viewers are connected.
 /// </summary>
@@ -49,8 +51,8 @@ public class RobotStreamService
 }
 
 /// <summary>
-/// Opens one streaming connection to a robot and forwards every chunk of bytes it
-/// receives to all currently-subscribed HTTP responses.
+/// Opens one streaming connection to a robot and fans frames to all subscribers.
+/// Each subscriber gets its own Channel so a slow client never blocks the others.
 /// </summary>
 internal class StreamBroadcaster
 {
@@ -59,11 +61,12 @@ internal class StreamBroadcaster
     private readonly ILogger _log;
 
     private readonly object _subLock = new();
-    private readonly List<HttpResponse> _subscribers = new();
+    // Map from response → dedicated channel for that subscriber
+    private readonly Dictionary<HttpResponse, Channel<byte[]>> _channels = new();
     private Task? _readTask;
     private CancellationTokenSource? _readCts;
 
-    public bool HasSubscribers { get { lock (_subLock) return _subscribers.Count > 0; } }
+    public bool HasSubscribers { get { lock (_subLock) return _channels.Count > 0; } }
 
     public StreamBroadcaster(string url, IHttpClientFactory factory, ILogger log)
     {
@@ -74,13 +77,26 @@ internal class StreamBroadcaster
 
     public async Task Subscribe(HttpResponse response, CancellationToken clientCt)
     {
+        // Disable ASP.NET / Kestrel response buffering so chunks reach the browser
+        // the instant they are flushed rather than being held until the response ends.
+        if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
+            bodyFeature.DisableBuffering();
+
         response.ContentType                  = "multipart/x-mixed-replace; boundary=frame";
         response.Headers["Cache-Control"]     = "no-cache";
         response.Headers["X-Accel-Buffering"] = "no";
 
+        // Bounded channel: drop old frames rather than blocking the broadcaster.
+        var ch = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4)
+        {
+            FullMode          = BoundedChannelFullMode.DropOldest,
+            SingleReader      = true,
+            SingleWriter      = false,
+        });
+
         lock (_subLock)
         {
-            _subscribers.Add(response);
+            _channels[response] = ch;
             if (_readTask == null || _readTask.IsCompleted)
             {
                 _readCts  = new CancellationTokenSource();
@@ -88,17 +104,30 @@ internal class StreamBroadcaster
             }
         }
 
-        // Hold open until the client disconnects or the server shuts down.
-        try { await Task.Delay(Timeout.Infinite, clientCt); }
+        // Drain the channel into the HTTP response until the client disconnects.
+        try
+        {
+            await foreach (var frame in ch.Reader.ReadAllAsync(clientCt))
+            {
+                await response.Body.WriteAsync(frame, clientCt);
+                await response.Body.FlushAsync(clientCt);
+            }
+        }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _log.LogDebug("[Stream] Subscriber write error: {msg}", ex.Message);
+        }
     }
 
     public void Unsubscribe(HttpResponse response)
     {
         lock (_subLock)
         {
-            _subscribers.Remove(response);
-            if (_subscribers.Count == 0)
+            if (_channels.Remove(response, out var ch))
+                ch.Writer.TryComplete();
+
+            if (_channels.Count == 0)
                 _readCts?.Cancel();
         }
     }
@@ -109,40 +138,28 @@ internal class StreamBroadcaster
         try
         {
             var client = _factory.CreateClient();
-            // Long timeout — robot may be slow to start streaming.
             client.Timeout = TimeSpan.FromSeconds(30);
 
             using var resp = await client.GetAsync(_url, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
-
-            _log.LogInformation("[Stream] Connected to {url} ({ct})", _url,
-                resp.Content.Headers.ContentType);
+            _log.LogInformation("[Stream] Connected to {url}", _url);
 
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            var buffer = new byte[65536];
+            var buffer = new byte[32768];
 
             while (!ct.IsCancellationRequested)
             {
                 int read = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
                 if (read == 0) break;
 
-                var chunk = buffer.AsMemory(0, read);
+                // Copy frame bytes once, then give each subscriber its own reference.
+                byte[] frame = buffer[..read].ToArray();
 
-                List<HttpResponse> subs;
-                lock (_subLock) subs = [.. _subscribers];
+                List<Channel<byte[]>> channels;
+                lock (_subLock) channels = [.. _channels.Values];
 
-                await Task.WhenAll(subs.Select(async sub =>
-                {
-                    try
-                    {
-                        await sub.Body.WriteAsync(chunk, ct);
-                        await sub.Body.FlushAsync(ct);
-                    }
-                    catch
-                    {
-                        // Subscriber disconnected — will be removed by Unsubscribe().
-                    }
-                }));
+                foreach (var ch in channels)
+                    ch.Writer.TryWrite(frame); // non-blocking; DropOldest handles backpressure
             }
         }
         catch (OperationCanceledException) { }
@@ -152,5 +169,11 @@ internal class StreamBroadcaster
         }
 
         _log.LogInformation("[Stream] Disconnected from {url}", _url);
+
+        // Signal all subscriber channels that no more data is coming.
+        lock (_subLock)
+        {
+            foreach (var ch in _channels.Values) ch.Writer.TryComplete();
+        }
     }
 }
