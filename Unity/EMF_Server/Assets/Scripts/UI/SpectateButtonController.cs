@@ -20,12 +20,35 @@ public class SpectateButtonController : MonoBehaviour
         // after AddComponent fires Awake, so the field is null during Awake.
         if (_fpvButton != null)
             _fpvButton.onClick.AddListener(OnClick);
+        if (_robotListPanel != null)
+            _robotListPanel.SelectionChanged += OnRobotSelectionChanged;
+    }
+
+    private void OnDestroy()
+    {
+        if (_robotListPanel != null)
+            _robotListPanel.SelectionChanged -= OnRobotSelectionChanged;
     }
 
     private void OnEnable()
     {
-        // Reset to off whenever the panel is shown (game start or panel re-enable).
+        // Reset to off whenever the panel is shown (game start or panel re-enable),
+        // and tell the display to return to info view.
+        if (_fpvActive)
+            ServiceLocator.PlayerServer?.SendSpectateUpdate(null, false);
         Apply(false);
+    }
+
+    private void OnRobotSelectionChanged(string robotId)
+    {
+        if (!_fpvActive) return;
+        if (string.IsNullOrEmpty(robotId))
+        {
+            ServiceLocator.PlayerServer?.SendSpectateUpdate(null, false);
+            Apply(false);
+            return;
+        }
+        ServiceLocator.PlayerServer?.SendSpectateUpdate(robotId, true);
     }
 
     private void OnClick()
