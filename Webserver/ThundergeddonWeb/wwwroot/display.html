@@ -168,7 +168,7 @@
 </head>
 <body>
 
-<div id="version">display v6</div>
+<div id="version">display v7</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
@@ -443,7 +443,7 @@ function applySpectateUpdate(data) {
   };
 
   document.getElementById('fpv-overlay').classList.add('active');
-  const proxyUrl = '/api/spectate-stream?url=' + encodeURIComponent(fpvState.videoUrl);
+  const proxyUrl = '/api/robot-stream?url=' + encodeURIComponent(fpvState.videoUrl);
   startFpvStream(proxyUrl);
   renderFpv();
 }
