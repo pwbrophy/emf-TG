@@ -154,6 +154,10 @@ public class UnityBridgeService : BackgroundService
                     await HandleFireResult(doc.RootElement);
                     break;
 
+                case "hit_taken":
+                    await HandleHitTaken(doc.RootElement);
+                    break;
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;
@@ -246,6 +250,15 @@ public class UnityBridgeService : BackgroundService
         if (string.IsNullOrEmpty(connId) || string.IsNullOrEmpty(text)) return;
         await _hub.Clients.Client(connId).SendAsync("FireResult", text);
         _logger.LogDebug("[Bridge] FireResult → conn {c}: {t}", connId, text);
+    }
+
+    private async Task HandleHitTaken(JsonElement root)
+    {
+        string? connId  = GetString(root, "connectionId");
+        if (string.IsNullOrEmpty(connId)) return;
+        string shooter = GetString(root, "shooter") ?? "";
+        string dir     = GetString(root, "dir") ?? "";
+        await _hub.Clients.Client(connId).SendAsync("HitTaken", new { shooter, dir });
     }
 
     private async Task HandleGameOver(JsonElement root)

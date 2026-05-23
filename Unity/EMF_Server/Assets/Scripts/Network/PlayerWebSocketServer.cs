@@ -89,10 +89,11 @@ public class PlayerWebSocketServer : MonoBehaviour
         // HP / death / respawn / win events
         if (ServiceLocator.Game != null)
         {
-            ServiceLocator.Game.OnHpChanged       += OnHpChanged;
-            ServiceLocator.Game.OnRobotDied       += OnRobotDied;
-            ServiceLocator.Game.OnRobotRespawned  += OnRobotRespawned;
-            ServiceLocator.Game.OnGameWon         += OnGameWon;
+            ServiceLocator.Game.OnHpChanged          += OnHpChanged;
+            ServiceLocator.Game.OnRobotDied          += OnRobotDied;
+            ServiceLocator.Game.OnRobotRespawned     += OnRobotRespawned;
+            ServiceLocator.Game.OnGameWon            += OnGameWon;
+            ServiceLocator.Game.OnRobotHitDirection  += OnHitDirection;
         }
 
         // RFID tag scans
@@ -122,10 +123,11 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         if (ServiceLocator.Game != null)
         {
-            ServiceLocator.Game.OnHpChanged      -= OnHpChanged;
-            ServiceLocator.Game.OnRobotDied      -= OnRobotDied;
-            ServiceLocator.Game.OnRobotRespawned -= OnRobotRespawned;
-            ServiceLocator.Game.OnGameWon        -= OnGameWon;
+            ServiceLocator.Game.OnHpChanged         -= OnHpChanged;
+            ServiceLocator.Game.OnRobotDied         -= OnRobotDied;
+            ServiceLocator.Game.OnRobotRespawned    -= OnRobotRespawned;
+            ServiceLocator.Game.OnGameWon           -= OnGameWon;
+            ServiceLocator.Game.OnRobotHitDirection -= OnHitDirection;
         }
 
         if (ServiceLocator.RobotServer != null)
@@ -463,6 +465,31 @@ public class PlayerWebSocketServer : MonoBehaviour
             if (rId != robotId) continue;
 
             SendSingleStateUpdate(connId);
+        }
+    }
+
+    void OnHitDirection(string targetId, string shooterId, byte rawMask, string cardinalDir)
+    {
+        // Resolve shooter's player name from their robot ID
+        string shooterName = "";
+        if (!string.IsNullOrEmpty(shooterId))
+        {
+            var dir2 = ServiceLocator.RobotDirectory;
+            if (dir2 != null && dir2.TryGet(shooterId, out var sInfo))
+                shooterName = sInfo.AssignedPlayer ?? "";
+        }
+
+        // Send hit_taken to the target robot's assigned player
+        foreach (var kvp in _connToPlayer)
+        {
+            if (PlayerToRobot(kvp.Value) != targetId) continue;
+
+            string json = "{\"cmd\":\"hit_taken\"" +
+                          ",\"connectionId\":\"" + EscapeJson(kvp.Key) + "\"" +
+                          ",\"shooter\":\"" + EscapeJson(shooterName) + "\"" +
+                          ",\"dir\":\"" + EscapeJson(cardinalDir ?? "") + "\"}";
+            BroadcastRaw(json);
+            break;
         }
     }
 

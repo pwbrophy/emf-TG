@@ -18,8 +18,8 @@ public sealed class GameService
     // allianceIndex, reason (fired when a win condition is met)
     public event Action<int, string> OnGameWon;
 
-    // targetId, rawDetMask (8-bit sensor bits), cardinalDir ("N"|"E"|"S"|"W")
-    public event Action<string, byte, string> OnRobotHitDirection;
+    // targetId, shooterId, rawDetMask (8-bit sensor bits), cardinalDir ("N"|"E"|"S"|"W")
+    public event Action<string, string, byte, string> OnRobotHitDirection;
 
     public bool CanStart() => true;
 
@@ -92,7 +92,7 @@ public sealed class GameService
         }
 
         OnHpChanged?.Invoke(targetId, newHp);
-        OnRobotHitDirection?.Invoke(targetId, rawMask, cardinalDir);
+        OnRobotHitDirection?.Invoke(targetId, shooterId, rawMask, cardinalDir);
 
         if (newHp <= 0)
         {
@@ -151,7 +151,7 @@ public sealed class GameService
         State.RobotHp[targetId] = newHp;
 
         OnHpChanged?.Invoke(targetId, newHp);
-        OnRobotHitDirection?.Invoke(targetId, 0, cardinalDir);
+        OnRobotHitDirection?.Invoke(targetId, null, 0, cardinalDir);
 
         if (newHp <= 0)
         {

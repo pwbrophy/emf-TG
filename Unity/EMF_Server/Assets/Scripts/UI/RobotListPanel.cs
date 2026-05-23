@@ -509,7 +509,7 @@ public class RobotListPanel : MonoBehaviour
         HandleHpChanged(robotId, maxHp);
     }
 
-    private void HandleHitDirection(string robotId, byte rawMask, string cardinalDir)
+    private void HandleHitDirection(string robotId, string shooterId, byte rawMask, string cardinalDir)
     {
         FindRow(robotId)?.Compass.Flash(rawMask, cardinalDir);
     }

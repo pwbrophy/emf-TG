@@ -506,6 +506,73 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Hit direction overlay ── */
+    #hit-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      overflow: hidden;
+    }
+
+    @keyframes hitFlash {
+      0%   { opacity: 0.85; }
+      100% { opacity: 0; }
+    }
+
+    .hit-effect {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+    }
+    .hit-effect.flash {
+      animation: hitFlash 0.6s ease-out forwards;
+    }
+
+    /* Front: large radial red circle centred */
+    #hit-front {
+      background: radial-gradient(circle 45vmin at center,
+        rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 100%);
+    }
+
+    /* Sides: gradient spreading 65% across from the corresponding edge */
+    #hit-left {
+      background: linear-gradient(to right,
+        rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%);
+    }
+    #hit-right {
+      background: linear-gradient(to left,
+        rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%);
+    }
+
+    /* Rear: vignette highlights all four edges */
+    #hit-rear {
+      background: radial-gradient(ellipse at center,
+        rgba(255,0,0,0) 35%, rgba(255,0,0,0.85) 100%);
+    }
+
+    /* Hit-by label: same capsule style as fire-toast but red-tinted */
+    #hit-by-label {
+      position: absolute;
+      left: 50%;
+      top: 36px;
+      transform: translateX(-50%);
+      z-index: 25;
+      background: rgba(160,0,0,0.88);
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: 700;
+      padding: 9px 20px;
+      border-radius: 24px;
+      border: 1px solid rgba(255,80,60,0.55);
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #hit-by-label.visible { opacity: 1; }
+
     /* ── RFID toast ── */
     #rfid-toast {
       position: fixed;
@@ -580,6 +647,17 @@
   <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
   <canvas id="stream-canvas" style="display:none"></canvas>
   <div id="stream-placeholder" style="display:none">No video stream</div>
+
+  <!-- Hit direction overlay (above video, below HP bar / controls) -->
+  <div id="hit-overlay">
+    <div id="hit-front" class="hit-effect"></div>
+    <div id="hit-left"  class="hit-effect"></div>
+    <div id="hit-right" class="hit-effect"></div>
+    <div id="hit-rear"  class="hit-effect"></div>
+  </div>
+
+  <!-- Hit-by label: capsule toast, z-index 25, sits above hit-overlay stacking context -->
+  <div id="hit-by-label"></div>
 
   <!-- HP bar -->
   <div id="hp-bar-wrap">
@@ -823,6 +901,7 @@ function returnToJoin(message) {
   document.getElementById('game-paused-overlay').classList.remove('active');
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
   document.getElementById('fire-toast').classList.remove('visible');
+  clearHitOverlay();
   document.getElementById('join-btn').disabled = false;
   showScreen('screen-join');
   if (message) setStatus(message, true);
@@ -848,6 +927,7 @@ function buildConnection() {
   conn.on('GamePaused',        ()   => document.getElementById('game-paused-overlay').classList.add('active'));
   conn.on('GameResumed',       ()   => document.getElementById('game-paused-overlay').classList.remove('active'));
   conn.on('FireResult',    text    => showFireToast(text));
+  conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected',()   => returnToJoin('Game server closed. Please rejoin.'));
 
   conn.onreconnecting(() => showReconnectOverlay('Trying to reconnect…'));
@@ -1049,6 +1129,47 @@ function onRfidTag(uid) {
     toast.classList.remove('visible');
     _rfidToastTimer = null;
   }, 3000);
+}
+
+// ════════════════════════════════════════════════════════
+// Hit direction overlay
+// ════════════════════════════════════════════════════════
+let _hitLabelTimer = null;
+
+function onHitTaken(data) {
+  showHitEffect((data.dir || '').toUpperCase(), data.shooter || '');
+}
+
+function dirToHitEffect(dir) {
+  if (dir === 'S' || dir === 'SE' || dir === 'SW') return 'hit-rear';
+  if (dir === 'E')                                  return 'hit-right';
+  if (dir === 'W')                                  return 'hit-left';
+  return 'hit-front'; // N, NE, NW (and unknown)
+}
+
+function showHitEffect(dir, shooter) {
+  const effectEl = document.getElementById(dirToHitEffect(dir));
+  effectEl.classList.remove('flash');
+  void effectEl.offsetWidth; // force reflow to restart animation
+  effectEl.classList.add('flash');
+
+  const label = document.getElementById('hit-by-label');
+  label.textContent = shooter ? 'Hit by ' + escHtml(shooter) : 'HIT';
+  label.classList.remove('visible');
+  void label.offsetWidth;
+  label.classList.add('visible');
+  if (_hitLabelTimer) clearTimeout(_hitLabelTimer);
+  _hitLabelTimer = setTimeout(() => {
+    label.classList.remove('visible');
+    _hitLabelTimer = null;
+  }, 1500);
+}
+
+function clearHitOverlay() {
+  document.querySelectorAll('.hit-effect').forEach(el => el.classList.remove('flash'));
+  const label = document.getElementById('hit-by-label');
+  label.classList.remove('visible');
+  if (_hitLabelTimer) { clearTimeout(_hitLabelTimer); _hitLabelTimer = null; }
 }
 
 // ════════════════════════════════════════════════════════
