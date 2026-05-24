@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Net.WebSockets;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http.Features;
 
@@ -24,16 +24,7 @@ public class RobotStreamService
 
     public async Task StreamToSubscriber(string robotUrl, HttpResponse response, CancellationToken ct)
     {
-        StreamBroadcaster broadcaster;
-        lock (_lock)
-        {
-            if (!_active.TryGetValue(robotUrl, out broadcaster!))
-            {
-                broadcaster = new StreamBroadcaster(robotUrl, _factory, _log);
-                _active[robotUrl] = broadcaster;
-            }
-        }
-
+        var broadcaster = GetOrCreate(robotUrl);
         try
         {
             await broadcaster.Subscribe(response, ct);
@@ -41,17 +32,46 @@ public class RobotStreamService
         finally
         {
             broadcaster.Unsubscribe(response);
-            lock (_lock)
+            lock (_lock) { if (!broadcaster.HasSubscribers) _active.Remove(robotUrl); }
+        }
+    }
+
+    /// <summary>
+    /// Subscribes a WebSocket client to the robot stream.  Individual JPEG frames
+    /// are parsed server-side from the MJPEG multipart stream and sent as binary
+    /// WebSocket messages.  This bypasses iOS Safari's inability to stream-read
+    /// fetch response bodies (multipart/x-mixed-replace).
+    /// </summary>
+    public async Task StreamFramesToWebSocket(string robotUrl, WebSocket ws, CancellationToken ct)
+    {
+        var broadcaster = GetOrCreate(robotUrl);
+        try
+        {
+            await broadcaster.SubscribeWs(ws, ct);
+        }
+        finally
+        {
+            lock (_lock) { if (!broadcaster.HasSubscribers) _active.Remove(robotUrl); }
+        }
+    }
+
+    private StreamBroadcaster GetOrCreate(string robotUrl)
+    {
+        lock (_lock)
+        {
+            if (!_active.TryGetValue(robotUrl, out var b))
             {
-                if (!broadcaster.HasSubscribers)
-                    _active.Remove(robotUrl);
+                b = new StreamBroadcaster(robotUrl, _factory, _log);
+                _active[robotUrl] = b;
             }
+            return b;
         }
     }
 }
 
 /// <summary>
-/// Opens one streaming connection to a robot and fans frames to all subscribers.
+/// Opens one streaming connection to a robot and fans raw MJPEG chunks to HTTP
+/// subscribers and parsed JPEG frames to WebSocket subscribers.
 /// Each subscriber gets its own Channel so a slow client never blocks the others.
 /// </summary>
 internal class StreamBroadcaster
@@ -61,12 +81,15 @@ internal class StreamBroadcaster
     private readonly ILogger _log;
 
     private readonly object _subLock = new();
-    // Map from response → dedicated channel for that subscriber
     private readonly Dictionary<HttpResponse, Channel<byte[]>> _channels = new();
+    private readonly Dictionary<Guid, Channel<byte[]>>         _wsChannels = new();
     private Task? _readTask;
     private CancellationTokenSource? _readCts;
 
-    public bool HasSubscribers { get { lock (_subLock) return _channels.Count > 0; } }
+    public bool HasSubscribers
+    {
+        get { lock (_subLock) return _channels.Count > 0 || _wsChannels.Count > 0; }
+    }
 
     public StreamBroadcaster(string url, IHttpClientFactory factory, ILogger log)
     {
@@ -75,10 +98,10 @@ internal class StreamBroadcaster
         _log     = log;
     }
 
+    // ── HTTP subscriber ──────────────────────────────────────────────────────
+
     public async Task Subscribe(HttpResponse response, CancellationToken clientCt)
     {
-        // Disable ASP.NET / Kestrel response buffering so chunks reach the browser
-        // the instant they are flushed rather than being held until the response ends.
         if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
             bodyFeature.DisableBuffering();
 
@@ -86,49 +109,91 @@ internal class StreamBroadcaster
         response.Headers["Cache-Control"]     = "no-cache";
         response.Headers["X-Accel-Buffering"] = "no";
 
-        // Bounded channel: drop old frames rather than blocking the broadcaster.
-        var ch = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4)
-        {
-            FullMode          = BoundedChannelFullMode.DropOldest,
-            SingleReader      = true,
-            SingleWriter      = false,
-        });
-
+        var ch = MakeChannel();
         lock (_subLock)
         {
             _channels[response] = ch;
-            if (_readTask == null || _readTask.IsCompleted)
-            {
-                _readCts  = new CancellationTokenSource();
-                _readTask = Task.Run(() => ReadLoop(_readCts.Token));
-            }
+            EnsureReadLoop();
         }
 
-        // Drain the channel into the HTTP response until the client disconnects.
         try
         {
-            await foreach (var frame in ch.Reader.ReadAllAsync(clientCt))
+            await foreach (var chunk in ch.Reader.ReadAllAsync(clientCt))
             {
-                await response.Body.WriteAsync(frame, clientCt);
+                await response.Body.WriteAsync(chunk, clientCt);
                 await response.Body.FlushAsync(clientCt);
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _log.LogDebug("[Stream] Subscriber write error: {msg}", ex.Message);
-        }
+        catch (Exception ex) { _log.LogDebug("[Stream] HTTP write error: {msg}", ex.Message); }
     }
 
     public void Unsubscribe(HttpResponse response)
     {
         lock (_subLock)
         {
-            if (_channels.Remove(response, out var ch))
-                ch.Writer.TryComplete();
+            if (_channels.Remove(response, out var ch)) ch.Writer.TryComplete();
+            if (!HasSubscribers) _readCts?.Cancel();
+        }
+    }
 
-            if (_channels.Count == 0)
-                _readCts?.Cancel();
+    // ── WebSocket subscriber ─────────────────────────────────────────────────
+
+    public async Task SubscribeWs(WebSocket ws, CancellationToken ct)
+    {
+        var id = Guid.NewGuid();
+        var ch = MakeChannel();
+        lock (_subLock)
+        {
+            _wsChannels[id] = ch;
+            EnsureReadLoop();
+        }
+
+        // Buffer incoming raw MJPEG chunks, extract complete JPEG frames,
+        // and send each frame as a binary WebSocket message.
+        var buf = Array.Empty<byte>();
+        try
+        {
+            await foreach (var chunk in ch.Reader.ReadAllAsync(ct))
+            {
+                // Append chunk to running buffer
+                var merged = new byte[buf.Length + chunk.Length];
+                buf.CopyTo(merged, 0);
+                chunk.CopyTo(merged, buf.Length);
+                buf = merged;
+
+                // Send every complete JPEG frame found in the buffer
+                while (buf.Length > 3)
+                {
+                    var (frame, remaining) = ExtractJpegFrame(buf);
+                    if (frame is null) break;
+                    buf = remaining;
+                    if (ws.State != WebSocketState.Open) return;
+                    await ws.SendAsync(new ArraySegment<byte>(frame),
+                        WebSocketMessageType.Binary, endOfMessage: true, ct);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { _log.LogDebug("[VideoWs] send error: {msg}", ex.Message); }
+        finally
+        {
+            lock (_subLock)
+            {
+                if (_wsChannels.Remove(id)) ch.Writer.TryComplete();
+                if (!HasSubscribers) _readCts?.Cancel();
+            }
+        }
+    }
+
+    // ── Shared read loop ─────────────────────────────────────────────────────
+
+    private void EnsureReadLoop()
+    {
+        if (_readTask == null || _readTask.IsCompleted)
+        {
+            _readCts  = new CancellationTokenSource();
+            _readTask = Task.Run(() => ReadLoop(_readCts.Token));
         }
     }
 
@@ -152,14 +217,13 @@ internal class StreamBroadcaster
                 int read = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
                 if (read == 0) break;
 
-                // Copy frame bytes once, then give each subscriber its own reference.
-                byte[] frame = buffer[..read].ToArray();
+                byte[] chunk = buffer[..read].ToArray();
 
-                List<Channel<byte[]>> channels;
-                lock (_subLock) channels = [.. _channels.Values];
+                List<Channel<byte[]>> all;
+                lock (_subLock) all = [.. _channels.Values, .. _wsChannels.Values];
 
-                foreach (var ch in channels)
-                    ch.Writer.TryWrite(frame); // non-blocking; DropOldest handles backpressure
+                foreach (var ch in all)
+                    ch.Writer.TryWrite(chunk);
             }
         }
         catch (OperationCanceledException) { }
@@ -170,10 +234,40 @@ internal class StreamBroadcaster
 
         _log.LogInformation("[Stream] Disconnected from {url}", _url);
 
-        // Signal all subscriber channels that no more data is coming.
         lock (_subLock)
         {
-            foreach (var ch in _channels.Values) ch.Writer.TryComplete();
+            foreach (var ch in _channels.Values)  ch.Writer.TryComplete();
+            foreach (var ch in _wsChannels.Values) ch.Writer.TryComplete();
         }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static Channel<byte[]> MakeChannel() =>
+        Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4)
+        {
+            FullMode     = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false,
+        });
+
+    /// <summary>
+    /// Scans <paramref name="buf"/> for the first complete JPEG (SOI FF D8 … EOI FF D9).
+    /// Returns (frame bytes, remaining buffer) on success, or (null, original buf) if the
+    /// frame is incomplete.
+    /// </summary>
+    private static (byte[]? frame, byte[] remaining) ExtractJpegFrame(byte[] buf)
+    {
+        int soi = -1;
+        for (int i = 0; i < buf.Length - 1; i++)
+            if (buf[i] == 0xFF && buf[i + 1] == 0xD8) { soi = i; break; }
+        if (soi < 0) return (null, Array.Empty<byte>());
+
+        int eoi = -1;
+        for (int i = soi + 2; i < buf.Length - 1; i++)
+            if (buf[i] == 0xFF && buf[i + 1] == 0xD9) { eoi = i + 2; break; }
+        if (eoi < 0) return (null, buf[soi..]);
+
+        return (buf[soi..eoi], buf[eoi..]);
     }
 }

@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
   <title>Thundergeddon</title>
-  <script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+  <script src="/js/signalr.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -761,86 +761,93 @@ let fireCooldownUntil  = 0;
 let fireCooldownTimer  = null;
 
 // ════════════════════════════════════════════════════════
-// JS MJPEG decoder (used on iOS/Safari which can't display MJPEG in <img>)
-// Fetches the multipart stream, finds JPEG SOI/EOI byte markers, and draws
-// each frame to #stream-canvas. CORS is already enabled on the ESP32.
+// WebSocket video decoder (iOS Safari/Chrome)
+// iOS Safari cannot stream-read multipart/x-mixed-replace fetch response bodies
+// (TypeError "Load failed").  Instead the server parses individual JPEG frames
+// and sends each as a binary WebSocket message — WebSocket binary has worked on
+// iOS since iOS 4.2 and is fully reliable.
 // ════════════════════════════════════════════════════════
-let _mjpegReader = null;
+let _videoWs = null;
 
-function stopJsMjpeg() {
-  if (_mjpegReader) { _mjpegReader.cancel(); _mjpegReader = null; }
+function stopVideoWs() {
+  if (_videoWs) {
+    _videoWs.onclose = null; // prevent onclose firing returnToJoin side-effects
+    _videoWs.close();
+    _videoWs = null;
+  }
 }
 
-async function startJsMjpegDecoder(url) {
-  stopJsMjpeg();
+function startWsVideoDecoder(robotUrl) {
+  stopVideoWs();
   const canvas = document.getElementById('stream-canvas');
   const ctx    = canvas.getContext('2d');
-  let buf      = new Uint8Array(0);
+  const ph     = document.getElementById('stream-placeholder');
+  let gotFirstFrame = false;
+  let frameCount    = 0;
 
-  let res;
-  try { res = await fetch(url, { mode: 'cors' }); }
-  catch (e) { console.warn('MJPEG fetch failed:', e); return; }
+  // Build ws:// URL pointing at the server's /api/video-ws endpoint
+  const wsUrl = location.origin.replace(/^http/, 'ws')
+              + '/api/video-ws?url=' + encodeURIComponent(robotUrl);
+  dbg('WS video: ' + wsUrl);
 
-  _mjpegReader = res.body.getReader();
+  _videoWs = new WebSocket(wsUrl);
+  _videoWs.binaryType = 'arraybuffer';
 
-  const pump = async () => {
-    while (true) {
-      const { done, value } = await _mjpegReader.read();
-      if (done) break;
-
-      // Append incoming chunk to buffer
-      const merged = new Uint8Array(buf.length + value.length);
-      merged.set(buf); merged.set(value, buf.length);
-      buf = merged;
-
-      // Extract all complete JPEG frames (SOI=FF D8 … EOI=FF D9)
-      while (buf.length > 3) {
-        let soi = -1;
-        for (let i = 0; i < buf.length - 1; i++) {
-          if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
-        }
-        if (soi < 0) { buf = new Uint8Array(0); break; }
-
-        let eoi = -1;
-        for (let i = soi + 2; i < buf.length - 1; i++) {
-          if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
-        }
-        if (eoi < 0) { buf = buf.slice(soi); break; } // incomplete frame — wait
-
-        const jpeg    = buf.slice(soi, eoi);
-        buf           = buf.slice(eoi);
-
-        const blob    = new Blob([jpeg], { type: 'image/jpeg' });
-        const blobUrl = URL.createObjectURL(blob);
-        const img     = new Image();
-        img.onload = () => {
-          if (!canvas.width)  canvas.width  = img.naturalWidth  || canvas.offsetWidth;
-          if (!canvas.height) canvas.height = img.naturalHeight || canvas.offsetHeight;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          URL.revokeObjectURL(blobUrl);
-        };
-        img.src = blobUrl;
-      }
+  _videoWs.onopen  = () => dbg('WS video open');
+  _videoWs.onerror = () => {
+    dbg('WS video error');
+    ph.textContent   = 'No video stream';
+    ph.style.display = 'flex';
+  };
+  _videoWs.onclose = e => {
+    dbg('WS video closed code=' + e.code + ' frames=' + frameCount);
+    if (!gotFirstFrame) {
+      ph.textContent   = 'No video stream';
+      ph.style.display = 'flex';
     }
   };
-
-  pump().catch(err => {
-    if (err && err.name !== 'AbortError') console.warn('MJPEG decode error:', err);
-  });
+  _videoWs.onmessage = e => {
+    const blob    = new Blob([e.data], { type: 'image/jpeg' });
+    const blobUrl = URL.createObjectURL(blob);
+    const img     = new Image();
+    img.onload = () => {
+      if (img.naturalWidth)  canvas.width  = img.naturalWidth;
+      if (img.naturalHeight) canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(blobUrl);
+      frameCount++;
+      if (!gotFirstFrame) {
+        gotFirstFrame        = true;
+        canvas.style.display = '';
+        ph.style.display     = 'none';
+        dbg('WS first frame! ' + img.naturalWidth + 'x' + img.naturalHeight);
+      } else if (frameCount === 10) {
+        dbg('WS stream OK, 10 frames received');
+      }
+    };
+    img.src = blobUrl;
+  };
 }
 
 function startGameStream(url) {
-  if (!url) return;
+  dbg('startGameStream url=' + url);
+  if (!url) { dbg('startGameStream: no url, aborting'); return; }
   // Route through the server-side fanout proxy so the robot only has one HTTP
   // streaming client regardless of how many viewers (phone + display) are watching.
   const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url);
+  dbg('proxyUrl=' + proxyUrl);
   if (IS_IOS) {
-    document.getElementById('stream').style.display              = 'none';
-    document.getElementById('stream-placeholder').style.display  = 'none';
+    dbg('iOS path: WS video decoder');
+    document.getElementById('stream').style.display = 'none';
+    // Show a placeholder until the first frame arrives
+    const ph = document.getElementById('stream-placeholder');
+    ph.textContent    = 'Connecting to camera…';
+    ph.style.display  = 'flex';
     const canvas = document.getElementById('stream-canvas');
-    canvas.style.display = '';
-    startJsMjpegDecoder(proxyUrl);
+    canvas.style.display = 'none';
+    startWsVideoDecoder(url);
   } else {
+    dbg('non-iOS path: img src');
     document.getElementById('stream-canvas').style.display = 'none';
     const img = document.getElementById('stream');
     img.style.display = '';
@@ -853,10 +860,13 @@ function startGameStream(url) {
 // Screen management
 // ════════════════════════════════════════════════════════
 function showScreen(id) {
+  dbg('showScreen: ' + id);
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   // Landscape lock only applies during gameplay
   document.body.classList.toggle('game-active', id === 'screen-playing');
+  // Reposition debug panel so it never blocks gameplay controls
+  positionDbgPanel(id);
 }
 
 let _fireToastTimer = null;
@@ -894,7 +904,7 @@ function returnToJoin(message) {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
   document.getElementById('stream').src = '';
-  stopJsMjpeg();
+  stopVideoWs();
   const _sc = document.getElementById('stream-canvas');
   _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
@@ -911,32 +921,41 @@ function returnToJoin(message) {
 // SignalR
 // ════════════════════════════════════════════════════════
 function buildConnection() {
+  // iOS Safari (Chrome+Safari share WebKit) has a bug where WebSocket connections
+  // never complete while the page is in the foreground. Long Polling uses plain HTTP
+  // which doesn't hang, at the cost of slightly higher latency.
+  const urlOpts = IS_IOS
+    ? { transport: signalR.HttpTransportType.LongPolling }
+    : {};
+  dbg('buildConnection transport=' + (IS_IOS ? 'LongPolling' : 'default'));
   const conn = new signalR.HubConnectionBuilder()
-    .withUrl('/gamehub')
+    .withUrl('/gamehub', urlOpts)
     .withAutomaticReconnect([0, 2000, 5000, 10000])
     .build();
 
-  conn.on('LobbyUpdate',     players => renderPlayerList(players));
-  conn.on('GameStarted',     data    => onGameStarted(data));
+  conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); renderPlayerList(players); });
+  conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); onGameStarted(data); });
   conn.on('TurretSettings',  speed   => { slowTurretSpeed = speed; });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
-  conn.on('YouAreDead',   ()       => onYouAreDead());
-  conn.on('YouAreAlive',  ()       => onYouAreAlive());
-  conn.on('GameOver',     data     => onGameOver(data));
+  conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
+  conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
+  conn.on('GameOver',     data     => { dbg('SignalR: GameOver'); onGameOver(data); });
   conn.on('RfidTag',      uid      => onRfidTag(uid));
-  conn.on('GamePaused',        ()   => document.getElementById('game-paused-overlay').classList.add('active'));
-  conn.on('GameResumed',       ()   => document.getElementById('game-paused-overlay').classList.remove('active'));
+  conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); document.getElementById('game-paused-overlay').classList.add('active'); });
+  conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
   conn.on('HitTaken',     data    => onHitTaken(data));
-  conn.on('ServerDisconnected',()   => returnToJoin('Game server closed. Please rejoin.'));
+  conn.on('ServerDisconnected',()   => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
 
-  conn.onreconnecting(() => showReconnectOverlay('Trying to reconnect…'));
+  conn.onreconnecting(err => { dbg('SignalR: reconnecting err=' + (err && err.message)); showReconnectOverlay('Trying to reconnect…'); });
   conn.onreconnected(async () => {
+    dbg('SignalR: reconnected');
     hideReconnectOverlay();
     setStatus('', false);
     await conn.invoke('JoinLobby', myName).catch(console.error);
   });
-  conn.onclose(() => {
+  conn.onclose(err => {
+    dbg('SignalR: closed err=' + (err && err.message));
     hideReconnectOverlay();
     // Only treat as unexpected loss if this connection is still the active one.
     // If connection was intentionally stopped (returnToJoin nulled it first), skip.
@@ -955,17 +974,39 @@ async function joinLobby() {
 
   if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
 
+  dbg('joinLobby: name="' + name + '"');
+
+  // Tear down any previous connection before starting a new one
+  if (connection) {
+    dbg('stopping old connection');
+    const old = connection;
+    connection = null;
+    old.stop().catch(() => {});
+  }
+
   const btn = document.getElementById('join-btn');
   btn.disabled = true;
   setStatus('Connecting…', false);
 
   try {
+    dbg('buildConnection...');
     connection = buildConnection();
+    dbg('connection.start()...');
     await connection.start();
+    dbg('connected! invoking JoinLobby');
     myName = name;
     await connection.invoke('JoinLobby', name);
-    showScreen('screen-lobby');
+    dbg('JoinLobby OK');
+    // game_started may have fired during the await above and already switched to
+    // screen-playing — don't overwrite it with the lobby waiting screen.
+    if (!document.getElementById('screen-playing').classList.contains('active')) {
+      dbg('→ screen-lobby');
+      showScreen('screen-lobby');
+    } else {
+      dbg('already on screen-playing, skip lobby');
+    }
   } catch (err) {
+    dbg('JOIN FAILED: ' + err.message);
     setStatus('Could not connect: ' + err.message, true);
     btn.disabled = false;
   }
@@ -1003,8 +1044,12 @@ function renderPlayerList(players) {
 // ════════════════════════════════════════════════════════
 function enterFullscreenLandscape() {
   const el = document.documentElement;
-  if (el.requestFullscreen)            el.requestFullscreen().catch(() => {});
-  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  dbg('enterFullscreen: requestFS=' + !!el.requestFullscreen + ' webkitFS=' + !!el.webkitRequestFullscreen);
+  try {
+    if (el.requestFullscreen)            el.requestFullscreen().catch(e => dbg('requestFS rejected: ' + e));
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    dbg('fullscreen call OK');
+  } catch (e) { dbg('fullscreen threw: ' + e.message); }
   try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
 }
 
@@ -1017,6 +1062,7 @@ function toggleFullscreen() {
 }
 
 function onGameStarted(data) {
+  dbg('onGameStarted: callsign=' + data.callsign + ' videoUrl=' + data.videoUrl);
   maxHp           = data.maxHp           || 100;
   currentHp       = data.hp              || maxHp;
   if (data.slowTurretSpeed) slowTurretSpeed = data.slowTurretSpeed;
@@ -1033,6 +1079,7 @@ function onGameStarted(data) {
 
   updateHpBar();
   showScreen('screen-playing');
+  dbg('onGameStarted done → screen-playing shown');
   startGameLoop();
 }
 
@@ -1356,6 +1403,114 @@ document.getElementById('name-input').addEventListener('keydown', e => {
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v15</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v18</div>
+
+<!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
+<!--
+  During gameplay the panel moves to the top of the screen (below the HP bar)
+  so it does not block the joystick/fire/turret controls at the bottom.
+  showScreen() calls positionDbgPanel() to reposition it.
+-->
+<div id="dbg-panel" style="
+  position:fixed; bottom:0; left:0; right:0;
+  height:180px; z-index:100000;
+  background:rgba(0,0,0,0.88);
+  border-top:1px solid #444;
+  display:flex; flex-direction:column;
+  font-family:monospace; font-size:11px; color:#0f0;
+">
+  <div style="display:flex;align-items:center;padding:2px 6px;background:#111;gap:6px;flex-shrink:0;">
+    <span style="color:#aaa;font-size:10px;flex:1">DEBUG LOG</span>
+    <button onclick="document.getElementById('dbg-log').innerHTML=''" style="font-size:10px;padding:1px 6px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer">Clear</button>
+    <button onclick="shareDbgLog()" style="font-size:10px;padding:1px 6px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer">Share</button>
+    <button onclick="toggleDbgPanel()" style="font-size:10px;padding:1px 6px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer">Hide</button>
+  </div>
+  <div id="dbg-log" style="flex:1;overflow-y:auto;padding:2px 6px;"></div>
+</div>
+<button id="dbg-show-btn" onclick="toggleDbgPanel()" style="
+  display:none; position:fixed; bottom:0; left:0;
+  font-size:10px; padding:2px 8px;
+  background:#111; color:#0f0; border:1px solid #444;
+  border-radius:0 4px 0 0; cursor:pointer; z-index:100000;
+">DBG</button>
+
+<script>
+// ── Debug panel ─────────────────────────────────────────────────────────────
+const _dbgLines = [];
+function dbg(msg) {
+  const ts  = new Date().toLocaleTimeString('en-GB', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const txt = ts + ' ' + msg;
+  _dbgLines.push(txt);
+  if (_dbgLines.length > 80) _dbgLines.shift();
+  const log = document.getElementById('dbg-log');
+  if (!log) return;
+  const line = document.createElement('div');
+  line.textContent = txt;
+  log.appendChild(line);
+  while (log.children.length > 80) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+// Share log via native iOS share sheet (works on HTTP; no HTTPS required).
+// Falls back to a full-screen selectable textarea on other platforms.
+function shareDbgLog() {
+  const text = _dbgLines.join('\n');
+  if (navigator.share) {
+    navigator.share({ title: 'TG debug log', text })
+      .then(() => dbg('shared'))
+      .catch(e => dbg('share cancelled: ' + e.message));
+    return;
+  }
+  // Non-iOS fallback: overlay with selectable text
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:200000;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;padding:12px;gap:8px;';
+  ov.innerHTML = '<div style="color:#0f0;font-family:monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center;"><span>SELECT ALL then COPY</span><button onclick="this.closest(\'div[style]\').remove()" style="background:#333;color:#ccc;border:1px solid #555;padding:2px 10px;border-radius:3px;cursor:pointer;font-size:11px;">Close</button></div><textarea readonly style="flex:1;background:#111;color:#0f0;font-family:monospace;font-size:10px;border:1px solid #444;padding:4px;resize:none;">' + text.replace(/</g,'&lt;') + '</textarea>';
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('textarea');
+  ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+  try { document.execCommand('copy'); dbg('execCommand copy OK'); } catch(e) {}
+}
+
+// Reposition the panel: bottom of screen on join/lobby, top during gameplay
+// so it never covers the joystick, fire button, or turret controls.
+function positionDbgPanel(screenId) {
+  const panel = document.getElementById('dbg-panel');
+  if (!panel || panel.style.display === 'none') return;
+  if (screenId === 'screen-playing') {
+    // Sit just below the HP bar (28px) — well above the bottom controls
+    panel.style.bottom  = 'auto';
+    panel.style.top     = '28px';
+    panel.style.height  = '120px';
+    panel.style.borderTop  = 'none';
+    panel.style.borderBottom = '1px solid #444';
+  } else {
+    panel.style.top     = 'auto';
+    panel.style.bottom  = '0';
+    panel.style.height  = '180px';
+    panel.style.borderTop    = '1px solid #444';
+    panel.style.borderBottom = 'none';
+  }
+}
+
+function toggleDbgPanel() {
+  const panel  = document.getElementById('dbg-panel');
+  const showBtn = document.getElementById('dbg-show-btn');
+  if (panel.style.display === 'none') {
+    panel.style.display   = 'flex';
+    showBtn.style.display = 'none';
+  } else {
+    panel.style.display   = 'none';
+    showBtn.style.display = 'block';
+  }
+}
+
+// ── Log startup info immediately ─────────────────────────────────────────────
+dbg('page load v18');
+dbg('UA: ' + navigator.userAgent.slice(0, 80));
+dbg('IS_IOS=' + IS_IOS);
+dbg('signalR type: ' + typeof signalR);
+if (typeof signalR !== 'undefined') dbg('signalR OK');
+else dbg('ERROR: signalR not loaded!');
+</script>
 </body>
 </html>

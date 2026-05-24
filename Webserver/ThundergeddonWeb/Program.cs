@@ -1,5 +1,6 @@
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using ThundergeddonWeb.Hubs;
 using ThundergeddonWeb.Services;
 
@@ -13,6 +14,7 @@ builder.Services.AddSingleton<RobotStreamService>();
 
 var app = builder.Build();
 
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapHub<GameHub>("/gamehub");
@@ -33,6 +35,27 @@ app.MapGet("/api/robot-stream", async (string url, RobotStreamService streamer, 
         return;
     }
     await streamer.StreamToSubscriber(url, ctx.Response, ct);
+});
+
+// WebSocket video endpoint: parses MJPEG frames server-side and pushes each JPEG
+// as a binary WebSocket message.  Used by iOS Safari/Chrome which cannot stream-read
+// multipart fetch response bodies.
+app.Map("/api/video-ws", async (HttpContext ctx) =>
+{
+    if (!ctx.WebSockets.IsWebSocketRequest)
+    {
+        ctx.Response.StatusCode = 400;
+        return;
+    }
+    var robotUrl = ctx.Request.Query["url"].ToString();
+    if (string.IsNullOrWhiteSpace(robotUrl))
+    {
+        ctx.Response.StatusCode = 400;
+        return;
+    }
+    var streamer = ctx.RequestServices.GetRequiredService<RobotStreamService>();
+    using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+    await streamer.StreamFramesToWebSocket(robotUrl, ws, ctx.RequestAborted);
 });
 
 app.Run();
