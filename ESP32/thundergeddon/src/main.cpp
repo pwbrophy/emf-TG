@@ -61,6 +61,10 @@ static constexpr uint32_t ANNOUNCE_MS    = 2000;
 static constexpr uint32_t HEARTBEAT_MS   = 2000;
 static constexpr uint32_t MOTOR_TICK_MS  = 1;      // 1 ms → 125 Hz soft-PWM
 static constexpr uint32_t WIFI_CHECK_MS  = 10000;  // reconnect check interval
+// If no drive/turret command arrives for this long, coast motors to zero.
+// Phone sends drive at 20 Hz (50 ms interval); 500 ms = 10× that, so transient
+// Wi-Fi jitter won't false-trigger, but a real disconnect stops the robot quickly.
+static constexpr uint32_t DRIVE_WATCHDOG_MS = 500;
 
 // ---- Module instances ----
 WiFiUDP                 udp;
@@ -98,6 +102,9 @@ static uint32_t g_lastAnnounce   = 0;
 static uint32_t g_lastHeartbeat  = 0;
 static uint32_t g_lastMotorTick  = 0;
 static uint32_t g_lastWifiCheck  = 0;
+// Drive watchdog: 0 = no drive command yet this connection; >0 = millis() of last cmd.
+static uint32_t g_lastDriveTime  = 0;
+static uint32_t g_lastTurretTime = 0;
 
 // ---- Buzzer (simple timed tone) ----
 static uint32_t g_buzzerEnd    = 0;
@@ -581,6 +588,8 @@ static void onWsClose()
 {
     if (!g_wsOpen && g_wsUrl.isEmpty()) return; // already cleaned up
     g_wsOpen = false;
+    g_lastDriveTime  = 0; // reset watchdog — motors are about to be disabled
+    g_lastTurretTime = 0;
     motors.enable(false);
     ir.stopEmit();
     mjpeg.setEnabled(false);
@@ -612,6 +621,7 @@ static void handleWsText(const String& s)
         if (g_inv_throttle) { l = -l; r = -r; }
         if (g_inv_steer)    { float t = l; l = r; r = t; }
         motors.setLeftRight(r, l); // hardware swap: left track wired to turret connector
+        g_lastDriveTime = millis();
         return;
     }
 
@@ -619,6 +629,7 @@ static void handleWsText(const String& s)
         float v = doc["speed"] | 0.0f;
         if (g_inv_turret) v = -v;
         motors.setTurret(v);
+        g_lastTurretTime = millis();
         return;
     }
 
@@ -962,6 +973,20 @@ void loop()
     if (now - g_lastMotorTick >= MOTOR_TICK_MS) {
         g_lastMotorTick = now;
         motors.tick();
+    }
+
+    // ---- Drive watchdog (safety-stop on silent Wi-Fi drop) ----
+    // The phone sends drive at 20 Hz even with stick at zero, so >500 ms silence
+    // means the connection is genuinely dead — coast targets to zero without
+    // disabling the SLEEP line (motors recover instantly when commands resume).
+    if (g_lastDriveTime > 0 && (now - g_lastDriveTime) > DRIVE_WATCHDOG_MS) {
+        motors.setLeftRight(0, 0);
+        g_lastDriveTime = 0;
+        Serial.println("[WD] drive watchdog fired — coasting to stop");
+    }
+    if (g_lastTurretTime > 0 && (now - g_lastTurretTime) > DRIVE_WATCHDOG_MS) {
+        motors.setTurret(0);
+        g_lastTurretTime = 0;
     }
 
     // ---- LED effects and status blink ----

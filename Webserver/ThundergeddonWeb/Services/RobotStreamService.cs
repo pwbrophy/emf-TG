@@ -197,13 +197,18 @@ internal class StreamBroadcaster
         }
     }
 
+    // Maximum time to wait for any single ReadAsync on the robot's MJPEG stream.
+    // At 10 fps a frame arrives every ~100 ms; 5 s of silence means the robot's
+    // camera has crashed or the TCP connection is silently dead.
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
+
     private async Task ReadLoop(CancellationToken ct)
     {
         _log.LogInformation("[Stream] Connecting to {url}", _url);
         try
         {
             var client = _factory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
+            client.Timeout = TimeSpan.FromSeconds(30); // initial connect + headers only
 
             using var resp = await client.GetAsync(_url, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
@@ -214,8 +219,34 @@ internal class StreamBroadcaster
 
             while (!ct.IsCancellationRequested)
             {
-                int read = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
-                if (read == 0) break;
+                int read;
+                try
+                {
+                    // Per-read timeout: HttpClient.Timeout covers the initial request
+                    // but NOT the streaming body.  Without this, a camera crash leaves
+                    // subscribers with a frozen frame and a blocked read indefinitely.
+                    using var readTimeout = new CancellationTokenSource(ReadTimeout);
+                    using var linked      = CancellationTokenSource
+                        .CreateLinkedTokenSource(ct, readTimeout.Token);
+
+                    read = await stream.ReadAsync(buffer, 0, buffer.Length, linked.Token);
+
+                    if (readTimeout.IsCancellationRequested)
+                    {
+                        // Timed out before any data — camera is silent.
+                        _log.LogWarning("[Stream] {url}: read timed out — camera crash?", _url);
+                        break;
+                    }
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Per-read timeout fired; outer ct is still live (subscribers present).
+                    _log.LogWarning("[Stream] {url}: read timed out — camera crash?", _url);
+                    break;
+                }
+                catch (OperationCanceledException) { break; } // outer ct cancelled — normal exit
+
+                if (read == 0) break; // graceful stream end
 
                 byte[] chunk = buffer[..read].ToArray();
 
@@ -234,6 +265,7 @@ internal class StreamBroadcaster
 
         _log.LogInformation("[Stream] Disconnected from {url}", _url);
 
+        // Complete all subscriber channels so their await-foreach loops exit cleanly.
         lock (_subLock)
         {
             foreach (var ch in _channels.Values)  ch.Writer.TryComplete();
