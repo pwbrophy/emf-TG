@@ -155,7 +155,10 @@ private:
 
     // ---- Transceive helpers ----
 
-    // 7-bit short frame (REQA/WUPA) — no CRC
+    // 7-bit short frame (REQA/WUPA) — no CRC.
+    // Uses a 3 ms software timeout: ISO 14443A cards reply to REQA within ~1 ms,
+    // so 3 ms is generous for a present card while cutting the no-card busy-wait
+    // from ~13 ms (hardware timer) down to 3 ms, giving the motor PWM ticks back.
     bool sendShort(uint8_t cmd, uint8_t* rx, uint8_t rxLen)
     {
         clrBits(R_Coll, 0x80);
@@ -166,7 +169,7 @@ private:
         wr(R_BitFraming, 0x07); // TxLastBits = 7
         wr(R_Command,    CMD_Transceive);
         setBits(R_BitFraming, 0x80); // StartSend
-        return waitAndRead(rx, rxLen);
+        return waitAndRead(rx, rxLen, 3);
     }
 
     // Full-byte transceive, no CRC (anti-collision commands)
@@ -195,14 +198,21 @@ private:
         return ok;
     }
 
-    bool waitAndRead(uint8_t* rx, uint8_t rxLen)
+    // Wait for RxIrq/IdleIrq (data received) or TimerIrq (no response).
+    // timeoutMs is a software ceiling — callers set it to the minimum needed:
+    //   sendShort (REQA)      → 3 ms  (cards respond in ~1 ms; avoids 13 ms stall)
+    //   sendFull  (anticoll)  → 25 ms (default; data reads need up to ~4 ms)
+    //   sendWithCRC (SELECT/READ) → 25 ms
+    // Exiting before hardware TimerIrq is safe: the next sendX() starts with
+    // CMD_Idle which resets the MFRC522 timer before re-arming it.
+    bool waitAndRead(uint8_t* rx, uint8_t rxLen, uint32_t timeoutMs = 25)
     {
-        uint32_t deadline = millis() + 30;
+        uint32_t deadline = millis() + timeoutMs;
         while ((int32_t)(millis() - deadline) < 0)
         {
             uint8_t irq = rd(R_ComIrq);
-            if (irq & 0x30) break;        // RxIrq or IdleIrq
-            if (irq & 0x01) return false; // TimerIrq — no card
+            if (irq & 0x30) break;        // RxIrq or IdleIrq — data ready
+            if (irq & 0x01) return false; // TimerIrq — no card response
         }
         if (rd(R_Error) & 0x17) return false; // overflow/parity/CRC/protocol
         uint8_t n = rd(R_FIFOLevel);
