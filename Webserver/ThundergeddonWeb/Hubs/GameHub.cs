@@ -18,6 +18,15 @@ public class GameHub : Hub
     {
         if (string.IsNullOrWhiteSpace(name)) return;
 
+        // If Unity isn't up yet, tell the caller to wait rather than silently
+        // dropping the join.  The phone will show a status message and can retry
+        // once it receives the ServerConnected broadcast.
+        if (!_bridge.IsConnectedToUnity)
+        {
+            await Clients.Caller.SendAsync("ServerNotReady");
+            return;
+        }
+
         await _bridge.SendToUnity(new
         {
             cmd          = "join",

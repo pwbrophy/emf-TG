@@ -946,6 +946,20 @@ function buildConnection() {
   conn.on('FireResult',    text    => showFireToast(text));
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected',()   => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
+  // Unity was not reachable when JoinLobby was called.  Keep the SignalR
+  // connection alive so ServerConnected arrives without a manual page refresh.
+  conn.on('ServerNotReady', () => {
+    dbg('SignalR: ServerNotReady');
+    showScreen('screen-join');
+    setStatus('Waiting for game server…', false);
+    document.getElementById('join-btn').disabled = false;
+  });
+  // Unity has (re-)connected — prompt waiting players to press Join.
+  conn.on('ServerConnected', () => {
+    dbg('SignalR: ServerConnected');
+    if (document.getElementById('screen-join').classList.contains('active'))
+      setStatus('Game server ready — press Join!', false);
+  });
 
   conn.onreconnecting(err => { dbg('SignalR: reconnecting err=' + (err && err.message)); showReconnectOverlay('Trying to reconnect…'); });
   conn.onreconnected(async () => {

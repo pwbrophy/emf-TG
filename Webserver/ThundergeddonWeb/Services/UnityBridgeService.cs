@@ -24,6 +24,9 @@ public class UnityBridgeService : BackgroundService
     private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
     private bool _connectedToUnity = false;
 
+    /// <summary>True while the WebSocket connection to Unity's PlayerWebSocketServer is open.</summary>
+    public bool IsConnectedToUnity => _connectedToUnity;
+
     public UnityBridgeService(IHubContext<GameHub> hub, ILogger<UnityBridgeService> logger)
     {
         _hub    = hub;
@@ -69,6 +72,9 @@ public class UnityBridgeService : BackgroundService
         await _ws.ConnectAsync(new Uri(UnityWsUrl), ct);
         _connectedToUnity = true;
         _logger.LogInformation("[Bridge] Connected.");
+        // Notify all connected phones that Unity is reachable.
+        // Phones waiting on the join screen will update their status prompt.
+        await _hub.Clients.All.SendAsync("ServerConnected", CancellationToken.None);
 
         var buffer = new byte[32768];
         while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
