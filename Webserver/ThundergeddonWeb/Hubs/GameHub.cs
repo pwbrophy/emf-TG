@@ -14,17 +14,18 @@ public class GameHub : Hub
 
     // ── Lobby ────────────────────────────────────────────────────────────────────
 
-    public async Task JoinLobby(string name)
+    /// <summary>
+    /// Returns true if the join was forwarded to Unity, false if Unity is not yet connected.
+    /// The client uses the return value to decide whether to show the lobby screen.
+    /// </summary>
+    public async Task<bool> JoinLobby(string name)
     {
-        if (string.IsNullOrWhiteSpace(name)) return;
+        if (string.IsNullOrWhiteSpace(name)) return false;
 
-        // If Unity isn't up yet, tell the caller to wait rather than silently
-        // dropping the join.  The phone will show a status message and can retry
-        // once it receives the ServerConnected broadcast.
         if (!_bridge.IsConnectedToUnity)
         {
             await Clients.Caller.SendAsync("ServerNotReady");
-            return;
+            return false;
         }
 
         await _bridge.SendToUnity(new
@@ -33,6 +34,7 @@ public class GameHub : Hub
             name         = name.Trim(),
             connectionId = Context.ConnectionId
         });
+        return true;
     }
 
     // ── Gameplay inputs ──────────────────────────────────────────────────────────

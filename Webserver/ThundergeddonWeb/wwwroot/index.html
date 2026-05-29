@@ -954,11 +954,16 @@ function buildConnection() {
     setStatus('Waiting for game server…', false);
     document.getElementById('join-btn').disabled = false;
   });
-  // Unity has (re-)connected — prompt waiting players to press Join.
+  // Unity has (re-)connected — auto-rejoin if the phone is waiting on the join screen.
   conn.on('ServerConnected', () => {
     dbg('SignalR: ServerConnected');
-    if (document.getElementById('screen-join').classList.contains('active'))
-      setStatus('Game server ready — press Join!', false);
+    if (document.getElementById('screen-join').classList.contains('active') && myName) {
+      setStatus('Game server ready — joining…', false);
+      conn.invoke('JoinLobby', myName).then(joined => {
+        if (joined && !document.getElementById('screen-playing').classList.contains('active'))
+          showScreen('screen-lobby');
+      }).catch(err => { dbg('ServerConnected auto-join failed: ' + err.message); });
+    }
   });
 
   conn.onreconnecting(err => { dbg('SignalR: reconnecting err=' + (err && err.message)); showReconnectOverlay('Trying to reconnect…'); });
@@ -966,7 +971,9 @@ function buildConnection() {
     dbg('SignalR: reconnected');
     hideReconnectOverlay();
     setStatus('', false);
-    await conn.invoke('JoinLobby', myName).catch(console.error);
+    const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
+    if (joined && !document.getElementById('screen-playing').classList.contains('active'))
+      showScreen('screen-lobby');
   });
   conn.onclose(err => {
     dbg('SignalR: closed err=' + (err && err.message));
@@ -1009,13 +1016,15 @@ async function joinLobby() {
     await connection.start();
     dbg('connected! invoking JoinLobby');
     myName = name;
-    await connection.invoke('JoinLobby', name);
-    dbg('JoinLobby OK');
-    // game_started may have fired during the await above and already switched to
-    // screen-playing — don't overwrite it with the lobby waiting screen.
-    if (!document.getElementById('screen-playing').classList.contains('active')) {
+    const joined = await connection.invoke('JoinLobby', name);
+    dbg('JoinLobby returned joined=' + joined);
+    // Only switch to lobby if Unity accepted the join.  If not (Unity not up),
+    // ServerNotReady will have already shown screen-join with a status message.
+    if (joined && !document.getElementById('screen-playing').classList.contains('active')) {
       dbg('→ screen-lobby');
       showScreen('screen-lobby');
+    } else if (!joined) {
+      dbg('not joined — staying on screen-join (awaiting ServerConnected)');
     } else {
       dbg('already on screen-playing, skip lobby');
     }
