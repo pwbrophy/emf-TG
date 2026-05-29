@@ -98,6 +98,9 @@
     }
     button.primary:active { opacity: 0.8; }
     button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Waiting-for-server state: solid grey, full opacity (not faded) */
+    #join-btn.btn-waiting { background: var(--muted); }
+    #join-btn.btn-waiting:disabled { opacity: 1; }
 
     .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
     .status.error { color: #e05050; }
@@ -624,7 +627,7 @@
   <div class="join-box">
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="20" autocomplete="off" spellcheck="false" />
-    <button class="primary" id="join-btn" onclick="joinLobby()">JOIN</button>
+    <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -737,6 +740,7 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 // ════════════════════════════════════════════════════════
 let myName      = '';
 let connection  = null;
+let hasJoined   = false;  // true once JoinLobby succeeded; false in monitoring-only mode
 let isDead      = false;      // true during 5-s explosion — all controls blocked
 let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
 let _deadTimer  = null;       // interval driving the countdown
@@ -768,6 +772,40 @@ let fireCooldownTimer  = null;
 // iOS since iOS 4.2 and is fully reliable.
 // ════════════════════════════════════════════════════════
 let _videoWs = null;
+
+// ── Join-button state helpers ──────────────────────────────────────────────
+function setJoinReady() {
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'JOIN';
+  btn.disabled = false;
+  btn.classList.remove('btn-waiting');
+}
+function setJoinWaiting() {
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'WAITING FOR SERVER';
+  btn.disabled = true;
+  btn.classList.add('btn-waiting');
+}
+
+// ── Background monitoring connection ──────────────────────────────────────
+// Keeps a SignalR connection alive purely to receive ServerConnected /
+// ServerNotReady and update the join button.  joinLobby() reuses this
+// connection rather than creating a new one each time.
+function startMonitoring() {
+  if (connection) {
+    const old = connection;
+    connection = null;
+    old.stop().catch(() => {});
+  }
+  connection = buildConnection();
+  connection.start()
+    .then(() => dbg('monitoring: connected'))
+    .catch(err => {
+      dbg('monitoring: start failed — ' + err.message);
+      connection = null;
+      setTimeout(startMonitoring, 3000);
+    });
+}
 
 function stopVideoWs() {
   if (_videoWs) {
@@ -890,11 +928,14 @@ function hideReconnectOverlay() {
 }
 
 function returnToJoin(message) {
-  // Stop old connection so Unity receives 'leave' before any new join arrives.
+  // Stop old connection so Unity receives 'leave' before the monitoring
+  // connection is established.  startMonitoring() rebuilds it below.
   if (connection) {
-    connection.stop().catch(() => {});
+    const old = connection;
     connection = null;
+    old.stop().catch(() => {});
   }
+  hasJoined  = false;
   isDead     = false;
   isDeadWalk = false;
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
@@ -912,9 +953,11 @@ function returnToJoin(message) {
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
   document.getElementById('fire-toast').classList.remove('visible');
   clearHitOverlay();
-  document.getElementById('join-btn').disabled = false;
+  setJoinWaiting();
   showScreen('screen-join');
   if (message) setStatus(message, true);
+  // Restart monitoring so the button updates when Unity reconnects.
+  startMonitoring();
 }
 
 // ════════════════════════════════════════════════════════
@@ -945,42 +988,59 @@ function buildConnection() {
   conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
   conn.on('HitTaken',     data    => onHitTaken(data));
-  conn.on('ServerDisconnected',()   => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
-  // Unity was not reachable when JoinLobby was called.  Keep the SignalR
-  // connection alive so ServerConnected arrives without a manual page refresh.
+  conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
+  // Unity not reachable — show grey button; keep SignalR alive for ServerConnected.
   conn.on('ServerNotReady', () => {
     dbg('SignalR: ServerNotReady');
+    setJoinWaiting();
     showScreen('screen-join');
     setStatus('Waiting for game server…', false);
-    document.getElementById('join-btn').disabled = false;
   });
-  // Unity has (re-)connected — auto-rejoin if the phone is waiting on the join screen.
+  // Unity (re-)connected — enable button; auto-rejoin if the phone was waiting.
   conn.on('ServerConnected', () => {
     dbg('SignalR: ServerConnected');
+    setJoinReady();
     if (document.getElementById('screen-join').classList.contains('active') && myName) {
       setStatus('Game server ready — joining…', false);
       conn.invoke('JoinLobby', myName).then(joined => {
-        if (joined && !document.getElementById('screen-playing').classList.contains('active'))
-          showScreen('screen-lobby');
+        if (joined) {
+          hasJoined = true;
+          if (!document.getElementById('screen-playing').classList.contains('active'))
+            showScreen('screen-lobby');
+        }
       }).catch(err => { dbg('ServerConnected auto-join failed: ' + err.message); });
     }
   });
 
-  conn.onreconnecting(err => { dbg('SignalR: reconnecting err=' + (err && err.message)); showReconnectOverlay('Trying to reconnect…'); });
+  // Don't show the reconnect overlay in monitoring-only mode (user hasn't joined yet).
+  conn.onreconnecting(err => {
+    dbg('SignalR: reconnecting err=' + (err && err.message));
+    if (hasJoined) showReconnectOverlay('Trying to reconnect…');
+  });
   conn.onreconnected(async () => {
     dbg('SignalR: reconnected');
     hideReconnectOverlay();
     setStatus('', false);
-    const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
-    if (joined && !document.getElementById('screen-playing').classList.contains('active'))
-      showScreen('screen-lobby');
+    if (myName) {
+      const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
+      if (joined) {
+        hasJoined = true;
+        if (!document.getElementById('screen-playing').classList.contains('active'))
+          showScreen('screen-lobby');
+      }
+    }
   });
   conn.onclose(err => {
     dbg('SignalR: closed err=' + (err && err.message));
     hideReconnectOverlay();
-    // Only treat as unexpected loss if this connection is still the active one.
-    // If connection was intentionally stopped (returnToJoin nulled it first), skip.
-    if (connection === conn) returnToJoin('Server connection lost. Please rejoin.');
+    if (connection !== conn) return;  // already replaced — ignore
+    if (hasJoined) {
+      returnToJoin('Server connection lost. Please rejoin.');
+    } else {
+      // Monitoring-only drop — restart silently without an error message.
+      connection = null;
+      startMonitoring();
+    }
   });
 
   return conn;
@@ -992,46 +1052,38 @@ function buildConnection() {
 async function joinLobby() {
   const input = document.getElementById('name-input');
   const name  = input.value.trim();
-
   if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
 
   dbg('joinLobby: name="' + name + '"');
 
-  // Tear down any previous connection before starting a new one
-  if (connection) {
-    dbg('stopping old connection');
-    const old = connection;
-    connection = null;
-    old.stop().catch(() => {});
+  if (!connection) {
+    setStatus('Not connected — please wait.', true);
+    return;
   }
 
-  const btn = document.getElementById('join-btn');
-  btn.disabled = true;
-  setStatus('Connecting…', false);
+  myName = name;
+  document.getElementById('join-btn').disabled = true;
+  setStatus('Joining…', false);
 
   try {
-    dbg('buildConnection...');
-    connection = buildConnection();
-    dbg('connection.start()...');
-    await connection.start();
-    dbg('connected! invoking JoinLobby');
-    myName = name;
     const joined = await connection.invoke('JoinLobby', name);
     dbg('JoinLobby returned joined=' + joined);
-    // Only switch to lobby if Unity accepted the join.  If not (Unity not up),
-    // ServerNotReady will have already shown screen-join with a status message.
-    if (joined && !document.getElementById('screen-playing').classList.contains('active')) {
-      dbg('→ screen-lobby');
-      showScreen('screen-lobby');
-    } else if (!joined) {
-      dbg('not joined — staying on screen-join (awaiting ServerConnected)');
+    if (joined) {
+      hasJoined = true;
+      if (!document.getElementById('screen-playing').classList.contains('active')) {
+        dbg('→ screen-lobby');
+        showScreen('screen-lobby');
+      } else {
+        dbg('already on screen-playing, skip lobby');
+      }
     } else {
-      dbg('already on screen-playing, skip lobby');
+      dbg('not joined — ServerNotReady will update button state');
+      // ServerNotReady handler calls setJoinWaiting() and shows status message.
     }
   } catch (err) {
     dbg('JOIN FAILED: ' + err.message);
     setStatus('Could not connect: ' + err.message, true);
-    btn.disabled = false;
+    setJoinReady();
   }
 }
 
@@ -1413,6 +1465,11 @@ function escHtml(s) {
 document.getElementById('name-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') joinLobby();
 });
+
+// ── Auto-start monitoring connection on page load ───────────────────────
+// Establishes a SignalR connection immediately so the join button reflects
+// the real Unity state before the user presses anything.
+startMonitoring();
 
 // ── Persist player name across sessions ────────────────
 (function () {

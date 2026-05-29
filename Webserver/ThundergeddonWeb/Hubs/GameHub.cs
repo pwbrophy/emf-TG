@@ -69,7 +69,18 @@ public class GameHub : Hub
         });
     }
 
-    // ── Disconnect ───────────────────────────────────────────────────────────────
+    // ── Connect / Disconnect ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Tell each new client immediately whether Unity is reachable so the join
+    /// button reflects the real server state without needing a join attempt first.
+    /// </summary>
+    public override async Task OnConnectedAsync()
+    {
+        await Clients.Caller.SendAsync(
+            _bridge.IsConnectedToUnity ? "ServerConnected" : "ServerNotReady");
+        await base.OnConnectedAsync();
+    }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
