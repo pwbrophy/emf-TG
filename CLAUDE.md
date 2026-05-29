@@ -467,21 +467,22 @@ DRV8833 INx truth table:
 - Safe: stops camera and disables motors before update
 - PlatformIO env: `thundergeddon_ota` — see **Working with Claude Code** section at the top of this file for the exact upload command and troubleshooting notes.
 
-### ArduinoWebsockets library patch — MUST REAPPLY after clean/reinstall
+### ArduinoWebsockets library patch — auto-applied at build time
 
-The ArduinoWebsockets library (gilmaimon, v0.5.4) sends `Host: <ip>` in the WebSocket upgrade request, omitting the port. **WebSocketSharp 1.0.3 rejects this with 400 Bad Request** for any non-standard port (i.e. not 80/443).
+The ArduinoWebsockets library (gilmaimon, v0.5.4) sends `Host: <ip>` in the WebSocket upgrade request, omitting the port. **WebSocketSharp 1.0.3 rejects this with 400 Bad Request** for any non-standard port (i.e. not 80/443) — so without the patch below, robots build clean but silently fail to connect to Unity.
 
-**After any `pio run` that reinstalls the library**, re-apply this patch to:
-`.pio/libdeps/thundergeddon_ota/ArduinoWebsockets/src/websockets_client.cpp`
+**This patch is now applied automatically** by [`scripts/patch_websockets.py`](ESP32/thundergeddon/scripts/patch_websockets.py), wired into both env sections via `extra_scripts = pre:scripts/patch_websockets.py` in `platformio.ini`. The script runs at script-load time and again as a pre-link action, is idempotent, and rewrites the file inside `.pio/libdeps/<env>/ArduinoWebsockets/src/websockets_client.cpp`. The library itself is pinned in `lib_deps` to commit `26eecea` (tag `0.5.4`) so the anchor line is stable.
 
-Find (around line 314):
+**No manual step is required.** A fresh clone, `pio pkg update`, or deletion of `.pio/libdeps/` will all re-trigger the patch on the next build.
+
+**If a future library bump invalidates the anchor**, the script exits with status 1 and a message naming the file — fix by updating `UNPATCHED_LINE` in `patch_websockets.py` to match the new upstream text. Better to fail loud at build time than silently produce non-connecting firmware.
+
+For reference, the substitution it applies (around line 314 of `websockets_client.cpp`):
 ```cpp
+// before:
 auto handshake = generateHandshake(internals::fromInterfaceString(host), internals::fromInterfaceString(path), _customHeaders);
-```
-Replace with:
-```cpp
-// Include port in Host header — WebSocketSharp requires "host:port" for
-// non-standard ports (not 80/443), otherwise it rejects with 400.
+
+// after:
 WSString hostHeader = internals::fromInterfaceString(host) + ":" + std::to_string(port);
 auto handshake = generateHandshake(hostHeader, internals::fromInterfaceString(path), _customHeaders);
 ```
