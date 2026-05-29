@@ -103,8 +103,10 @@ static uint32_t g_lastHeartbeat  = 0;
 static uint32_t g_lastMotorTick  = 0;
 static uint32_t g_lastWifiCheck  = 0;
 // Drive watchdog: 0 = no drive command yet this connection; >0 = millis() of last cmd.
+// Turret has no watchdog — the turret pill sends only on change (not continuously),
+// so a silent hold would falsely trigger.  A stray spinning turret is minor; a
+// tank driving into walls is the real safety risk.
 static uint32_t g_lastDriveTime  = 0;
-static uint32_t g_lastTurretTime = 0;
 
 // ---- Buzzer (simple timed tone) ----
 static uint32_t g_buzzerEnd    = 0;
@@ -588,8 +590,7 @@ static void onWsClose()
 {
     if (!g_wsOpen && g_wsUrl.isEmpty()) return; // already cleaned up
     g_wsOpen = false;
-    g_lastDriveTime  = 0; // reset watchdog — motors are about to be disabled
-    g_lastTurretTime = 0;
+    g_lastDriveTime = 0; // reset watchdog — motors are about to be disabled
     motors.enable(false);
     ir.stopEmit();
     mjpeg.setEnabled(false);
@@ -629,7 +630,6 @@ static void handleWsText(const String& s)
         float v = doc["speed"] | 0.0f;
         if (g_inv_turret) v = -v;
         motors.setTurret(v);
-        g_lastTurretTime = millis();
         return;
     }
 
@@ -983,10 +983,6 @@ void loop()
         motors.setLeftRight(0, 0);
         g_lastDriveTime = 0;
         Serial.println("[WD] drive watchdog fired — coasting to stop");
-    }
-    if (g_lastTurretTime > 0 && (now - g_lastTurretTime) > DRIVE_WATCHDOG_MS) {
-        motors.setTurret(0);
-        g_lastTurretTime = 0;
     }
 
     // ---- LED effects and status blink ----
