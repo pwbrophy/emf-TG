@@ -743,6 +743,7 @@ let connection  = null;
 let isDead      = false;      // true during 5-s explosion — all controls blocked
 let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
 let _deadTimer  = null;       // interval driving the countdown
+let gamePaused  = false;      // true between GamePaused and GameResumed — freezes timer label
 
 let maxHp       = 100;
 let currentHp   = 100;
@@ -946,6 +947,7 @@ function returnToJoin(message) {
   _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
   document.getElementById('game-paused-overlay').classList.remove('active');
+  gamePaused = false;
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
   document.getElementById('fire-toast').classList.remove('visible');
   clearHitOverlay();
@@ -979,8 +981,8 @@ function buildConnection() {
   conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
   conn.on('GameOver',     data     => { dbg('SignalR: GameOver'); onGameOver(data); });
   conn.on('RfidTag',      uid      => onRfidTag(uid));
-  conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); document.getElementById('game-paused-overlay').classList.add('active'); });
-  conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); document.getElementById('game-paused-overlay').classList.remove('active'); });
+  conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; document.getElementById('game-paused-overlay').classList.add('active'); });
+  conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
@@ -1145,7 +1147,7 @@ function onStateUpdate(data) {
     // Fallback respawn detection: full HP while in dead walk = respawn happened
     if (isDeadWalk && currentHp >= maxHp) onYouAreAlive();
   }
-  if (data.timer !== undefined) {
+  if (data.timer !== undefined && !gamePaused) {
     updateTimer(data.timer);
   }
 }
