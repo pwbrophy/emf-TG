@@ -19,3 +19,4 @@ Reference_Code/
 # ── Python / misc build artefacts ────────────────────────
 __pycache__/
 *.pyc
+**/Assets/_Recovery/
