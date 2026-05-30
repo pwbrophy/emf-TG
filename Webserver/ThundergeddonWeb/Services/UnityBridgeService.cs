@@ -23,9 +23,16 @@ public class UnityBridgeService : BackgroundService
     private ClientWebSocket? _ws;
     private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
     private bool _connectedToUnity = false;
+    private bool _joinAllowed      = false;
 
     /// <summary>True while the WebSocket connection to Unity's PlayerWebSocketServer is open.</summary>
     public bool IsConnectedToUnity => _connectedToUnity;
+
+    /// <summary>
+    /// True when Unity is reachable AND in a phase that accepts new players
+    /// (Lobby or Playing).  Phone clients should gate the join button on this.
+    /// </summary>
+    public bool IsGameReady => _connectedToUnity && _joinAllowed;
 
     public UnityBridgeService(IHubContext<GameHub> hub, ILogger<UnityBridgeService> logger)
     {
@@ -55,6 +62,7 @@ public class UnityBridgeService : BackgroundService
             if (_connectedToUnity)
             {
                 _connectedToUnity = false;
+                _joinAllowed      = false;
                 await _hub.Clients.All.SendAsync("ServerDisconnected", CancellationToken.None);
             }
 
@@ -71,10 +79,7 @@ public class UnityBridgeService : BackgroundService
         _logger.LogInformation("[Bridge] Connecting to Unity at {url}…", UnityWsUrl);
         await _ws.ConnectAsync(new Uri(UnityWsUrl), ct);
         _connectedToUnity = true;
-        _logger.LogInformation("[Bridge] Connected.");
-        // Notify all connected phones that Unity is reachable.
-        // Phones waiting on the join screen will update their status prompt.
-        await _hub.Clients.All.SendAsync("ServerConnected", CancellationToken.None);
+        _logger.LogInformation("[Bridge] Connected. Awaiting phase_changed from Unity…");
 
         var buffer = new byte[32768];
         while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
@@ -163,6 +168,26 @@ public class UnityBridgeService : BackgroundService
                 case "hit_taken":
                     await HandleHitTaken(doc.RootElement);
                     break;
+
+                case "phase_changed":
+                {
+                    string? phase = GetString(doc.RootElement, "phase");
+                    // Lobby and Playing both accept player joins (Playing allows reconnects).
+                    bool nowAllowed = phase == "lobby" || phase == "playing";
+                    if (nowAllowed != _joinAllowed)
+                    {
+                        _joinAllowed = nowAllowed;
+                        _logger.LogInformation("[Bridge] phase_changed → {phase}, joinAllowed={a}", phase, nowAllowed);
+                        await _hub.Clients.All.SendAsync(
+                            nowAllowed ? "ServerConnected" : "ServerNotReady",
+                            CancellationToken.None);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("[Bridge] phase_changed → {phase} (no state change)", phase);
+                    }
+                    break;
+                }
 
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");

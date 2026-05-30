@@ -22,7 +22,7 @@ public class GameHub : Hub
     {
         if (string.IsNullOrWhiteSpace(name)) return false;
 
-        if (!_bridge.IsConnectedToUnity)
+        if (!_bridge.IsGameReady)
         {
             await Clients.Caller.SendAsync("ServerNotReady");
             return false;
@@ -78,7 +78,7 @@ public class GameHub : Hub
     public override async Task OnConnectedAsync()
     {
         await Clients.Caller.SendAsync(
-            _bridge.IsConnectedToUnity ? "ServerConnected" : "ServerNotReady");
+            _bridge.IsGameReady ? "ServerConnected" : "ServerNotReady");
         await base.OnConnectedAsync();
     }
 

@@ -211,6 +211,8 @@ public class PlayerWebSocketServer : MonoBehaviour
         _sessionToConns[sessionId] = new HashSet<string>();
         Debug.Log("[PlayerWS] Bridge connected: " + sessionId);
         BroadcastPlayerList();
+        // Tell the newly-connected bridge what phase we're in so it can gate player joins.
+        BroadcastPhase(ServiceLocator.GameFlow?.Phase ?? GamePhase.MainMenu);
     }
 
     void HandleSessionClosed(string sessionId)
@@ -417,6 +419,7 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnPhaseChanged(GamePhase phase)
     {
+        BroadcastPhase(phase);
         if (phase == GamePhase.Playing)
         {
             SendGameStartedToAll();
@@ -428,6 +431,12 @@ public class PlayerWebSocketServer : MonoBehaviour
             DeactivateAllRobots();
             BroadcastDisplayUpdate();
         }
+    }
+
+    void BroadcastPhase(GamePhase phase)
+    {
+        string phaseStr = phase.ToString().ToLower();
+        BroadcastRaw("{\"cmd\":\"phase_changed\",\"phase\":\"" + phaseStr + "\"}");
     }
 
     void ActivateAllRobots()
