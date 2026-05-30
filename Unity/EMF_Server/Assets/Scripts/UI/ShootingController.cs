@@ -14,6 +14,8 @@ public class ShootingController : MonoBehaviour
 
     // Per-robot cooldown: robotId -> time when next shot is allowed
     private readonly Dictionary<string, float> _nextFireTime = new Dictionary<string, float>();
+    private bool  _paused;
+    private float _pauseStartTime;
 
     private void Awake()
     {
@@ -25,7 +27,11 @@ public class ShootingController : MonoBehaviour
         if (shootButton != null)
             shootButton.onClick.AddListener(OnShootClicked);
         var flow = ServiceLocator.GameFlow;
-        if (flow != null) flow.OnPhaseChanged += OnPhaseChanged;
+        if (flow != null)
+        {
+            flow.OnPhaseChanged   += OnPhaseChanged;
+            flow.OnPausedChanged  += OnPausedChanged;
+        }
     }
 
     private void OnDisable()
@@ -33,13 +39,36 @@ public class ShootingController : MonoBehaviour
         if (shootButton != null)
             shootButton.onClick.RemoveListener(OnShootClicked);
         var flow = ServiceLocator.GameFlow;
-        if (flow != null) flow.OnPhaseChanged -= OnPhaseChanged;
+        if (flow != null)
+        {
+            flow.OnPhaseChanged   -= OnPhaseChanged;
+            flow.OnPausedChanged  -= OnPausedChanged;
+        }
     }
 
     private void OnPhaseChanged(GamePhase phase)
     {
         if (phase == GamePhase.Playing)
+        {
             _nextFireTime.Clear();
+            _paused = false;
+        }
+    }
+
+    private void OnPausedChanged(bool paused)
+    {
+        if (paused)
+        {
+            _pauseStartTime = Time.time;
+            _paused = true;
+        }
+        else if (_paused)
+        {
+            float pauseDuration = Time.time - _pauseStartTime;
+            var keys = new List<string>(_nextFireTime.Keys);
+            foreach (var k in keys) _nextFireTime[k] += pauseDuration;
+            _paused = false;
+        }
     }
 
     private void Update()
@@ -90,7 +119,10 @@ public class ShootingController : MonoBehaviour
     public float CooldownRemaining(string robotId)
     {
         if (_nextFireTime.TryGetValue(robotId, out float t))
-            return Mathf.Max(0f, t - Time.time);
+        {
+            float now = _paused ? _pauseStartTime : Time.time;
+            return Mathf.Max(0f, t - now);
+        }
         return 0f;
     }
 
