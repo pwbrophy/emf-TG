@@ -69,6 +69,8 @@ public sealed class GameService
                            PlayersService players, IRobotDirectory dir)
     {
         if (State == null) return 0;
+        // Drop in-flight IR results that resolve while the match is paused
+        if (ServiceLocator.GameFlow?.IsPaused == true) return 0;
         if (State.DeadRobots.Contains(targetId) || State.RespawningRobots.Contains(targetId)) return 0;
         if (!State.RobotHp.ContainsKey(targetId)) return 0;
 

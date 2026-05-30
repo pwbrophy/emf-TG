@@ -66,6 +66,7 @@ public class ShootingController : MonoBehaviour
     public void RequestFire(string robotId)
     {
         if (string.IsNullOrEmpty(robotId)) return;
+        if (ServiceLocator.GameFlow?.IsPaused == true) return;
         if (CooldownRemaining(robotId) > 0f) return;
 
         // Block fire while dead (explosion) or in dead walk
