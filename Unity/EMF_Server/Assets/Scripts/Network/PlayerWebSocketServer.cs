@@ -525,6 +525,35 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Called by RobotWebSocketServer when a robot sends 'hello' during Playing.
+    /// Sends game_started to the assigned phone player so their video stream
+    /// reconnects to the robot's (possibly updated) IP address.
+    /// Skipped for robots currently in the explosion/dead-walk phase to avoid
+    /// clearing the dead overlay prematurely.
+    /// </summary>
+    public void NotifyRobotRejoined(string robotId)
+    {
+        if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
+
+        var state = ServiceLocator.Game?.State;
+        if (state != null && (state.DeadRobots.Contains(robotId) || state.RespawningRobots.Contains(robotId)))
+            return;
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null || !dir.TryGet(robotId, out var robotInfo)) return;
+        if (string.IsNullOrEmpty(robotInfo.AssignedPlayer)) return;
+
+        foreach (var kvp in _connToPlayer)
+        {
+            if (kvp.Value == robotInfo.AssignedPlayer)
+            {
+                SendGameStarted(kvp.Key, robotInfo.AssignedPlayer);
+                Debug.Log($"[PlayerWS] Robot {robotId} rejoined → re-sent game_started to {robotInfo.AssignedPlayer}");
+            }
+        }
+    }
+
     public void SendFireResult(string shooterRobotId, string resultText)
     {
         foreach (var kvp in _connToPlayer)

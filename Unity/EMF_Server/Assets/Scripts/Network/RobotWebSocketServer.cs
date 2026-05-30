@@ -286,6 +286,33 @@ public class RobotWebSocketServer : MonoBehaviour
                             gs.TurretAcceleration, gs.TurretDeceleration);
 
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
+
+            // Mid-game reconnect: restore robot state and notify phone player.
+            if (_flow?.Phase == GamePhase.Playing)
+            {
+                var gameState = ServiceLocator.Game?.State;
+                bool isDead        = gameState != null && gameState.DeadRobots.Contains(id);
+                bool isRespawning  = gameState != null && gameState.RespawningRobots.Contains(id);
+
+                // Always restart the camera stream so the phone gets video back.
+                SendStreamOn(id);
+
+                // Motors only if the robot is not in the death / dead-walk state.
+                if (!isDead && !isRespawning)
+                    SendMotorsOn(id);
+
+                // Restore the HP LED bar.
+                if (gameState != null && gs != null)
+                {
+                    int hp = gameState.RobotHp.TryGetValue(id, out int v) ? v : gs.MaxHp;
+                    SendSetHp(id, hp, gs.MaxHp);
+                }
+
+                // Tell the assigned phone player their robot is back (sends game_started
+                // with the robot's current IP so the video URL is refreshed).
+                ServiceLocator.PlayerServer?.NotifyRobotRejoined(id);
+            }
+
             return;
         }
 
