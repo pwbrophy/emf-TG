@@ -50,6 +50,12 @@ A successful upload ends with `Result: OK` / `Success`. If the hostname doesn't 
 
 **Robot IPs** are stored in the Claude memory file `C:\Users\Pete\.claude\projects\F--Data-Thundergeddon-EMF-Project\memory\project_robot_ip.md`. Current static IPs: robot 1 = `192.168.86.101`, robot 2 = `192.168.86.102`. When flashing multiple robots, build once then upload sequentially — parallel uploads conflict on the shared `firmware.bin` output file.
 
+**Per-robot OTA envs** are pre-baked for the static IPs — use these instead of passing `--upload-port`:
+```
+pio run -e thundergeddon_ota_r1 --target upload   # 192.168.86.101
+pio run -e thundergeddon_ota_r2 --target upload   # 192.168.86.102
+```
+
 ---
 
 ## Project Overview
