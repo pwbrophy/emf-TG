@@ -760,9 +760,10 @@ let lastDriveSend = 0;
 let slowTurretSpeed = 0.4; // updated from server via TurretSettings / game_started
 
 // Fire cooldown
-const FIRE_COOLDOWN_MS = 3000;
-let fireCooldownUntil  = 0;
-let fireCooldownTimer  = null;
+const FIRE_COOLDOWN_MS     = 3000;
+let fireCooldownUntil      = 0;
+let fireCooldownTimer      = null;
+let fireCooldownPauseLeft  = 0;   // ms remaining when paused
 
 // ════════════════════════════════════════════════════════
 // WebSocket video decoder (iOS Safari/Chrome)
@@ -941,6 +942,7 @@ function returnToJoin(message) {
   turretActive   = false;
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
+  fireCooldownPauseLeft = 0;
   document.getElementById('stream').src = '';
   stopVideoWs();
   const _sc = document.getElementById('stream-canvas');
@@ -981,8 +983,8 @@ function buildConnection() {
   conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
   conn.on('GameOver',     data     => { dbg('SignalR: GameOver'); onGameOver(data); });
   conn.on('RfidTag',      uid      => onRfidTag(uid));
-  conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; document.getElementById('game-paused-overlay').classList.add('active'); });
-  conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; document.getElementById('game-paused-overlay').classList.remove('active'); });
+  conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; pauseFireCooldown(); document.getElementById('game-paused-overlay').classList.add('active'); });
+  conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; resumeFireCooldown(); document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
@@ -1407,6 +1409,23 @@ function onFire() {
   if (connection) connection.invoke('Fire').catch(() => {});
 
   startFireCooldownUI();
+}
+
+function pauseFireCooldown() {
+  const remaining = fireCooldownUntil - Date.now();
+  if (remaining > 0) {
+    fireCooldownPauseLeft = remaining;
+    clearInterval(fireCooldownTimer);
+    fireCooldownTimer = null;
+  }
+}
+
+function resumeFireCooldown() {
+  if (fireCooldownPauseLeft > 0) {
+    fireCooldownUntil = Date.now() + fireCooldownPauseLeft;
+    fireCooldownPauseLeft = 0;
+    startFireCooldownUI();
+  }
 }
 
 function startFireCooldownUI() {
