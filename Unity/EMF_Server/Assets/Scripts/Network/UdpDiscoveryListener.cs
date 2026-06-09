@@ -15,6 +15,12 @@ public class UdpDiscoveryListener : MonoBehaviour
     [SerializeField] private int websocketPort = 8080;
     [SerializeField] private string websocketPath = "/esp32";
 
+    [Header("AP-isolation bypass (unicast push)")]
+    [Tooltip("Known robot IPs to push the WS URL to directly every 2s. " +
+             "Needed when the router has AP/client isolation that blocks UDP broadcasts " +
+             "between wireless devices (e.g. home Google/Nest WiFi).")]
+    [SerializeField] private string[] _knownRobotIps = new string[0];
+
     private IRobotDirectory _dir;
     private GameFlow _flow;
 
@@ -28,6 +34,9 @@ public class UdpDiscoveryListener : MonoBehaviour
 
     private readonly object _mtx = new object();
     private readonly Queue<Action> _main = new Queue<Action>();
+
+    // AP-isolation bypass: push WS URL unicast to known IPs on the main thread
+    private float _pushTimer = -1f;
 
     private void Start()
     {
@@ -71,6 +80,44 @@ public class UdpDiscoveryListener : MonoBehaviour
             }
             try { if (a != null) a(); }
             catch (Exception ex) { Debug.LogException(ex); }
+        }
+
+        // AP-isolation bypass: push WS URL directly to known robot IPs every 2s.
+        if (_running && _knownRobotIps != null && _knownRobotIps.Length > 0)
+        {
+            if (_pushTimer < 0f || Time.time - _pushTimer >= 2f)
+            {
+                _pushTimer = Time.time;
+                PushDiscoveryToKnownIps();
+            }
+        }
+    }
+
+    // Sends {"ws":"..."} unicast to each configured robot IP.
+    // Called on the main thread; uses a short-lived UdpClient so it doesn't
+    // interfere with the background receive socket.
+    private void PushDiscoveryToKnownIps()
+    {
+        string ip = PetersUtils.GetLocalIPAddress().ToString();
+        string wsUrl = "ws://" + ip + ":" + websocketPort + websocketPath;
+        string reply = "{\"ws\":\"" + wsUrl + "\"}";
+        byte[] outBytes = Encoding.UTF8.GetBytes(reply);
+
+        foreach (string robotIp in _knownRobotIps)
+        {
+            if (string.IsNullOrWhiteSpace(robotIp)) continue;
+            try
+            {
+                using (var sender = new UdpClient())
+                {
+                    var ep = new IPEndPoint(IPAddress.Parse(robotIp), discoveryPort);
+                    sender.Send(outBytes, outBytes.Length, ep);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[UDP] Push to " + robotIp + " failed: " + ex.Message);
+            }
         }
     }
 

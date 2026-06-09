@@ -521,12 +521,18 @@ static void connectWifi()
 static void startDiscovery()
 {
     udp.stop();
-    if (!udp.begin(DISCOVERY_PORT)) {
-        Serial.println("[DISCOVERY] bind failed");
-        return;
+    // Retry bind up to 5 times with a short delay — the port may briefly sit in
+    // TIME_WAIT after a rapid connect/close cycle (e.g. server restart mid-session).
+    for (int attempt = 0; attempt < 5; attempt++) {
+        if (udp.begin(DISCOVERY_PORT)) {
+            g_lastAnnounce = 0; // force immediate announce on next loop tick
+            Serial.println("[DISCOVERY] listening");
+            return;
+        }
+        Serial.printf("[DISCOVERY] bind failed (attempt %d/5), retrying...\n", attempt + 1);
+        delay(200);
     }
-    g_lastAnnounce = 0; // force immediate announce on next loop tick
-    Serial.println("[DISCOVERY] listening");
+    Serial.println("[DISCOVERY] bind failed permanently — will retry next onWsClose");
 }
 
 static void maybeAnnounce()

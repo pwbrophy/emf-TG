@@ -21115,6 +21115,9 @@ MonoBehaviour:
   discoveryPort: 30560
   websocketPort: 8080
   websocketPath: /esp32
+  _knownRobotIps:
+  - 192.168.86.101
+  - 192.168.86.102
 --- !u!114 &1515607756
 MonoBehaviour:
   m_ObjectHideFlags: 0

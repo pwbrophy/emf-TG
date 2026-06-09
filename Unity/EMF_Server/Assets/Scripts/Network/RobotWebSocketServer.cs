@@ -103,7 +103,6 @@ public class RobotWebSocketServer : MonoBehaviour
         Debug.Log("[WS] Starting server on 0.0.0.0:" + Port + Path + "  (LAN IP: " + ip + ")");
 
         _wss = new WebSocketServer(Port);
-        _wss.KeepClean = false;
 
         var parent = this;
         _wss.AddWebSocketService<ESP32Service>(Path, () => new ESP32Service { Parent = parent });
