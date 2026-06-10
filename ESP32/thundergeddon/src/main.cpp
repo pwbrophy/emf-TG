@@ -503,18 +503,32 @@ static String makeRobotId()
 // ---- Wi-Fi ----
 static void connectWifi()
 {
-    Serial.print("[WIFI] connecting to ");
-    Serial.println(WIFI_SSID);
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);           // low-latency radio; important for drive commands
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    while (WiFi.status() != WL_CONNECTED) {
-        Serial.print(".");
-        delay(300);
+
+    const int NET_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
+    const unsigned long ATTEMPT_MS = 10000; // ms per network before trying the next
+
+    while (true) {
+        for (int i = 0; i < NET_COUNT; i++) {
+            Serial.printf("[WIFI] trying %s\n", WIFI_NETWORKS[i].ssid);
+            WiFi.begin(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].pass);
+            unsigned long start = millis();
+            while (millis() - start < ATTEMPT_MS) {
+                if (WiFi.status() == WL_CONNECTED) {
+                    Serial.printf("\n[WIFI] connected to %s, IP=%s\n",
+                        WIFI_NETWORKS[i].ssid,
+                        WiFi.localIP().toString().c_str());
+                    return;
+                }
+                Serial.print(".");
+                delay(300);
+            }
+            Serial.println(" timeout");
+            WiFi.disconnect(true);
+            delay(200);
+        }
     }
-    Serial.println();
-    Serial.print("[WIFI] IP=");
-    Serial.println(WiFi.localIP());
 }
 
 // ---- UDP discovery ----
