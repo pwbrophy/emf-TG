@@ -1022,9 +1022,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (settings != null && game?.State != null && game.State.RespawningRobots.Contains(robotId))
         {
             int alliance = GetRobotAllianceIndex(robotId);
-            string baseUid = alliance == 0 ? settings.Alliance0BaseUid :
-                             alliance == 1 ? settings.Alliance1BaseUid : null;
-            if (!string.IsNullOrEmpty(baseUid) && uid == baseUid)
+            if (settings.IsAllianceBase(alliance, uid))
             {
                 game.RespawnRobot(robotId);
                 ServiceLocator.RobotServer?.SendFlashHeal(robotId);
@@ -1045,9 +1043,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (settings != null && game?.State != null)
         {
             int alliance = GetRobotAllianceIndex(robotId);
-            string baseUid = alliance == 0 ? settings.Alliance0BaseUid :
-                             alliance == 1 ? settings.Alliance1BaseUid : null;
-            if (!string.IsNullOrEmpty(baseUid) && uid == baseUid)
+            if (settings.IsAllianceBase(alliance, uid))
             {
                 game.RestoreHp(robotId);
                 ServiceLocator.RobotServer?.SendFlashHeal(robotId);

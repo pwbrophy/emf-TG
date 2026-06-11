@@ -34,8 +34,8 @@ public class GameSettings : MonoBehaviour
     public int TeamPointsPerKill = 20;
 
     [Header("Base RFID UIDs — set directly in Inspector, not persisted")]
-    public string Alliance0BaseUid = "";
-    public string Alliance1BaseUid = "";
+    public string[] Alliance0BaseUids = new string[0];
+    public string[] Alliance1BaseUids = new string[0];
 
     [Header("Capture Point RFID UIDs — set directly in Inspector, not persisted")]
     public string[] NorthPointUids  = new string[0];
@@ -45,6 +45,19 @@ public class GameSettings : MonoBehaviour
     [Header("Countdown")]
     [Tooltip("Seconds to count down before the match begins. Default 5.")]
     public int CountdownDuration = 5;
+
+    /// <summary>Returns true if uid matches any tag configured for the given alliance's base.</summary>
+    public bool IsAllianceBase(int alliance, string uid)
+    {
+        if (string.IsNullOrEmpty(uid)) return false;
+        string[] arr = alliance == 0 ? Alliance0BaseUids :
+                       alliance == 1 ? Alliance1BaseUids : null;
+        if (arr == null) return false;
+        uid = uid.ToUpperInvariant();
+        foreach (var entry in arr)
+            if (!string.IsNullOrEmpty(entry) && uid == entry.ToUpperInvariant()) return true;
+        return false;
+    }
 
     [Header("Phone Controls")]
     [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]

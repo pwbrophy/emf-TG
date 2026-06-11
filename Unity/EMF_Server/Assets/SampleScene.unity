@@ -5483,13 +5483,20 @@ MonoBehaviour:
   MaxPlayers: 6
   MaxTeamPoints: 300
   TeamPointsPerKill: 25
-  Alliance0BaseUid: 118D6A5D
-  Alliance1BaseUid: 118D6A5D
+  Alliance0BaseUids:
+  - 118D6A5D
+  - F1886B01
+  Alliance1BaseUids:
+  - 11F6025D
+  - 1168465D
   NorthPointUids:
   - 110E8C5D
+  - 11F79E5D
   CentrePointUids:
   - 11E0A45D
+  - 1186AE5D
   SouthPointUids:
+  - 114DBB5D
   - 01DA2C5D
   CountdownDuration: 5
   SlowTurretSpeed: 0.4
