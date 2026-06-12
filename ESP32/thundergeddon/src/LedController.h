@@ -57,14 +57,17 @@ public:
 
     // ---- HP bar ----
 
-    // Update stored HP values and redraw the bar (unless an effect is active).
-    // Resets the pulse cycle so the bar immediately shows the new state.
+    // Update stored HP values and redraw the bar.
+    // If hp > 0 arrives while in a death state, cancel it — the server says the
+    // robot is alive again (e.g. game reset), so restore the HP bar immediately.
     void setHp(int hp, int maxHp)
     {
         _hp    = (hp    < 0) ? 0    : hp;
         _maxHp = (maxHp < 1) ? 1    : maxHp;
         _pulseOn         = true;
         _nextPulseToggle = millis() + 500;
+        if (_hp > 0 && (_effect == Effect::DeadBlink || _effect == Effect::DeathExplosion))
+            _effect = Effect::None;
         if (_effect == Effect::None) _drawHpBar();
     }
 

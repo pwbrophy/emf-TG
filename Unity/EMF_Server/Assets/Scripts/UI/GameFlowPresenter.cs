@@ -28,7 +28,7 @@ public class GameFlowPresenter : MonoBehaviour
 
         if (toLobbyButton)    toLobbyButton.onClick.AddListener(() => _flow?.GoToLobby());
         if (startGameButton)  startGameButton.onClick.AddListener(() => _flow?.StartGame());
-        if (backToMenuButton) backToMenuButton.onClick.AddListener(() => _flow?.BackToMenu());
+        if (backToMenuButton) backToMenuButton.onClick.AddListener(() => _flow?.GoToLobby());
         if (endGameButton)    endGameButton.onClick.AddListener(() => _flow?.EndGame());
 
         _flow.OnPhaseChanged += HandlePhaseChanged;

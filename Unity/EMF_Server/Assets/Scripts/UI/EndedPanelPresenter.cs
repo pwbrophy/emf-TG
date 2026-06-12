@@ -58,9 +58,9 @@ public class EndedPanelPresenter : MonoBehaviour
 
         string reasonText = reason switch
         {
-            "elimination" => "by elimination!",
-            "time"        => "on time — most tanks surviving!",
-            _             => ""
+            "points" => "by reaching the victory point limit!",
+            "time"   => "on time — most points wins!",
+            _        => ""
         };
 
         resultLabel.text = $"{teamName} wins!\n{reasonText}";

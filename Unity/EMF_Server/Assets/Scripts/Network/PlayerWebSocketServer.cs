@@ -431,6 +431,15 @@ public class PlayerWebSocketServer : MonoBehaviour
             DeactivateAllRobots();
             BroadcastDisplayUpdate();
         }
+        else if (phase == GamePhase.Lobby)
+        {
+            // Clear stale death timers from the previous game so they don't fire
+            // transitions on the new GameState when a fresh game starts.
+            _deathTimes.Clear();
+            // Reset all robot LED displays to full HP bar immediately so the
+            // dead-blink effect clears as soon as the lobby opens.
+            ResetAllRobotLeds();
+        }
     }
 
     void BroadcastPhase(GamePhase phase)
@@ -461,6 +470,17 @@ public class PlayerWebSocketServer : MonoBehaviour
             ws.SendStreamOff(robot.RobotId);
             ws.SendMotorsOff(robot.RobotId);
         }
+    }
+
+    void ResetAllRobotLeds()
+    {
+        var server   = ServiceLocator.RobotServer;
+        var dir      = ServiceLocator.RobotDirectory;
+        var settings = ServiceLocator.GameSettings;
+        if (server == null || dir == null) return;
+        int maxHp = settings != null ? settings.MaxHp : 100;
+        foreach (var robot in dir.GetAll())
+            server.SendSetHp(robot.RobotId, maxHp, maxHp);
     }
 
     void OnHpChanged(string robotId, int newHp)

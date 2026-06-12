@@ -1210,8 +1210,8 @@ function onGameOver(data) {
   let msg = 'Game over.';
   if (teamName) {
     msg = teamName + ' wins! (' +
-      (reason === 'elimination' ? 'by elimination' :
-       reason === 'time'        ? 'by time' : reason) + ')';
+      (reason === 'points' ? 'by victory points' :
+       reason === 'time'   ? 'on time' : reason) + ')';
   }
 
   document.getElementById('stream').src = '';

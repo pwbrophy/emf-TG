@@ -26,7 +26,7 @@ public sealed class GameFlow
         OnPhaseChanged?.Invoke(Phase);
     }
 
-    public bool CanGoToLobby()  => Phase == GamePhase.MainMenu;
+    public bool CanGoToLobby()  => Phase == GamePhase.MainMenu || Phase == GamePhase.Ended;
     public bool CanStartGame()  => Phase == GamePhase.Lobby && _game.CanStart();
     public bool CanEndGame()    => Phase == GamePhase.Playing;
 
