@@ -334,12 +334,12 @@ public class PlayerWebSocketServer : MonoBehaviour
     void HandleSquad(string connId, int alliance)
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
-        if (alliance != 0 && alliance != 1) return;
+        if (alliance != -1 && alliance != 0 && alliance != 1) return;
 
-        // Update the player's alliance in PlayersService
+        // Update the player's alliance (-1 = unassigned)
         ServiceLocator.Players?.SetAllianceByName(playerName, alliance);
 
-        // Clear any existing robot assignment for this player, then re-assign from chosen squad
+        // Always clear the current robot assignment first
         var dir = ServiceLocator.RobotDirectory;
         if (dir != null)
         {
@@ -347,11 +347,14 @@ public class PlayerWebSocketServer : MonoBehaviour
                 if (robot.AssignedPlayer == playerName)
                     dir.ClearAssignedPlayer(robot.RobotId);
 
-            TryAssignFreeRobotToPlayer(playerName, alliance);
+            // Only re-assign if they picked a squad
+            if (alliance == 0 || alliance == 1)
+                TryAssignFreeRobotToPlayer(playerName, alliance);
         }
 
         BroadcastPlayerList();
-        Debug.Log("[PlayerWS] Player " + playerName + " joined squad " + AllianceName(alliance));
+        string action = alliance >= 0 ? "joined squad " + AllianceName(alliance) : "left squad";
+        Debug.Log("[PlayerWS] Player " + playerName + " " + action);
     }
 
     void HandleLeave(string connId)

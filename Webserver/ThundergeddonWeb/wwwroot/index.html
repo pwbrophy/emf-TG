@@ -185,6 +185,7 @@
     .squad-pick-btn:active { filter: brightness(0.85); }
     .squad-pick-btn.desert { background: #b8905a; color: #fff; }
     .squad-pick-btn.jungle { background: #4a7a4a; color: #fff; }
+    .squad-pick-btn.leave  { background: #444; color: #ccc; }
 
     .waiting-anim {
       display: inline-block;
@@ -1153,45 +1154,47 @@ function renderPlayerList(players) {
     }
   }
 
-  function makeRow(name, dotColor) {
+  function makeRow(name, dotColor, selfBtns) {
     const isSelf = name === myName;
     return `<div class="player-row">
       <div class="player-dot" style="background:${dotColor}"></div>
       <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+      ${isSelf && selfBtns ? selfBtns : ''}
     </div>`;
   }
 
-  // Unassigned — show squad-pick buttons for the current player
+  // Unassigned — squad-pick buttons for the current player
   const unEl = document.getElementById('lobby-unassigned');
   if (unEl) {
     if (unassigned.length === 0) {
       unEl.innerHTML = '<div class="empty-state">–</div>';
     } else {
-      unEl.innerHTML = unassigned.map(name => {
-        const isSelf = name === myName;
-        const pickBtns = isSelf
-          ? `<div class="squad-pick-btns">
-               <button class="squad-pick-btn desert" onclick="joinSquad(0)">Desert Squad</button>
-               <button class="squad-pick-btn jungle" onclick="joinSquad(1)">Jungle Squad</button>
-             </div>`
-          : '';
-        return `<div class="player-row">
-          <div class="player-dot"></div>
-          <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
-          ${pickBtns}
-        </div>`;
-      }).join('');
+      const pickBtns = `<div class="squad-pick-btns">
+        <button class="squad-pick-btn desert" onclick="joinSquad(0)">Desert Squad</button>
+        <button class="squad-pick-btn jungle" onclick="joinSquad(1)">Jungle Squad</button>
+      </div>`;
+      unEl.innerHTML = unassigned.map(n => makeRow(n, 'var(--green)', pickBtns)).join('');
     }
   }
 
+  // Desert — switch-to-jungle + leave buttons for the current player
+  const desertBtns = `<div class="squad-pick-btns">
+    <button class="squad-pick-btn jungle" onclick="joinSquad(1)">Switch to Jungle</button>
+    <button class="squad-pick-btn leave"  onclick="joinSquad(-1)">Leave</button>
+  </div>`;
   const dEl = document.getElementById('lobby-desert');
   if (dEl) dEl.innerHTML = desert.length
-    ? desert.map(n => makeRow(n, '#b8905a')).join('')
+    ? desert.map(n => makeRow(n, '#b8905a', desertBtns)).join('')
     : '<div class="empty-state">–</div>';
 
+  // Jungle — switch-to-desert + leave buttons for the current player
+  const jungleBtns = `<div class="squad-pick-btns">
+    <button class="squad-pick-btn desert" onclick="joinSquad(0)">Switch to Desert</button>
+    <button class="squad-pick-btn leave"  onclick="joinSquad(-1)">Leave</button>
+  </div>`;
   const jEl = document.getElementById('lobby-jungle');
   if (jEl) jEl.innerHTML = jungle.length
-    ? jungle.map(n => makeRow(n, '#4a7a4a')).join('')
+    ? jungle.map(n => makeRow(n, '#4a7a4a', jungleBtns)).join('')
     : '<div class="empty-state">–</div>';
 }
 
