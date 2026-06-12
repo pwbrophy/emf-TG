@@ -919,17 +919,28 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     string BuildPlayerListJson(IReadOnlyList<PlayerInfo> players)
     {
+        var dir = ServiceLocator.RobotDirectory;
         var sb = new StringBuilder("{\"cmd\":\"player_list\",\"players\":[");
         if (players != null)
         {
             for (int i = 0; i < players.Count; i++)
             {
                 if (i > 0) sb.Append(',');
+                string robotCallsign = "";
+                if (dir != null)
+                    foreach (var robot in dir.GetAll())
+                        if (robot.AssignedPlayer == players[i].Name)
+                        {
+                            robotCallsign = string.IsNullOrEmpty(robot.Callsign) ? robot.RobotId : robot.Callsign;
+                            break;
+                        }
                 sb.Append("{\"name\":\"");
                 sb.Append(EscapeJson(players[i].Name));
                 sb.Append("\",\"alliance\":");
                 sb.Append(players[i].AllianceIndex);
-                sb.Append('}');
+                sb.Append(",\"robot\":\"");
+                sb.Append(EscapeJson(robotCallsign));
+                sb.Append("\"}");
             }
         }
         sb.Append("]}");

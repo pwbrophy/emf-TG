@@ -210,9 +210,10 @@ public class UnityBridgeService : BackgroundService
             .EnumerateArray()
             .Select(e =>
             {
-                string name    = e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : e.GetString() ?? "";
+                string name    = e.TryGetProperty("name",    out var n) ? n.GetString() ?? "" : e.GetString() ?? "";
                 int    alliance = e.TryGetProperty("alliance", out var a) && a.TryGetInt32(out int i) ? i : -1;
-                return new { name, alliance };
+                string robot   = e.TryGetProperty("robot",   out var r) ? r.GetString() ?? "" : "";
+                return new { name, alliance, robot };
             })
             .Where(p => p.name.Length > 0)
             .ToList();

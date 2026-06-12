@@ -689,6 +689,7 @@
     <button id="squad-btn-jungle" class="squad-action-btn jungle" onclick="joinSquad(1)" disabled>Join Jungle</button>
     <button id="squad-btn-leave"  class="squad-action-btn leave"  onclick="joinSquad(-1)" disabled>Leave Squad</button>
   </div>
+  <div id="my-robot-label" style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;min-height:1.1em"></div>
 
   <!-- Unassigned players -->
   <div class="lobby-section">
@@ -1172,17 +1173,24 @@ function setStatus(msg, isError) {
 function renderPlayerList(players) {
   const unassigned = [], desert = [], jungle = [];
 
+  let myRobot = '';
   if (players) {
     for (const p of players) {
       const name     = typeof p === 'string' ? p : (p.name ?? '');
       const alliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
-      // Sync our own alliance from authoritative server data
-      if (name === myName) myAlliance = alliance;
+      // Sync our own alliance and robot from authoritative server data
+      if (name === myName) {
+        myAlliance = alliance;
+        myRobot    = typeof p === 'string' ? '' : (p.robot ?? '');
+      }
       if      (alliance === 0) desert.push(name);
       else if (alliance === 1) jungle.push(name);
       else                     unassigned.push(name);
     }
   }
+
+  const robotLabel = document.getElementById('my-robot-label');
+  if (robotLabel) robotLabel.textContent = myRobot ? 'Your tank: ' + myRobot : '';
 
   updateSquadButtons();
 
