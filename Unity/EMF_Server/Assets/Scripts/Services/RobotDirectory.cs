@@ -192,6 +192,9 @@ public class RobotDirectory : IRobotDirectory
         record.name = newName;
         Debug.Log("[RobotDirectory] Saved name '" + newName + "' for robot " + robotId);
         SaveToDisk();
+
+        // Push the new name to the robot's NVS so it persists across servers.
+        ServiceLocator.RobotServer?.SendSetName(robotId, newName);
     }
 
     public void SetAssignedPlayer(string robotId, string playerName)

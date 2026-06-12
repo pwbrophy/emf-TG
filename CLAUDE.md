@@ -262,13 +262,14 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 | `ir_emit_prepare` | — | Motors off, IR LEDs on, carrier on. Robot replies `ir_emit_ready` |
 | `ir_emit_stop` | — | IR LEDs off, carrier off, motors on |
 | `ir_listen_and_report` | `ms` | Listen for IR for window, auto-reply `ir_result` |
+| `set_name` | `name` | Save human-readable name to robot NVS (`tg_id`). Robot sends it back in future `hello` messages. |
 | `ping` | — | Connectivity test. Robot replies `pong` immediately. |
 
 **Robot → Unity:**
 
 | Message | Fields | Meaning |
 |---------|--------|---------|
-| `hello` | `id` | Robot registers itself (MAC-based ID, 12-char hex) |
+| `hello` | `id`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret` | Robot registers itself. `name` is the human-readable name saved in NVS (empty string if never set). |
 | `hb` | `t` | Heartbeat (millis timestamp) |
 | `pong` | — | Reply to `ping`; used by `RobotPingButton` to display RTT |
 | `ir_emit_ready` | — | Robot is ready to emit IR |
@@ -311,7 +312,7 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 ## Not Yet Implemented
 
 - **RobotTestPanel** — subsystem test buttons (drive, turret sweep, flash, IR) in Lobby
-- **RenamePopup** — `RobotsPanelPresenter.renamePopup` is unwired; Edit button logs a warning
+- **RenamePopup** — Implemented. Edit button opens modal to rename robot and reassign player. Name is pushed to robot NVS via `set_name` command so it persists across servers.
 - **Phase 4: Player-facing display** — second monitor panel with QR code, scoreboard not started
 - **`PetersUtils.GetLocalIPAddress()`** — referenced in `RobotWebSocketServer` and `UdpDiscoveryListener`; must pick LAN IPv4 (avoids loopback/VPN)
 

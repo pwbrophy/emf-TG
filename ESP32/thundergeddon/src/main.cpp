@@ -84,6 +84,10 @@ static int      g_wsPort  = 8080;
 static String   g_wsPath  = "/esp32";
 static bool     g_wsOpen  = false;
 
+// Human-readable robot name — loaded from NVS on boot, updated by set_name command.
+// Sent to the server in the hello message so any server knows the robot's name.
+static String   g_robotName;
+
 // Camera flip state — loaded from NVS on boot, updated by set_video_flip command.
 // Both default to 1 to match the original hardcoded values in CameraController.
 static int      g_hflip = 1;
@@ -726,6 +730,17 @@ static void handleWsText(const String& s)
         return;
     }
 
+    if (strcmp(cmd, "set_name") == 0) {
+        const char* newName = doc["name"] | "";
+        g_robotName = String(newName);
+        Preferences prefs;
+        prefs.begin("tg_id", false);
+        prefs.putString("name", g_robotName);
+        prefs.end();
+        Serial.printf("[ID] Name set to: %s\n", g_robotName.c_str());
+        return;
+    }
+
     // ---- Game effects ----
 
     if (strcmp(cmd, "flash_fire") == 0) {
@@ -832,9 +847,10 @@ static void connectWebSocket()
             g_wsOpen        = true;
             g_lastHeartbeat = 0; // trigger immediate heartbeat next tick
 
-            // hello includes IP and flip state so the server can sync its UI
+            // hello includes IP, name, and config so the server can sync its UI
             String hello = String("{\"cmd\":\"hello\",\"id\":\"") + g_robotId +
-                           "\",\"ip\":\"" + WiFi.localIP().toString() +
+                           "\",\"name\":\""      + g_robotName +
+                           "\",\"ip\":\""        + WiFi.localIP().toString() +
                            "\",\"hflip\":"       + String(g_hflip) +
                            ",\"vflip\":"         + String(g_vflip) +
                            ",\"inv_throttle\":"  + String(g_inv_throttle) +
@@ -938,6 +954,18 @@ void setup()
         prefs.end();
         Serial.printf("[DRV] config loaded inv_throttle=%d inv_steer=%d inv_turret=%d\n",
                       g_inv_throttle, g_inv_steer, g_inv_turret);
+    }
+
+    // Load robot name from NVS (empty string = no name set yet)
+    {
+        Preferences prefs;
+        prefs.begin("tg_id", true);
+        g_robotName = prefs.getString("name", "");
+        prefs.end();
+        if (g_robotName.isEmpty())
+            Serial.println("[ID] No saved name (will use ID as default)");
+        else
+            Serial.printf("[ID] Loaded name: %s\n", g_robotName.c_str());
     }
 
     // Wi-Fi: blocking until connected

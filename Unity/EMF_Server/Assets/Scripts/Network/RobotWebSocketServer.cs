@@ -267,8 +267,12 @@ public class RobotWebSocketServer : MonoBehaviour
 
             _sessionByRobot[id] = sid;
 
-            string helloIp = ExtractString(json, "ip") ?? "";
-            _dir?.Upsert(id, id, ip: helloIp);
+            string helloIp   = ExtractString(json, "ip")   ?? "";
+            string helloName = ExtractString(json, "name") ?? "";
+            // Use the robot's saved name if it sent one; otherwise fall back to the id
+            // so RobotDirectory can apply its own saved name or generate a generic one.
+            string callsign = string.IsNullOrWhiteSpace(helloName) ? id : helloName;
+            _dir?.Upsert(id, callsign, ip: helloIp);
 
             bool hflip = ExtractInt(json, "hflip") != 0;
             bool vflip = ExtractInt(json, "vflip") != 0;
@@ -484,6 +488,18 @@ public class RobotWebSocketServer : MonoBehaviour
         Debug.Log(ok
             ? $"[WS->Robot] set_drive_config th={invThrottle} st={invSteer} tu={invTurret} -> {robotId}"
             : $"[WS->Robot] FAILED set_drive_config -> {robotId}");
+        return ok;
+    }
+
+    public bool SendSetName(string robotId, string name)
+    {
+        if (string.IsNullOrEmpty(robotId) || string.IsNullOrEmpty(name)) return false;
+        string escaped = name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        string json = "{\"cmd\":\"set_name\",\"name\":\"" + escaped + "\"}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok
+            ? $"[WS->Robot] set_name '{name}' -> {robotId}"
+            : $"[WS->Robot] FAILED set_name -> {robotId}");
         return ok;
     }
 
