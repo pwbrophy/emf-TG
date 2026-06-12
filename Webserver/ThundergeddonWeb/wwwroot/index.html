@@ -170,22 +170,30 @@
     .player-name-self { font-weight: 700; color: var(--accent2); }
     .empty-state { padding: 14px; color: var(--muted); font-size: 0.85rem; text-align: center; }
 
-    /* Squad pick buttons shown to the current player while unassigned */
-    .squad-pick-btns { display: flex; gap: 6px; width: 100%; margin-top: 8px; }
-    .squad-pick-btn {
-      flex: 1;
-      padding: 8px 4px;
-      border: none;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: filter 0.15s;
+    /* Persistent squad action buttons */
+    .squad-action-btns {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 360px;
+      margin-bottom: 14px;
     }
-    .squad-pick-btn:active { filter: brightness(0.85); }
-    .squad-pick-btn.desert { background: #b8905a; color: #fff; }
-    .squad-pick-btn.jungle { background: #4a7a4a; color: #fff; }
-    .squad-pick-btn.leave  { background: #444; color: #ccc; }
+    .squad-action-btn {
+      flex: 1;
+      padding: 10px 4px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: filter 0.12s, opacity 0.12s;
+    }
+    .squad-action-btn:active:not(:disabled) { filter: brightness(0.82); }
+    .squad-action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .squad-action-btn.desert { background: #b8905a; color: #fff; }
+    .squad-action-btn.jungle { background: #4a7a4a; color: #fff; }
+    .squad-action-btn.leave  { background: #3a3a3a; color: #bbb; }
 
     .waiting-anim {
       display: inline-block;
@@ -675,6 +683,13 @@
     <p>Waiting for the game to start…</p>
   </div>
 
+  <!-- Squad action buttons -->
+  <div class="squad-action-btns">
+    <button id="squad-btn-desert" class="squad-action-btn desert" onclick="joinSquad(0)" disabled>Join Desert</button>
+    <button id="squad-btn-jungle" class="squad-action-btn jungle" onclick="joinSquad(1)" disabled>Join Jungle</button>
+    <button id="squad-btn-leave"  class="squad-action-btn leave"  onclick="joinSquad(-1)" disabled>Leave Squad</button>
+  </div>
+
   <!-- Unassigned players -->
   <div class="lobby-section">
     <div class="lobby-section-title">UNASSIGNED</div>
@@ -1123,6 +1138,7 @@ async function joinLobby() {
 
 async function joinSquad(alliance) {
   myAlliance = alliance;
+  updateSquadButtons();
   if (!connection) return;
   try {
     await connection.invoke('JoinSquad', alliance);
@@ -1130,6 +1146,18 @@ async function joinSquad(alliance) {
   } catch (err) {
     dbg('joinSquad failed: ' + err.message);
   }
+}
+
+function updateSquadButtons() {
+  const inDesert = myAlliance === 0;
+  const inJungle = myAlliance === 1;
+  const inSquad  = inDesert || inJungle;
+  const d = document.getElementById('squad-btn-desert');
+  const j = document.getElementById('squad-btn-jungle');
+  const l = document.getElementById('squad-btn-leave');
+  if (d) d.disabled = inDesert;
+  if (j) j.disabled = inJungle;
+  if (l) l.disabled = !inSquad;
 }
 
 function setStatus(msg, isError) {
@@ -1148,53 +1176,37 @@ function renderPlayerList(players) {
     for (const p of players) {
       const name     = typeof p === 'string' ? p : (p.name ?? '');
       const alliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
+      // Sync our own alliance from authoritative server data
+      if (name === myName) myAlliance = alliance;
       if      (alliance === 0) desert.push(name);
       else if (alliance === 1) jungle.push(name);
       else                     unassigned.push(name);
     }
   }
 
-  function makeRow(name, dotColor, selfBtns) {
+  updateSquadButtons();
+
+  function makeRow(name, dotColor) {
     const isSelf = name === myName;
     return `<div class="player-row">
       <div class="player-dot" style="background:${dotColor}"></div>
       <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
-      ${isSelf && selfBtns ? selfBtns : ''}
     </div>`;
   }
 
-  // Unassigned — squad-pick buttons for the current player
   const unEl = document.getElementById('lobby-unassigned');
-  if (unEl) {
-    if (unassigned.length === 0) {
-      unEl.innerHTML = '<div class="empty-state">–</div>';
-    } else {
-      const pickBtns = `<div class="squad-pick-btns">
-        <button class="squad-pick-btn desert" onclick="joinSquad(0)">Desert Squad</button>
-        <button class="squad-pick-btn jungle" onclick="joinSquad(1)">Jungle Squad</button>
-      </div>`;
-      unEl.innerHTML = unassigned.map(n => makeRow(n, 'var(--green)', pickBtns)).join('');
-    }
-  }
-
-  // Desert — switch-to-jungle + leave buttons for the current player
-  const desertBtns = `<div class="squad-pick-btns">
-    <button class="squad-pick-btn jungle" onclick="joinSquad(1)">Switch to Jungle</button>
-    <button class="squad-pick-btn leave"  onclick="joinSquad(-1)">Leave</button>
-  </div>`;
-  const dEl = document.getElementById('lobby-desert');
-  if (dEl) dEl.innerHTML = desert.length
-    ? desert.map(n => makeRow(n, '#b8905a', desertBtns)).join('')
+  if (unEl) unEl.innerHTML = unassigned.length
+    ? unassigned.map(n => makeRow(n, 'var(--green)')).join('')
     : '<div class="empty-state">–</div>';
 
-  // Jungle — switch-to-desert + leave buttons for the current player
-  const jungleBtns = `<div class="squad-pick-btns">
-    <button class="squad-pick-btn desert" onclick="joinSquad(0)">Switch to Desert</button>
-    <button class="squad-pick-btn leave"  onclick="joinSquad(-1)">Leave</button>
-  </div>`;
+  const dEl = document.getElementById('lobby-desert');
+  if (dEl) dEl.innerHTML = desert.length
+    ? desert.map(n => makeRow(n, '#b8905a')).join('')
+    : '<div class="empty-state">–</div>';
+
   const jEl = document.getElementById('lobby-jungle');
   if (jEl) jEl.innerHTML = jungle.length
-    ? jungle.map(n => makeRow(n, '#4a7a4a', jungleBtns)).join('')
+    ? jungle.map(n => makeRow(n, '#4a7a4a')).join('')
     : '<div class="empty-state">–</div>';
 }
 
