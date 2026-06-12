@@ -30,33 +30,28 @@ public static class RebuildRobotRowPrefab
         hlg.childForceExpandWidth  = false;
         hlg.childForceExpandHeight = true;
         hlg.childControlHeight     = true;
-        hlg.childControlWidth      = false;
+        hlg.childControlWidth      = true;   // respect LayoutElement.preferredWidth
         hlg.padding = new RectOffset(4, 4, 2, 2);
 
         // Optional subtle row background
         var bg = root.AddComponent<Image>();
         bg.color = new Color(0.12f, 0.12f, 0.18f, 1f);
 
-        // ── Name label ────────────────────────────────────────────────────────────
-        var nameGO = MakeTMPLabel(root.transform, "Name", "", 13, 90f);
+        // ── Name label (flexible — takes remaining space) ─────────────────────────
+        var nameGO = MakeTMPLabel(root.transform, "Name", "", 13, minWidth: 80f, flexibleWidth: 1f);
 
         // ── IP label ──────────────────────────────────────────────────────────────
-        var ipGO = MakeTMPLabel(root.transform, "Ip", "IP: ?", 11, 90f, new Color(0.7f, 0.7f, 0.7f));
+        var ipGO = MakeTMPLabel(root.transform, "Ip", "IP: ?", 11, minWidth: 120f, flexibleWidth: 0f, color: new Color(0.7f, 0.7f, 0.7f));
 
         // ── Player label ──────────────────────────────────────────────────────────
-        var playerGO = MakeTMPLabel(root.transform, "Player", "Unassigned", 11, 80f, new Color(0.6f, 0.8f, 1f));
+        var playerGO = MakeTMPLabel(root.transform, "Player", "Unassigned", 11, minWidth: 80f, flexibleWidth: 0f, color: new Color(0.6f, 0.8f, 1f));
 
-        // Spacer — pushes Edit button to the right
-        var spacer = new GameObject("Spacer", typeof(RectTransform));
-        spacer.transform.SetParent(root.transform, false);
-        var spacerLE = spacer.AddComponent<LayoutElement>();
-        spacerLE.flexibleWidth = 1;
-
-        // ── Edit button ───────────────────────────────────────────────────────────
+        // ── Rename button (fixed width, right-aligned by layout) ──────────────────
         var editGO = new GameObject("EditButton", typeof(RectTransform), typeof(Image), typeof(Button));
         editGO.transform.SetParent(root.transform, false);
-        editGO.GetComponent<Image>().color = new Color(0.25f, 0.35f, 0.55f, 1f);
+        editGO.GetComponent<Image>().color = new Color(0.25f, 0.45f, 0.75f, 1f);
         var editLE = editGO.AddComponent<LayoutElement>();
+        editLE.minWidth      = 64;
         editLE.preferredWidth  = 64;
         editLE.preferredHeight = 30;
 
@@ -90,7 +85,7 @@ public static class RebuildRobotRowPrefab
     }
 
     static GameObject MakeTMPLabel(Transform parent, string name, string text,
-                                    float fontSize, float preferredWidth,
+                                    float fontSize, float minWidth, float flexibleWidth,
                                     Color? color = null)
     {
         var go = new GameObject(name);
@@ -107,7 +102,8 @@ public static class RebuildRobotRowPrefab
         var f = GetFont(); if (f != null) tmp.font = f;
 
         var le = go.AddComponent<LayoutElement>();
-        le.preferredWidth = preferredWidth;
+        le.minWidth      = minWidth;
+        le.flexibleWidth = flexibleWidth;
 
         return go;
     }
