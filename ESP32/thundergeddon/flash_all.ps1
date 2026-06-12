@@ -1,20 +1,10 @@
 #Requires -Version 5.1
-<#
-.SYNOPSIS
-    Build firmware once, then flash all Thundergeddon robots in parallel via OTA.
-.DESCRIPTION
-    Runs `pio run -e thundergeddon_ota` to compile (no upload), then calls
-    espota.py directly for every robot simultaneously — avoiding the scons
-    build-database conflict that breaks parallel `pio run --target upload`.
-
-    To add a robot: uncomment its entry and fill in the IP.
-    To exclude a robot: comment out its entry.
-#>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── Robot list ────────────────────────────────────────────────────────────────
+# --- Robot list --------------------------------------------------------------
+# Comment out any robot that is offline or not yet provisioned.
 $Robots = @(
     [pscustomobject]@{ Name = "Robot 1";  Ip = "192.168.86.101" }
     [pscustomobject]@{ Name = "Robot 2";  Ip = "192.168.86.102" }
@@ -30,23 +20,21 @@ $Robots = @(
 $Auth     = "thunder123"
 $OtaPort  = 3232
 $BuildEnv = "thundergeddon_ota"
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
-# Prefer PlatformIO's bundled Python (always available after `pio` runs)
-$PythonExe = if (Test-Path "$env:USERPROFILE\.platformio\penv\Scripts\python.exe") {
-    "$env:USERPROFILE\.platformio\penv\Scripts\python.exe"
-} else {
-    "python"
+# Prefer PlatformIO's bundled Python
+$PythonExe = "python"
+if (Test-Path "$env:USERPROFILE\.platformio\penv\Scripts\python.exe") {
+    $PythonExe = "$env:USERPROFILE\.platformio\penv\Scripts\python.exe"
 }
 
-# Find espota.py once at startup
-$EspotaPath = Get-ChildItem "$env:USERPROFILE\.platformio\packages" -Filter "espota.py" `
-              -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+# Find espota.py
+$EspotaPath = Get-ChildItem "$env:USERPROFILE\.platformio\packages" -Filter "espota.py" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
 if (-not $EspotaPath) {
-    Write-Error "espota.py not found under ~/.platformio/packages — run 'pio pkg update' first."
+    Write-Error "espota.py not found under ~/.platformio/packages - run 'pio pkg update' first."
 }
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+# --- Build -------------------------------------------------------------------
 Write-Host ""
 Write-Host "=== Building firmware ($BuildEnv) ===" -ForegroundColor Cyan
 & pio run -e $BuildEnv
@@ -59,7 +47,7 @@ if (-not (Test-Path $FirmwarePath)) {
 $FirmwarePath = (Resolve-Path $FirmwarePath).Path
 Write-Host "Firmware: $FirmwarePath" -ForegroundColor Green
 
-# ── Upload in parallel ────────────────────────────────────────────────────────
+# --- Upload in parallel ------------------------------------------------------
 Write-Host ""
 Write-Host "=== Flashing $($Robots.Count) robot(s) in parallel ===" -ForegroundColor Cyan
 
@@ -68,11 +56,9 @@ foreach ($Robot in $Robots) {
     Write-Host "  -> $($Robot.Name)  ($($Robot.Ip))"
     $job = Start-Job -Name $Robot.Name -ScriptBlock {
         param($python, $espota, $firmware, $ip, $port, $auth)
-        # Redirect stderr to stdout so PS5.1 doesn't wrap it in ErrorRecords
-        $lines    = & $python $espota -i $ip -p $port -a $auth -f $firmware 2>&1 | ForEach-Object { "$_" }
-        $exitCode = $LASTEXITCODE
+        $lines = & $python $espota -i $ip -p $port -a $auth -f $firmware 2>&1 | ForEach-Object { "$_" }
         [pscustomobject]@{
-            ExitCode = $exitCode
+            ExitCode = $LASTEXITCODE
             Output   = ($lines -join "`n")
         }
     } -ArgumentList $PythonExe, $EspotaPath, $FirmwarePath, $Robot.Ip, $OtaPort, $Auth
@@ -83,7 +69,7 @@ Write-Host ""
 Write-Host "Waiting for uploads to complete..." -ForegroundColor DarkGray
 $null = $Jobs | Wait-Job
 
-# ── Results ───────────────────────────────────────────────────────────────────
+# --- Results -----------------------------------------------------------------
 Write-Host ""
 Write-Host "=== Results ===" -ForegroundColor Cyan
 $successCount = 0
