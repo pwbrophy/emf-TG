@@ -57,7 +57,7 @@ public static class RebuildRobotRowPrefab
         editGO.transform.SetParent(root.transform, false);
         editGO.GetComponent<Image>().color = new Color(0.25f, 0.35f, 0.55f, 1f);
         var editLE = editGO.AddComponent<LayoutElement>();
-        editLE.preferredWidth  = 46;
+        editLE.preferredWidth  = 64;
         editLE.preferredHeight = 30;
 
         var editTextGO = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
@@ -66,7 +66,7 @@ public static class RebuildRobotRowPrefab
         editRT.anchorMin = Vector2.zero; editRT.anchorMax = Vector2.one;
         editRT.offsetMin = Vector2.zero; editRT.offsetMax = Vector2.zero;
         var editTMP = editTextGO.GetComponent<TextMeshProUGUI>();
-        editTMP.text      = "Edit";
+        editTMP.text      = "Rename";
         editTMP.fontSize  = 11;
         editTMP.color     = Color.white;
         editTMP.alignment = TextAlignmentOptions.Center;
