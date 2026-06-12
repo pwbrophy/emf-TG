@@ -83,8 +83,8 @@ public class RobotsPanelPresenter : MonoBehaviour
         }
     }
 
-    private void HandleRobotAdded(RobotInfo r)  { CreateOrUpdateRow(r); }
-    private void HandleRobotUpdated(RobotInfo r) { CreateOrUpdateRow(r); }
+    private void HandleRobotAdded(RobotInfo r)  { RebuildFromDirectory(); }
+    private void HandleRobotUpdated(RobotInfo r) { RebuildFromDirectory(); }
 
     private void HandleRobotRemoved(string robotId)
     {
