@@ -137,8 +137,10 @@ public class RobotsPanelPresenter : MonoBehaviour
                     : r.AssignedPlayer,
                 (id, newName, newPlayer) =>
                 {
-                    _dir.SetCallsign(id, newName);
-                    _dir.SetAssignedPlayer(id, newPlayer);
+                    if (!string.IsNullOrWhiteSpace(newName))
+                        _dir.SetCallsign(id, newName);
+                    if (!string.IsNullOrWhiteSpace(newPlayer))
+                        _dir.SetAssignedPlayer(id, newPlayer);
                 }
             );
         });
