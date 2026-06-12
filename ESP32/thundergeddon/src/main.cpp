@@ -507,7 +507,7 @@ static void connectWifi()
     WiFi.setSleep(false);           // low-latency radio; important for drive commands
 
     const int NET_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
-    const unsigned long ATTEMPT_MS = 10000; // ms per network before trying the next
+    const unsigned long ATTEMPT_MS = 2000; // max ms before moving to next network
 
     while (true) {
         for (int i = 0; i < NET_COUNT; i++) {
@@ -515,18 +515,19 @@ static void connectWifi()
             WiFi.begin(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].pass);
             unsigned long start = millis();
             while (millis() - start < ATTEMPT_MS) {
-                if (WiFi.status() == WL_CONNECTED) {
-                    Serial.printf("\n[WIFI] connected to %s, IP=%s\n",
+                wl_status_t s = WiFi.status();
+                if (s == WL_CONNECTED) {
+                    Serial.printf("[WIFI] connected to %s, IP=%s\n",
                         WIFI_NETWORKS[i].ssid,
                         WiFi.localIP().toString().c_str());
                     return;
                 }
-                Serial.print(".");
-                delay(300);
+                if (s == WL_NO_SSID_AVAIL || s == WL_CONNECT_FAILED) break;
+                delay(100);
             }
-            Serial.println(" timeout");
+            Serial.printf("[WIFI] %s not available\n", WIFI_NETWORKS[i].ssid);
             WiFi.disconnect(true);
-            delay(200);
+            delay(100);
         }
     }
 }
