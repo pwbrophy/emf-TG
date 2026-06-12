@@ -48,12 +48,19 @@ The robot must be powered on and connected to Wi-Fi for OTA to work. The `platfo
 
 A successful upload ends with `Result: OK` / `Success`. If the hostname doesn't resolve, substitute the robot's current IP directly, e.g. `pio run -e thundergeddon_ota --target upload --upload-port 192.168.x.x`.
 
-**Robot IPs** are stored in the Claude memory file `C:\Users\Pete\.claude\projects\F--Data-Thundergeddon-EMF-Project\memory\project_robot_ip.md`. Current static IPs: robot 1 = `192.168.86.101`, robot 2 = `192.168.86.102`. When flashing multiple robots, build once then upload sequentially — parallel uploads conflict on the shared `firmware.bin` output file.
+**Robot IPs** are stored in the Claude memory file `C:\Users\Pete\.claude\projects\F--Data-Thundergeddon-EMF-Project\memory\project_robot_ip.md`. To flash all robots simultaneously, run `flash_all.ps1` from `ESP32/thundergeddon/` — it builds once then calls `espota.py` in parallel for every robot. Do **not** run multiple `pio run --target upload` in parallel; they share the scons build database and conflict.
 
-**Per-robot OTA envs** are pre-baked for the static IPs — use these instead of passing `--upload-port`:
 ```
-pio run -e thundergeddon_ota_r1 --target upload   # 192.168.86.101
-pio run -e thundergeddon_ota_r2 --target upload   # 192.168.86.102
+cd "F:\Data\Thundergeddon\EMF_Project\ESP32\thundergeddon"
+.\flash_all.ps1
+```
+
+**Per-robot OTA envs** (single robot) — use when flashing just one robot:
+```
+pio run -e thundergeddon_ota_r1  --target upload   # 192.168.86.101
+pio run -e thundergeddon_ota_r2  --target upload   # 192.168.86.102
+...
+pio run -e thundergeddon_ota_r10 --target upload   # 192.168.86.110
 ```
 
 ---
