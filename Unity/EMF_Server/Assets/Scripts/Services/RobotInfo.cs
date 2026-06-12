@@ -10,4 +10,5 @@ public class RobotInfo
     public bool   InvThrottle;     // drive: forward/backward inverted (saved to robot NVS)
     public bool   InvSteer;        // drive: left/right inverted (saved to robot NVS)
     public bool   InvTurret;       // turret: rotation direction inverted (saved to robot NVS)
+    public int    PreferredAlliance = -1; // 0=Desert Squad, 1=Jungle Squad, -1=unset
 }

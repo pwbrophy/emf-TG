@@ -46,6 +46,27 @@ public static class RebuildRobotRowPrefab
         // ── Player label ──────────────────────────────────────────────────────────
         var playerGO = MakeTMPLabel(root.transform, "Player", "Unassigned", 11, minWidth: 80f, flexibleWidth: 0f, color: new Color(0.6f, 0.8f, 1f));
 
+        // ── Alliance toggle button (D / J / ?) ────────────────────────────────────
+        var allianceGO = new GameObject("AllianceButton", typeof(RectTransform), typeof(Image), typeof(Button));
+        allianceGO.transform.SetParent(root.transform, false);
+        allianceGO.GetComponent<Image>().color = new Color(0.35f, 0.35f, 0.35f, 1f);
+        var allianceLE = allianceGO.AddComponent<LayoutElement>();
+        allianceLE.minWidth       = 32;
+        allianceLE.preferredWidth = 32;
+        allianceLE.preferredHeight = 30;
+
+        var allianceTextGO = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        allianceTextGO.transform.SetParent(allianceGO.transform, false);
+        var allianceTextRT = allianceTextGO.GetComponent<RectTransform>();
+        allianceTextRT.anchorMin = Vector2.zero; allianceTextRT.anchorMax = Vector2.one;
+        allianceTextRT.offsetMin = Vector2.zero; allianceTextRT.offsetMax = Vector2.zero;
+        var allianceTMP = allianceTextGO.GetComponent<TextMeshProUGUI>();
+        allianceTMP.text      = "?";
+        allianceTMP.fontSize  = 13;
+        allianceTMP.color     = Color.white;
+        allianceTMP.alignment = TextAlignmentOptions.Center;
+        var f2 = GetFont(); if (f2 != null) allianceTMP.font = f2;
+
         // ── Rename button (fixed width, right-aligned by layout) ──────────────────
         var editGO = new GameObject("EditButton", typeof(RectTransform), typeof(Image), typeof(Button));
         editGO.transform.SetParent(root.transform, false);

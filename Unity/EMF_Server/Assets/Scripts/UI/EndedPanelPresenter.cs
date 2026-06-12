@@ -54,7 +54,7 @@ public class EndedPanelPresenter : MonoBehaviour
             return;
         }
 
-        string teamName = $"Team {winner + 1}";
+        string teamName = winner == 0 ? "Desert Squad" : winner == 1 ? "Jungle Squad" : $"Team {winner + 1}";
 
         string reasonText = reason switch
         {

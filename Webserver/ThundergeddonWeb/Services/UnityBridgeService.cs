@@ -208,8 +208,13 @@ public class UnityBridgeService : BackgroundService
     {
         var players = root.GetProperty("players")
             .EnumerateArray()
-            .Select(e => e.GetString() ?? string.Empty)
-            .Where(n => n.Length > 0)
+            .Select(e =>
+            {
+                string name    = e.TryGetProperty("name", out var n) ? n.GetString() ?? "" : e.GetString() ?? "";
+                int    alliance = e.TryGetProperty("alliance", out var a) && a.TryGetInt32(out int i) ? i : -1;
+                return new { name, alliance };
+            })
+            .Where(p => p.name.Length > 0)
             .ToList();
 
         await _hub.Clients.All.SendAsync("LobbyUpdate", players);

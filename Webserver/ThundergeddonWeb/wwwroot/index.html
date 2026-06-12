@@ -98,9 +98,27 @@
     }
     button.primary:active { opacity: 0.8; }
     button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
-    /* Waiting-for-server state: solid grey, full opacity (not faded) */
-    #join-btn.btn-waiting { background: var(--muted); }
-    #join-btn.btn-waiting:disabled { opacity: 1; }
+
+    /* Squad buttons */
+    .squad-buttons { display: flex; gap: 10px; width: 100%; }
+    .squad-btn {
+      flex: 1;
+      padding: 14px 8px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: opacity 0.15s, filter 0.15s;
+    }
+    .squad-btn:active { opacity: 0.8; }
+    .squad-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .squad-desert { background: #b8905a; color: #fff; }
+    .squad-desert:hover:not(:disabled) { filter: brightness(1.15); }
+    .squad-jungle { background: #4a7a4a; color: #fff; }
+    .squad-jungle:hover:not(:disabled) { filter: brightness(1.15); }
+    .squad-btn.btn-waiting { background: var(--muted); opacity: 1; }
 
     .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
     .status.error { color: #e05050; }
@@ -627,7 +645,10 @@
   <div class="join-box">
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="20" autocomplete="off" spellcheck="false" />
-    <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
+    <div class="squad-buttons">
+      <button class="squad-btn squad-desert btn-waiting" id="join-desert-btn" onclick="joinLobby(0)" disabled>DESERT SQUAD</button>
+      <button class="squad-btn squad-jungle btn-waiting" id="join-jungle-btn" onclick="joinLobby(1)" disabled>JUNGLE SQUAD</button>
+    </div>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -739,6 +760,7 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 // State
 // ════════════════════════════════════════════════════════
 let myName      = '';
+let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
 let connection  = null;
 let isDead      = false;      // true during 5-s explosion — all controls blocked
 let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
@@ -776,16 +798,16 @@ let _videoWs = null;
 
 // ── Join-button state helpers ──────────────────────────────────────────────
 function setJoinReady() {
-  const btn = document.getElementById('join-btn');
-  btn.textContent = 'JOIN';
-  btn.disabled = false;
-  btn.classList.remove('btn-waiting');
+  const desert = document.getElementById('join-desert-btn');
+  const jungle = document.getElementById('join-jungle-btn');
+  if (desert) { desert.disabled = false; desert.classList.remove('btn-waiting'); }
+  if (jungle) { jungle.disabled = false; jungle.classList.remove('btn-waiting'); }
 }
 function setJoinWaiting() {
-  const btn = document.getElementById('join-btn');
-  btn.textContent = 'WAITING FOR SERVER';
-  btn.disabled = true;
-  btn.classList.add('btn-waiting');
+  const desert = document.getElementById('join-desert-btn');
+  const jungle = document.getElementById('join-jungle-btn');
+  if (desert) { desert.disabled = true; desert.classList.add('btn-waiting'); }
+  if (jungle) { jungle.disabled = true; jungle.classList.add('btn-waiting'); }
 }
 
 // ── Pre-join server-status poll ────────────────────────────────────────────
@@ -953,6 +975,7 @@ function returnToJoin(message) {
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
   document.getElementById('fire-toast').classList.remove('visible');
   clearHitOverlay();
+  myAlliance = -1;
   setJoinWaiting();
   showScreen('screen-join');
   if (message) setStatus(message, true);
@@ -999,9 +1022,9 @@ function buildConnection() {
   conn.on('ServerConnected', () => {
     dbg('SignalR: ServerConnected');
     setJoinReady();
-    if (document.getElementById('screen-join').classList.contains('active') && myName) {
+    if (document.getElementById('screen-join').classList.contains('active') && myName && myAlliance >= 0) {
       setStatus('Game server ready — joining…', false);
-      conn.invoke('JoinLobby', myName).then(joined => {
+      conn.invoke('JoinLobby', myName, myAlliance).then(joined => {
         if (joined && !document.getElementById('screen-playing').classList.contains('active'))
           showScreen('screen-lobby');
       }).catch(err => { dbg('ServerConnected auto-join failed: ' + err.message); });
@@ -1013,7 +1036,7 @@ function buildConnection() {
     dbg('SignalR: reconnected');
     hideReconnectOverlay();
     setStatus('', false);
-    const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
+    const joined = await conn.invoke('JoinLobby', myName, myAlliance).catch(console.error);
     if (joined && !document.getElementById('screen-playing').classList.contains('active'))
       showScreen('screen-lobby');
   });
@@ -1029,12 +1052,12 @@ function buildConnection() {
 // ════════════════════════════════════════════════════════
 // Join flow
 // ════════════════════════════════════════════════════════
-async function joinLobby() {
+async function joinLobby(alliance) {
   const input = document.getElementById('name-input');
   const name  = input.value.trim();
   if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
 
-  dbg('joinLobby: name="' + name + '"');
+  dbg('joinLobby: name="' + name + '" alliance=' + alliance);
 
   // Tear down any previous connection before starting a new one.
   if (connection) {
@@ -1044,22 +1067,23 @@ async function joinLobby() {
     old.stop().catch(() => {});
   }
 
-  const btn = document.getElementById('join-btn');
-  btn.disabled = true;
+  setJoinWaiting();
   setStatus('Connecting…', false);
 
   try {
     connection = buildConnection();
     await connection.start();
     dbg('connected! invoking JoinLobby');
-    myName = name;
-    const joined = await connection.invoke('JoinLobby', name);
+    myName     = name;
+    myAlliance = (alliance === 0 || alliance === 1) ? alliance : -1;
+    const joined = await connection.invoke('JoinLobby', name, myAlliance);
     dbg('JoinLobby returned joined=' + joined);
     if (joined && !document.getElementById('screen-playing').classList.contains('active')) {
       dbg('→ screen-lobby');
       showScreen('screen-lobby');
     } else if (!joined) {
       dbg('not joined — ServerNotReady will update button state');
+      setJoinReady();
     } else {
       dbg('already on screen-playing, skip lobby');
     }
@@ -1079,17 +1103,28 @@ function setStatus(msg, isError) {
 // ════════════════════════════════════════════════════════
 // Lobby
 // ════════════════════════════════════════════════════════
+const SQUAD_NAMES  = ['Desert Squad', 'Jungle Squad'];
+const SQUAD_COLORS = ['#b8905a',      '#4a7a4a'];
+
+function squadColor(alliance) { return SQUAD_COLORS[alliance] ?? '#888'; }
+function squadName(alliance)  { return SQUAD_NAMES[alliance]  ?? ''; }
+
 function renderPlayerList(players) {
   const body = document.getElementById('player-list-body');
   if (!players || players.length === 0) {
     body.innerHTML = '<div class="empty-state">No players yet</div>';
     return;
   }
-  body.innerHTML = players.map(name => {
-    const isSelf = name === myName;
+  body.innerHTML = players.map(p => {
+    const name     = (typeof p === 'string') ? p : (p.name ?? '');
+    const alliance = (typeof p === 'string') ? -1 : (p.alliance ?? -1);
+    const isSelf   = name === myName;
+    const col      = squadColor(alliance);
+    const squad    = squadName(alliance);
     return `<div class="player-row">
-      <div class="player-dot"></div>
+      <div class="player-dot" style="background:${col}"></div>
       <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+      ${squad ? `<span style="color:${col};font-size:0.75em;margin-left:6px;opacity:0.9">${escHtml(squad)}</span>` : ''}
     </div>`;
   }).join('');
 }
@@ -1461,9 +1496,13 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Submit on Enter ────────────────────────────────────
+// ── Enter key: focus first enabled squad button ────────
 document.getElementById('name-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') joinLobby();
+  if (e.key !== 'Enter') return;
+  const desert = document.getElementById('join-desert-btn');
+  const jungle = document.getElementById('join-jungle-btn');
+  if (desert && !desert.disabled) { desert.focus(); }
+  else if (jungle && !jungle.disabled) { jungle.focus(); }
 });
 
 // ── Start polling server status on page load ────────────────────────────

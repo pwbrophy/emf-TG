@@ -31,6 +31,7 @@ public class RobotDirectory : IRobotDirectory
         public string id;
         public string name;
         public string preferredPlayer;
+        public int    preferredAlliance = -1;
     }
 
     [Serializable]
@@ -95,7 +96,8 @@ public class RobotDirectory : IRobotDirectory
                 RobotId = robotId,
                 Callsign = initialName,
                 Ip = string.IsNullOrWhiteSpace(ip) ? "" : ip.Trim(),
-                AssignedPlayer = null
+                AssignedPlayer = null,
+                PreferredAlliance = savedRecord != null ? savedRecord.preferredAlliance : -1
             };
 
             string preferredForPick = hasSavedPreferredPlayer ? savedRecord.preferredPlayer : null;
@@ -223,6 +225,25 @@ public class RobotDirectory : IRobotDirectory
 
         record.preferredPlayer = chosen;
         Debug.Log("[RobotDirectory] Saved preferred player '" + chosen + "' for robot " + robotId);
+        SaveToDisk();
+    }
+
+    public void SetPreferredAlliance(string robotId, int alliance)
+    {
+        if (!_byId.TryGetValue(robotId, out var r)) return;
+        if (r.PreferredAlliance == alliance) return;
+
+        r.PreferredAlliance = alliance;
+        OnRobotUpdated?.Invoke(r);
+
+        EnsureLoadedSave();
+        if (!_savedById.TryGetValue(robotId, out var record))
+        {
+            record = new RobotSaveRecord { id = robotId };
+            _savedById[robotId] = record;
+        }
+        record.preferredAlliance = alliance;
+        Debug.Log("[RobotDirectory] Saved preferredAlliance=" + alliance + " for robot " + robotId);
         SaveToDisk();
     }
 

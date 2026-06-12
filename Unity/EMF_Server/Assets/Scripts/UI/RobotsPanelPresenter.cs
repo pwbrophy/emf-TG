@@ -93,6 +93,19 @@ public class RobotsPanelPresenter : MonoBehaviour
             Destroy(row.gameObject);
     }
 
+    private static readonly Color AllianceColorDesert = new Color(0.72f, 0.56f, 0.35f); // tan
+    private static readonly Color AllianceColorJungle = new Color(0.29f, 0.48f, 0.29f); // green
+    private static readonly Color AllianceColorNone   = new Color(0.35f, 0.35f, 0.35f); // grey
+
+    private static void RefreshAllianceButton(Button btn, int alliance)
+    {
+        var img = btn.GetComponent<UnityEngine.UI.Image>();
+        var tmp = btn.GetComponentInChildren<TMPro.TextMeshProUGUI>();
+        if (alliance == 0)      { if (img) img.color = AllianceColorDesert; if (tmp) { tmp.text = "D"; tmp.color = Color.white; } }
+        else if (alliance == 1) { if (img) img.color = AllianceColorJungle; if (tmp) { tmp.text = "J"; tmp.color = Color.white; } }
+        else                    { if (img) img.color = AllianceColorNone;   if (tmp) { tmp.text = "?"; tmp.color = new Color(0.7f,0.7f,0.7f); } }
+    }
+
     private void CreateOrUpdateRow(RobotInfo r, bool allowReuse = true)
     {
         GameObject rowGO;
@@ -114,11 +127,27 @@ public class RobotsPanelPresenter : MonoBehaviour
         TextMeshProUGUI nameText   = rowGO.transform.Find("Name").GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI ipText     = rowGO.transform.Find("Ip").GetComponent<TextMeshProUGUI>();
         TextMeshProUGUI playerText = rowGO.transform.Find("Player").GetComponent<TextMeshProUGUI>();
+        Button allianceButton      = rowGO.transform.Find("AllianceButton")?.GetComponent<Button>();
         Button editButton          = rowGO.transform.Find("EditButton").GetComponent<Button>();
 
         nameText.text   = r.Callsign;
         ipText.text     = string.IsNullOrEmpty(r.Ip) ? "IP: ?" : $"IP: {r.Ip}";
         playerText.text = string.IsNullOrEmpty(r.AssignedPlayer) ? "Unassigned" : r.AssignedPlayer;
+
+        // Alliance cycle button: ? → Desert (D) → Jungle (J) → ?
+        if (allianceButton != null)
+        {
+            RefreshAllianceButton(allianceButton, r.PreferredAlliance);
+            allianceButton.onClick.RemoveAllListeners();
+            allianceButton.onClick.AddListener(() =>
+            {
+                // Current alliance from the live RobotInfo (may have changed since row was built)
+                int current = r.PreferredAlliance;
+                int next = current == -1 ? 0 : current == 0 ? 1 : -1;
+                _dir.SetPreferredAlliance(r.RobotId, next);
+                RefreshAllianceButton(allianceButton, next);
+            });
+        }
 
         editButton.onClick.RemoveAllListeners();
         editButton.onClick.AddListener(() =>

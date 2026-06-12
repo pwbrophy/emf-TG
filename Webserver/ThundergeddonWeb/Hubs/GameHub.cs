@@ -18,7 +18,7 @@ public class GameHub : Hub
     /// Returns true if the join was forwarded to Unity, false if Unity is not yet connected.
     /// The client uses the return value to decide whether to show the lobby screen.
     /// </summary>
-    public async Task<bool> JoinLobby(string name)
+    public async Task<bool> JoinLobby(string name, int alliance = -1)
     {
         if (string.IsNullOrWhiteSpace(name)) return false;
 
@@ -32,6 +32,7 @@ public class GameHub : Hub
         {
             cmd          = "join",
             name         = name.Trim(),
+            alliance     = alliance,
             connectionId = Context.ConnectionId
         });
         return true;

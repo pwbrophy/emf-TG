@@ -239,7 +239,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         switch (msg.cmd)
         {
             case "join":
-                HandleJoin(sessionId, msg.connectionId, msg.name);
+                HandleJoin(sessionId, msg.connectionId, msg.name, msg.alliance);
                 break;
 
             case "leave":
@@ -264,7 +264,7 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     // ── Lobby handlers ───────────────────────────────────────────────────────────
 
-    void HandleJoin(string sessionId, string connId, string name)
+    void HandleJoin(string sessionId, string connId, string name, int alliance = -1)
     {
         if (string.IsNullOrWhiteSpace(connId) || string.IsNullOrWhiteSpace(name)) return;
         if (_connToPlayer.ContainsKey(connId)) return;
@@ -280,11 +280,14 @@ public class PlayerWebSocketServer : MonoBehaviour
             foreach (var p in existingList)
                 if (p.Name == name) { alreadyListed = true; break; }
         if (!alreadyListed)
-            ServiceLocator.Players?.AddPlayer(name, 0);
-        Debug.Log("[PlayerWS] Player joined: " + name + " (conn=" + connId + ")");
+        {
+            int effectiveAlliance = (alliance == 0 || alliance == 1) ? alliance : 0;
+            ServiceLocator.Players?.AddPlayer(name, effectiveAlliance);
+        }
+        Debug.Log("[PlayerWS] Player joined: " + name + " alliance=" + alliance + " (conn=" + connId + ")");
 
-        // Auto-assign the first available (unassigned) robot to the new player.
-        TryAssignFreeRobotToPlayer(name);
+        // Auto-assign a robot from the player's chosen squad to the new player.
+        TryAssignFreeRobotToPlayer(name, alliance);
 
         // If the game is already running, send game_started immediately so the
         // phone transitions to the playing screen without waiting for the next phase change.
@@ -294,18 +297,36 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastPlayerList();
     }
 
-    // Find the first robot with no assigned player and give it to playerName.
-    void TryAssignFreeRobotToPlayer(string playerName)
+    // Find the first unassigned robot in the player's chosen squad and give it to playerName.
+    // Falls back to any unassigned robot if no squad match exists.
+    void TryAssignFreeRobotToPlayer(string playerName, int alliance = -1)
     {
         var dir = ServiceLocator.RobotDirectory;
         if (dir == null) return;
 
-        foreach (var robot in dir.GetAll())
+        var all = dir.GetAll();
+
+        // First pass: prefer a robot whose PreferredAlliance matches the player's squad.
+        if (alliance == 0 || alliance == 1)
+        {
+            foreach (var robot in all)
+            {
+                if (string.IsNullOrEmpty(robot.AssignedPlayer) && robot.PreferredAlliance == alliance)
+                {
+                    dir.SetAssignedPlayer(robot.RobotId, playerName);
+                    Debug.Log("[PlayerWS] Auto-assigned squad robot " + robot.RobotId + " (alliance=" + alliance + ") to " + playerName);
+                    return;
+                }
+            }
+        }
+
+        // Second pass: fall back to any free robot.
+        foreach (var robot in all)
         {
             if (string.IsNullOrEmpty(robot.AssignedPlayer))
             {
                 dir.SetAssignedPlayer(robot.RobotId, playerName);
-                Debug.Log("[PlayerWS] Auto-assigned robot " + robot.RobotId + " to player " + playerName);
+                Debug.Log("[PlayerWS] Auto-assigned robot " + robot.RobotId + " (fallback) to " + playerName);
                 return;
             }
         }
@@ -631,9 +652,12 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
     }
 
+    static string AllianceName(int index)
+        => index == 0 ? "Desert Squad" : index == 1 ? "Jungle Squad" : "Unknown";
+
     void OnGameWon(int allianceIndex, string reason)
     {
-        string teamName = "Alliance " + (allianceIndex + 1);
+        string teamName = AllianceName(allianceIndex);
         string json = "{\"cmd\":\"game_over\",\"winnerTeam\":\"" +
                       EscapeJson(teamName) + "\",\"reason\":\"" +
                       EscapeJson(reason) + "\"}";
@@ -848,7 +872,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         var state = ServiceLocator.Game?.State;
         string teamName = (state != null && state.WinnerAllianceIndex >= 0)
-            ? "Alliance " + (state.WinnerAllianceIndex + 1)
+            ? AllianceName(state.WinnerAllianceIndex)
             : "";
         string reason = state?.EndReason ?? "manual";
 
@@ -876,9 +900,11 @@ public class PlayerWebSocketServer : MonoBehaviour
             for (int i = 0; i < players.Count; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append('"');
+                sb.Append("{\"name\":\"");
                 sb.Append(EscapeJson(players[i].Name));
-                sb.Append('"');
+                sb.Append("\",\"alliance\":");
+                sb.Append(players[i].AllianceIndex);
+                sb.Append('}');
             }
         }
         sb.Append("]}");
@@ -1071,6 +1097,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         public float  l;
         public float  r;
         public float  speed;
+        public int    alliance = -1;
     }
 
     // ── WebSocket behaviour ──────────────────────────────────────────────────────
