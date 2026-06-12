@@ -98,27 +98,9 @@
     }
     button.primary:active { opacity: 0.8; }
     button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    /* Squad buttons */
-    .squad-buttons { display: flex; gap: 10px; width: 100%; }
-    .squad-btn {
-      flex: 1;
-      padding: 14px 8px;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      font-weight: 700;
-      letter-spacing: 0.03em;
-      cursor: pointer;
-      transition: opacity 0.15s, filter 0.15s;
-    }
-    .squad-btn:active { opacity: 0.8; }
-    .squad-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .squad-desert { background: #b8905a; color: #fff; }
-    .squad-desert:hover:not(:disabled) { filter: brightness(1.15); }
-    .squad-jungle { background: #4a7a4a; color: #fff; }
-    .squad-jungle:hover:not(:disabled) { filter: brightness(1.15); }
-    .squad-btn.btn-waiting { background: var(--muted); opacity: 1; }
+    /* Waiting-for-server state: solid grey, full opacity (not faded) */
+    #join-btn.btn-waiting { background: var(--muted); }
+    #join-btn.btn-waiting:disabled { opacity: 1; }
 
     .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
     .status.error { color: #e05050; }
@@ -130,45 +112,79 @@
       display: none;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       min-height: 100%;
-      padding: 24px 20px;
+      padding: 24px 16px;
       text-align: center;
+      overflow-y: auto;
     }
     #screen-lobby.active { display: flex; }
 
-    .lobby-header { margin-bottom: 32px; }
+    .lobby-header { margin-bottom: 20px; }
     .lobby-header h2 { font-size: 1.6rem; font-weight: 800; margin-bottom: 6px; }
     .lobby-header p  { color: var(--muted); font-size: 0.9rem; }
 
-    .player-list {
+    /* Lobby sections */
+    .lobby-section {
       width: 100%;
       max-width: 360px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
       overflow: hidden;
+      margin-bottom: 12px;
     }
-    .player-list-header {
-      padding: 10px 16px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--muted);
+    .lobby-section-title {
+      padding: 8px 14px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
       border-bottom: 1px solid var(--border);
+      text-align: left;
     }
+    /* Side-by-side squad sections */
+    .lobby-squads {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .lobby-squads .lobby-section {
+      flex: 1;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+
     .player-row {
       display: flex;
       align-items: center;
-      padding: 12px 16px;
+      flex-wrap: wrap;
+      padding: 10px 14px;
       border-bottom: 1px solid var(--border);
-      font-size: 1rem;
+      font-size: 0.95rem;
+      text-align: left;
     }
     .player-row:last-child { border-bottom: none; }
-    .player-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 12px; flex-shrink: 0; }
+    .player-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 10px; flex-shrink: 0; }
     .player-name-self { font-weight: 700; color: var(--accent2); }
-    .empty-state { padding: 20px 16px; color: var(--muted); font-size: 0.9rem; }
+    .empty-state { padding: 14px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+
+    /* Squad pick buttons shown to the current player while unassigned */
+    .squad-pick-btns { display: flex; gap: 6px; width: 100%; margin-top: 8px; }
+    .squad-pick-btn {
+      flex: 1;
+      padding: 8px 4px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: filter 0.15s;
+    }
+    .squad-pick-btn:active { filter: brightness(0.85); }
+    .squad-pick-btn.desert { background: #b8905a; color: #fff; }
+    .squad-pick-btn.jungle { background: #4a7a4a; color: #fff; }
 
     .waiting-anim {
       display: inline-block;
@@ -645,10 +661,7 @@
   <div class="join-box">
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="20" autocomplete="off" spellcheck="false" />
-    <div class="squad-buttons">
-      <button class="squad-btn squad-desert btn-waiting" id="join-desert-btn" onclick="joinLobby(0)" disabled>DESERT SQUAD</button>
-      <button class="squad-btn squad-jungle btn-waiting" id="join-jungle-btn" onclick="joinLobby(1)" disabled>JUNGLE SQUAD</button>
-    </div>
+    <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -660,9 +673,23 @@
     <h2>LOBBY</h2>
     <p>Waiting for the game to start…</p>
   </div>
-  <div class="player-list">
-    <div class="player-list-header">Players</div>
-    <div id="player-list-body"><div class="empty-state">No players yet</div></div>
+
+  <!-- Unassigned players -->
+  <div class="lobby-section">
+    <div class="lobby-section-title">UNASSIGNED</div>
+    <div id="lobby-unassigned"><div class="empty-state">–</div></div>
+  </div>
+
+  <!-- Desert Squad + Jungle Squad side by side -->
+  <div class="lobby-squads">
+    <div class="lobby-section">
+      <div class="lobby-section-title" style="color:#b8905a">DESERT SQUAD</div>
+      <div id="lobby-desert"><div class="empty-state">–</div></div>
+    </div>
+    <div class="lobby-section">
+      <div class="lobby-section-title" style="color:#4a7a4a">JUNGLE SQUAD</div>
+      <div id="lobby-jungle"><div class="empty-state">–</div></div>
+    </div>
   </div>
 </div>
 
@@ -798,16 +825,16 @@ let _videoWs = null;
 
 // ── Join-button state helpers ──────────────────────────────────────────────
 function setJoinReady() {
-  const desert = document.getElementById('join-desert-btn');
-  const jungle = document.getElementById('join-jungle-btn');
-  if (desert) { desert.disabled = false; desert.classList.remove('btn-waiting'); }
-  if (jungle) { jungle.disabled = false; jungle.classList.remove('btn-waiting'); }
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'JOIN GAME';
+  btn.disabled = false;
+  btn.classList.remove('btn-waiting');
 }
 function setJoinWaiting() {
-  const desert = document.getElementById('join-desert-btn');
-  const jungle = document.getElementById('join-jungle-btn');
-  if (desert) { desert.disabled = true; desert.classList.add('btn-waiting'); }
-  if (jungle) { jungle.disabled = true; jungle.classList.add('btn-waiting'); }
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'WAITING FOR SERVER';
+  btn.disabled = true;
+  btn.classList.add('btn-waiting');
 }
 
 // ── Pre-join server-status poll ────────────────────────────────────────────
@@ -1022,9 +1049,9 @@ function buildConnection() {
   conn.on('ServerConnected', () => {
     dbg('SignalR: ServerConnected');
     setJoinReady();
-    if (document.getElementById('screen-join').classList.contains('active') && myName && myAlliance >= 0) {
+    if (document.getElementById('screen-join').classList.contains('active') && myName) {
       setStatus('Game server ready — joining…', false);
-      conn.invoke('JoinLobby', myName, myAlliance).then(joined => {
+      conn.invoke('JoinLobby', myName).then(joined => {
         if (joined && !document.getElementById('screen-playing').classList.contains('active'))
           showScreen('screen-lobby');
       }).catch(err => { dbg('ServerConnected auto-join failed: ' + err.message); });
@@ -1036,7 +1063,7 @@ function buildConnection() {
     dbg('SignalR: reconnected');
     hideReconnectOverlay();
     setStatus('', false);
-    const joined = await conn.invoke('JoinLobby', myName, myAlliance).catch(console.error);
+    const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
     if (joined && !document.getElementById('screen-playing').classList.contains('active'))
       showScreen('screen-lobby');
   });
@@ -1052,12 +1079,12 @@ function buildConnection() {
 // ════════════════════════════════════════════════════════
 // Join flow
 // ════════════════════════════════════════════════════════
-async function joinLobby(alliance) {
+async function joinLobby() {
   const input = document.getElementById('name-input');
   const name  = input.value.trim();
   if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
 
-  dbg('joinLobby: name="' + name + '" alliance=' + alliance);
+  dbg('joinLobby: name="' + name + '"');
 
   // Tear down any previous connection before starting a new one.
   if (connection) {
@@ -1067,23 +1094,22 @@ async function joinLobby(alliance) {
     old.stop().catch(() => {});
   }
 
-  setJoinWaiting();
+  const btn = document.getElementById('join-btn');
+  btn.disabled = true;
   setStatus('Connecting…', false);
 
   try {
     connection = buildConnection();
     await connection.start();
     dbg('connected! invoking JoinLobby');
-    myName     = name;
-    myAlliance = (alliance === 0 || alliance === 1) ? alliance : -1;
-    const joined = await connection.invoke('JoinLobby', name, myAlliance);
+    myName = name;
+    const joined = await connection.invoke('JoinLobby', name);
     dbg('JoinLobby returned joined=' + joined);
     if (joined && !document.getElementById('screen-playing').classList.contains('active')) {
       dbg('→ screen-lobby');
       showScreen('screen-lobby');
     } else if (!joined) {
       dbg('not joined — ServerNotReady will update button state');
-      setJoinReady();
     } else {
       dbg('already on screen-playing, skip lobby');
     }
@@ -1091,6 +1117,17 @@ async function joinLobby(alliance) {
     dbg('JOIN FAILED: ' + err.message);
     setStatus('Could not connect: ' + err.message, true);
     setJoinReady();
+  }
+}
+
+async function joinSquad(alliance) {
+  myAlliance = alliance;
+  if (!connection) return;
+  try {
+    await connection.invoke('JoinSquad', alliance);
+    dbg('joinSquad sent alliance=' + alliance);
+  } catch (err) {
+    dbg('joinSquad failed: ' + err.message);
   }
 }
 
@@ -1103,30 +1140,59 @@ function setStatus(msg, isError) {
 // ════════════════════════════════════════════════════════
 // Lobby
 // ════════════════════════════════════════════════════════
-const SQUAD_NAMES  = ['Desert Squad', 'Jungle Squad'];
-const SQUAD_COLORS = ['#b8905a',      '#4a7a4a'];
-
-function squadColor(alliance) { return SQUAD_COLORS[alliance] ?? '#888'; }
-function squadName(alliance)  { return SQUAD_NAMES[alliance]  ?? ''; }
-
 function renderPlayerList(players) {
-  const body = document.getElementById('player-list-body');
-  if (!players || players.length === 0) {
-    body.innerHTML = '<div class="empty-state">No players yet</div>';
-    return;
+  const unassigned = [], desert = [], jungle = [];
+
+  if (players) {
+    for (const p of players) {
+      const name     = typeof p === 'string' ? p : (p.name ?? '');
+      const alliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
+      if      (alliance === 0) desert.push(name);
+      else if (alliance === 1) jungle.push(name);
+      else                     unassigned.push(name);
+    }
   }
-  body.innerHTML = players.map(p => {
-    const name     = (typeof p === 'string') ? p : (p.name ?? '');
-    const alliance = (typeof p === 'string') ? -1 : (p.alliance ?? -1);
-    const isSelf   = name === myName;
-    const col      = squadColor(alliance);
-    const squad    = squadName(alliance);
+
+  function makeRow(name, dotColor) {
+    const isSelf = name === myName;
     return `<div class="player-row">
-      <div class="player-dot" style="background:${col}"></div>
+      <div class="player-dot" style="background:${dotColor}"></div>
       <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
-      ${squad ? `<span style="color:${col};font-size:0.75em;margin-left:6px;opacity:0.9">${escHtml(squad)}</span>` : ''}
     </div>`;
-  }).join('');
+  }
+
+  // Unassigned — show squad-pick buttons for the current player
+  const unEl = document.getElementById('lobby-unassigned');
+  if (unEl) {
+    if (unassigned.length === 0) {
+      unEl.innerHTML = '<div class="empty-state">–</div>';
+    } else {
+      unEl.innerHTML = unassigned.map(name => {
+        const isSelf = name === myName;
+        const pickBtns = isSelf
+          ? `<div class="squad-pick-btns">
+               <button class="squad-pick-btn desert" onclick="joinSquad(0)">Desert Squad</button>
+               <button class="squad-pick-btn jungle" onclick="joinSquad(1)">Jungle Squad</button>
+             </div>`
+          : '';
+        return `<div class="player-row">
+          <div class="player-dot"></div>
+          <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+          ${pickBtns}
+        </div>`;
+      }).join('');
+    }
+  }
+
+  const dEl = document.getElementById('lobby-desert');
+  if (dEl) dEl.innerHTML = desert.length
+    ? desert.map(n => makeRow(n, '#b8905a')).join('')
+    : '<div class="empty-state">–</div>';
+
+  const jEl = document.getElementById('lobby-jungle');
+  if (jEl) jEl.innerHTML = jungle.length
+    ? jungle.map(n => makeRow(n, '#4a7a4a')).join('')
+    : '<div class="empty-state">–</div>';
 }
 
 // ════════════════════════════════════════════════════════
@@ -1496,13 +1562,9 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Enter key: focus first enabled squad button ────────
+// ── Submit on Enter ────────────────────────────────────
 document.getElementById('name-input').addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  const desert = document.getElementById('join-desert-btn');
-  const jungle = document.getElementById('join-jungle-btn');
-  if (desert && !desert.disabled) { desert.focus(); }
-  else if (jungle && !jungle.disabled) { jungle.focus(); }
+  if (e.key === 'Enter') joinLobby();
 });
 
 // ── Start polling server status on page load ────────────────────────────

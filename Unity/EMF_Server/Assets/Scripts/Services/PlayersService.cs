@@ -92,6 +92,21 @@ public class PlayersService
         SaveToDisk();
     }
 
+    // Set alliance for a player identified by name (-1 = unassigned, 0 = Desert, 1 = Jungle).
+    public void SetAllianceByName(string playerName, int allianceIndex)
+    {
+        for (int i = 0; i < _players.Count; i++)
+        {
+            if (_players[i].Name == playerName)
+            {
+                _players[i].AllianceIndex = allianceIndex;
+                OnChanged?.Invoke();
+                SaveToDisk();
+                return;
+            }
+        }
+    }
+
     // Change which alliance a player belongs to.
     public void SetPlayerAlliance(int index, int allianceIndex, int maxAlliances)
     {

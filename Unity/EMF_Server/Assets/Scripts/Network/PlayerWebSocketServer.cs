@@ -239,7 +239,11 @@ public class PlayerWebSocketServer : MonoBehaviour
         switch (msg.cmd)
         {
             case "join":
-                HandleJoin(sessionId, msg.connectionId, msg.name, msg.alliance);
+                HandleJoin(sessionId, msg.connectionId, msg.name);
+                break;
+
+            case "squad":
+                HandleSquad(msg.connectionId, msg.alliance);
                 break;
 
             case "leave":
@@ -264,7 +268,7 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     // ── Lobby handlers ───────────────────────────────────────────────────────────
 
-    void HandleJoin(string sessionId, string connId, string name, int alliance = -1)
+    void HandleJoin(string sessionId, string connId, string name)
     {
         if (string.IsNullOrWhiteSpace(connId) || string.IsNullOrWhiteSpace(name)) return;
         if (_connToPlayer.ContainsKey(connId)) return;
@@ -280,14 +284,9 @@ public class PlayerWebSocketServer : MonoBehaviour
             foreach (var p in existingList)
                 if (p.Name == name) { alreadyListed = true; break; }
         if (!alreadyListed)
-        {
-            int effectiveAlliance = (alliance == 0 || alliance == 1) ? alliance : 0;
-            ServiceLocator.Players?.AddPlayer(name, effectiveAlliance);
-        }
-        Debug.Log("[PlayerWS] Player joined: " + name + " alliance=" + alliance + " (conn=" + connId + ")");
+            ServiceLocator.Players?.AddPlayer(name, -1); // -1 = unassigned until squad chosen
 
-        // Auto-assign a robot from the player's chosen squad to the new player.
-        TryAssignFreeRobotToPlayer(name, alliance);
+        Debug.Log("[PlayerWS] Player joined: " + name + " (conn=" + connId + ")");
 
         // If the game is already running, send game_started immediately so the
         // phone transitions to the playing screen without waiting for the next phase change.
@@ -330,6 +329,29 @@ public class PlayerWebSocketServer : MonoBehaviour
                 return;
             }
         }
+    }
+
+    void HandleSquad(string connId, int alliance)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        if (alliance != 0 && alliance != 1) return;
+
+        // Update the player's alliance in PlayersService
+        ServiceLocator.Players?.SetAllianceByName(playerName, alliance);
+
+        // Clear any existing robot assignment for this player, then re-assign from chosen squad
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir != null)
+        {
+            foreach (var robot in dir.GetAll())
+                if (robot.AssignedPlayer == playerName)
+                    dir.ClearAssignedPlayer(robot.RobotId);
+
+            TryAssignFreeRobotToPlayer(playerName, alliance);
+        }
+
+        BroadcastPlayerList();
+        Debug.Log("[PlayerWS] Player " + playerName + " joined squad " + AllianceName(alliance));
     }
 
     void HandleLeave(string connId)
