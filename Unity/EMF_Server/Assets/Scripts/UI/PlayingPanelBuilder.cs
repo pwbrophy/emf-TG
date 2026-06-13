@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v7";
+    const string BUILT_SENTINEL = "__ppb_v8";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -312,6 +312,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_driveDecel  = MakeSettingsRow(gameSettingsContent, "Drive Decel",  "Seconds to coast to stop when drive stick released. 0=instant.");
         var f_turretAccel = MakeSettingsRow(gameSettingsContent, "Turret Accel", "Seconds to reach full turret speed from stopped. 0=instant.");
         var f_turretDecel = MakeSettingsRow(gameSettingsContent, "Turret Decel", "Seconds to coast to stop when turret released. 0=instant.");
+        var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",   "Enable / disable buzzer sound effects on all robots.");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -372,6 +373,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "driveDecelField",  f_driveDecel);
         Wire(psp, "turretAccelField", f_turretAccel);
         Wire(psp, "turretDecelField", f_turretDecel);
+        Wire(psp, "buzzerToggle",     f_buzzer);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)

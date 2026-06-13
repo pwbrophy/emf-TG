@@ -285,8 +285,11 @@ public class RobotWebSocketServer : MonoBehaviour
 
             var gs = ServiceLocator.GameSettings;
             if (gs != null)
+            {
                 SendPhysics(id, gs.DriveAcceleration, gs.DriveDeceleration,
                             gs.TurretAcceleration, gs.TurretDeceleration);
+                SendBuzzerEnabled(id, gs.BuzzerEnabled);
+            }
 
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
 
@@ -563,6 +566,23 @@ public class RobotWebSocketServer : MonoBehaviour
         foreach (var robotId in _sessionByRobot.Keys.ToList())
             SendPhysics(robotId, settings.DriveAcceleration, settings.DriveDeceleration,
                         settings.TurretAcceleration, settings.TurretDeceleration);
+    }
+
+    public bool SendBuzzerEnabled(string robotId, bool enabled)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"set_buzzer\",\"enabled\":{(enabled ? 1 : 0)}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok
+            ? $"[WS->Robot] set_buzzer enabled={enabled} -> {robotId}"
+            : $"[WS->Robot] FAILED set_buzzer -> {robotId}");
+        return ok;
+    }
+
+    public void BroadcastBuzzerToAll(bool enabled)
+    {
+        foreach (var robotId in _sessionByRobot.Keys.ToList())
+            SendBuzzerEnabled(robotId, enabled);
     }
 
     public bool SendIrEmitStop(string robotId)

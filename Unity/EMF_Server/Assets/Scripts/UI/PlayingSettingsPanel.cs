@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 // Exposes GameSettings (match params) as editable fields on the Playing screen.
 // Values auto-save to disk on each change via GameSettings.SaveToDisk().
@@ -20,6 +21,9 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField driveDecelField;
     [SerializeField] private TMP_InputField turretAccelField;
     [SerializeField] private TMP_InputField turretDecelField;
+
+    [Header("Audio")]
+    [SerializeField] private Toggle buzzerToggle;
 
     private GameSettings _settings;
 
@@ -50,6 +54,7 @@ public class PlayingSettingsPanel : MonoBehaviour
         Set(driveDecelField,  _settings.DriveDeceleration.ToString("F2"));
         Set(turretAccelField, _settings.TurretAcceleration.ToString("F2"));
         Set(turretDecelField, _settings.TurretDeceleration.ToString("F2"));
+        if (buzzerToggle != null) buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
     }
 
     private static void Set(TMP_InputField f, string v)
@@ -71,6 +76,7 @@ public class PlayingSettingsPanel : MonoBehaviour
         Reg(driveDecelField,  OnDriveDecelChanged);
         Reg(turretAccelField, OnTurretAccelChanged);
         Reg(turretDecelField, OnTurretDecelChanged);
+        if (buzzerToggle != null) buzzerToggle.onValueChanged.AddListener(OnBuzzerChanged);
     }
 
     private void RemoveListeners()
@@ -87,6 +93,7 @@ public class PlayingSettingsPanel : MonoBehaviour
         Unreg(driveDecelField,  OnDriveDecelChanged);
         Unreg(turretAccelField, OnTurretAccelChanged);
         Unreg(turretDecelField, OnTurretDecelChanged);
+        if (buzzerToggle != null) buzzerToggle.onValueChanged.RemoveListener(OnBuzzerChanged);
     }
 
     private static void Reg(TMP_InputField f, UnityEngine.Events.UnityAction<string> cb)
@@ -195,6 +202,14 @@ public class PlayingSettingsPanel : MonoBehaviour
             Save();
             ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings);
         }
+    }
+
+    private void OnBuzzerChanged(bool enabled)
+    {
+        if (_settings == null) return;
+        _settings.BuzzerEnabled = enabled;
+        Save();
+        ServiceLocator.RobotServer?.BroadcastBuzzerToAll(enabled);
     }
 
     private void Save() => _settings.SaveToDisk();

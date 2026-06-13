@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
 /// Lets the operator adjust match parameters in the Lobby before starting.
@@ -13,6 +14,9 @@ public class GameSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField durationField;
     [SerializeField] private TMP_InputField maxTeamPointsField;
     [SerializeField] private TMP_InputField countdownField;
+
+    [Header("Audio")]
+    [SerializeField] private Toggle buzzerToggle;
 
     private GameSettings _settings;
 
@@ -32,6 +36,8 @@ public class GameSettingsPanel : MonoBehaviour
         if (durationField)      durationField.onValueChanged.AddListener(OnDurationChanged);
         if (maxTeamPointsField) maxTeamPointsField.onValueChanged.AddListener(OnMaxTeamPointsChanged);
         if (countdownField)     countdownField.onValueChanged.AddListener(OnCountdownChanged);
+        if (buzzerToggle)       buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
+        if (buzzerToggle)       buzzerToggle.onValueChanged.AddListener(OnBuzzerChanged);
     }
 
     private void OnDisable()
@@ -41,6 +47,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (durationField)      durationField.onValueChanged.RemoveListener(OnDurationChanged);
         if (maxTeamPointsField) maxTeamPointsField.onValueChanged.RemoveListener(OnMaxTeamPointsChanged);
         if (countdownField)     countdownField.onValueChanged.RemoveListener(OnCountdownChanged);
+        if (buzzerToggle)       buzzerToggle.onValueChanged.RemoveListener(OnBuzzerChanged);
     }
 
     private void OnMaxHpChanged(string v)
@@ -91,5 +98,13 @@ public class GameSettingsPanel : MonoBehaviour
             _settings.CountdownDuration = n;
             _settings.SaveToDisk();
         }
+    }
+
+    private void OnBuzzerChanged(bool enabled)
+    {
+        if (_settings == null) return;
+        _settings.BuzzerEnabled = enabled;
+        _settings.SaveToDisk();
+        ServiceLocator.RobotServer?.BroadcastBuzzerToAll(enabled);
     }
 }

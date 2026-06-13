@@ -113,6 +113,7 @@ static uint32_t g_lastWifiCheck  = 0;
 static uint32_t g_lastDriveTime  = 0;
 
 // ---- Buzzer (simple timed tone) ----
+static bool     g_buzzerEnabled = true;  // toggled via set_buzzer cmd
 static uint32_t g_buzzerEnd    = 0;
 static bool     g_buzzerActive = false;
 
@@ -151,6 +152,7 @@ static uint32_t g_buzzerFireLastUp = 0;
 
 static void startBuzzerFireEffect()
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive = false; // cancel any plain tone
     ledcSetup(BUZZER_LEDC_CH, 3500, 8);
     ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
@@ -222,6 +224,7 @@ static uint32_t g_buzzerHitNextBlock = 0;
 
 static void startBuzzerHitEffect()
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive    = false; // cancel plain tone
     g_buzzerFirePhase = 0;     // cancel fire effect
     ledcSetup(BUZZER_LEDC_CH, 1200, 8);
@@ -281,6 +284,7 @@ static const uint8_t  HEAL_PIP_DUTIES[4] = {120,  135,  155,  175};
 
 static void startBuzzerHealEffect()
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive    = false;
     g_buzzerFirePhase = 0;
     g_buzzerHitPhase  = 0;
@@ -358,6 +362,7 @@ static uint32_t g_buzzerDeathNextNoise = 0;
 
 static void startBuzzerDeathEffect()
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive    = false;
     g_buzzerFirePhase = 0;
     g_buzzerHitPhase  = 0;
@@ -432,6 +437,7 @@ static const uint8_t  CAPTURE_PIP_DUTIES[3] = {150, 160, 175};
 
 static void startBuzzerCaptureEffect()
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive      = false;
     g_buzzerFirePhase   = 0;
     g_buzzerHitPhase    = 0;
@@ -484,6 +490,7 @@ static const uint32_t CDOWN_FADEOUT_MS = 40u;
 
 static void startBuzzerCountdownTick(uint32_t baseFreq, uint8_t targetDuty)
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive              = false;
     g_buzzerCountdownBaseFreq   = baseFreq;
     g_buzzerCountdownTargetDuty = targetDuty;
@@ -532,6 +539,7 @@ static const uint8_t  FANFARE_PIP_DUTIES[4] = {140, 155, 170,  200};
 
 static void startBuzzerFanfareEffect()
 {
+    if (!g_buzzerEnabled) return;
     g_buzzerActive          = false;
     g_buzzerFirePhase       = 0;
     g_buzzerHitPhase        = 0;
@@ -916,6 +924,26 @@ static void handleWsText(const String& s)
         int ms = doc["ms"] | 100;
         ir.beginListenWindow((uint32_t)(ms > 0 ? ms : 100));
         Serial.printf("[IR] listen_window %d ms\n", ms);
+        return;
+    }
+
+    // ---- Buzzer mute ----
+
+    if (strcmp(cmd, "set_buzzer") == 0) {
+        g_buzzerEnabled = (doc["enabled"] | 1) != 0;
+        if (!g_buzzerEnabled) {
+            // Silence any currently-playing effect
+            g_buzzerActive     = false;
+            g_buzzerFirePhase  = 0;
+            g_buzzerHitPhase   = 0;
+            g_buzzerHealPhase  = 0;
+            g_buzzerDeathPhase = 0;
+            g_buzzerCapturePhase   = 0;
+            g_buzzerCountdownPhase = 0;
+            g_buzzerFanfarePhase   = 0;
+            silenceBuzzer();
+        }
+        Serial.printf("[BUZZER] %s\n", g_buzzerEnabled ? "enabled" : "disabled");
         return;
     }
 

@@ -60,6 +60,10 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Seconds to coast to a stop after turret input is released. 0 = instant stop.")]
     public float TurretDeceleration = 0f;
 
+    [Header("Audio")]
+    [Tooltip("When disabled, no buzzer sounds play on any robot.")]
+    public bool BuzzerEnabled = true;
+
     [Header("Shot Timing")]
     [Tooltip("Minimum seconds between shots for the same robot.")]
     public float FireCooldownSeconds = 3f;
@@ -108,6 +112,7 @@ public class GameSettings : MonoBehaviour
                 handshakeWindowMs        = HandshakeWindowMs,
                 handshakeAckTimeoutMs    = HandshakeAckTimeoutMs,
                 handshakeWindowTimeoutMs = HandshakeWindowTimeoutMs,
+                buzzerEnabled            = BuzzerEnabled ? 1 : 0,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -143,6 +148,8 @@ public class GameSettings : MonoBehaviour
             if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
             if (data.handshakeAckTimeoutMs    > 0) HandshakeAckTimeoutMs    = data.handshakeAckTimeoutMs;
             if (data.handshakeWindowTimeoutMs > 0) HandshakeWindowTimeoutMs = data.handshakeWindowTimeoutMs;
+            // buzzerEnabled: -1 = not yet written (old save) → keep default true
+            if (data.buzzerEnabled >= 0) BuzzerEnabled = data.buzzerEnabled != 0;
 
             Debug.Log("[GameSettings] Loaded from " + SavePath);
         }
@@ -172,5 +179,6 @@ public class GameSettings : MonoBehaviour
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;
         public int   handshakeWindowTimeoutMs;
+        public int   buzzerEnabled = -1; // -1 = not set (old save); 0 = off; 1 = on
     }
 }
