@@ -52,7 +52,8 @@ A successful upload ends with `Result: OK` / `Success`. If the hostname doesn't 
 
 ```
 cd "F:\Data\Thundergeddon\EMF_Project\ESP32\thundergeddon"
-.\flash_all.ps1
+.\flash_all.ps1              # all 10 robots
+.\flash_all.ps1 1,2,7,8      # subset — pass robot numbers as a comma-separated list
 ```
 
 **Per-robot OTA envs** (single robot) — use when flashing just one robot:
