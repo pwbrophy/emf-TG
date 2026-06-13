@@ -1230,6 +1230,7 @@ function renderLobby() {
     const isMine   = r.id === myRobotId;
     const isTaken  = !!assigned && !isMine;
     const btnClass = isMine ? 'mine' : isTaken ? 'taken' : 'available';
+    const btnLabel = isMine ? 'Leave' : isTaken ? 'Taken' : 'Join';
     const clickId  = isMine ? '' : r.id;
     const btnClick = isTaken ? '' : `onclick="pickRobot('${escHtml(clickId)}')"`;
     return `<div class="robot-row">
@@ -1238,7 +1239,7 @@ function renderLobby() {
         ${assigned ? `<span class="robot-player-assigned">${escHtml(assigned)}${isMine ? ' (you)' : ''}</span>` : ''}
       </div>
       <div class="robot-actions">
-        <button class="role-btn ${btnClass}" ${isTaken ? 'disabled' : ''} ${btnClick}>Drive</button>
+        <button class="role-btn ${btnClass}" ${isTaken ? 'disabled' : ''} ${btnClick}>${btnLabel}</button>
       </div>
     </div>`;
   }
