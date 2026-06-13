@@ -21,6 +21,9 @@ public sealed class GameService
     // targetId, shooterId, rawDetMask (8-bit sensor bits), cardinalDir ("N"|"E"|"S"|"W")
     public event Action<string, string, byte, string> OnRobotHitDirection;
 
+    // shooterId (null if operator/direct damage), targetId — fired when HP reaches zero
+    public event Action<string, string> OnRobotKilled;
+
     public bool CanStart() => true;
 
     public void StartGame()
@@ -100,6 +103,7 @@ public sealed class GameService
         {
             State.DeadRobots.Add(targetId);
             OnRobotDied?.Invoke(targetId);
+            OnRobotKilled?.Invoke(shooterId, targetId);
             if (shooterAlliance >= 0)
                 ServiceLocator.CapturePoints?.AwardKillPoints(shooterAlliance);
             // Elimination no longer ends the game — robots can respawn.
@@ -128,6 +132,7 @@ public sealed class GameService
         {
             State.DeadRobots.Add(targetId);
             OnRobotDied?.Invoke(targetId);
+            OnRobotKilled?.Invoke(null, targetId);
             // Elimination no longer ends the game — robots can respawn.
         }
 
@@ -159,6 +164,7 @@ public sealed class GameService
         {
             State.DeadRobots.Add(targetId);
             OnRobotDied?.Invoke(targetId);
+            OnRobotKilled?.Invoke(null, targetId);
         }
 
         return newHp;

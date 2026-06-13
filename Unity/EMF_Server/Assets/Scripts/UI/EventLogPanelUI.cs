@@ -93,12 +93,15 @@ public class EventLogPanelUI : MonoBehaviour
 
     private void HandleGameWon(int allianceIndex, string reason)
     {
-        string winner = allianceIndex >= 0 ? $"Alliance {allianceIndex + 1}" : "Nobody";
+        string winner = allianceIndex >= 0 ? SquadName(allianceIndex) : "Nobody";
         AddEvent($"{winner} wins! ({reason})");
     }
 
     private void HandlePointCaptured(int pointIndex, int allianceIndex, string pointName)
     {
-        AddEvent($"Alliance {allianceIndex + 1} captures {pointName}!");
+        AddEvent($"{SquadName(allianceIndex)} captures {pointName}!");
     }
+
+    private static string SquadName(int index)
+        => index == 0 ? "Desert Squad" : index == 1 ? "Jungle Squad" : $"Alliance {index + 1}";
 }

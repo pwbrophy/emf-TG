@@ -59,6 +59,17 @@ public class PlayerWebSocketServer : MonoBehaviour
     // robotId → Time.time when the robot died (used to time the 5-s explosion → dead-walk transition)
     private readonly Dictionary<string, float> _deathTimes = new Dictionary<string, float>();
 
+    // ── Announcer tracking ────────────────────────────────────────────────────────
+    private bool _firstBloodDone;
+    private float _gameStartTime;
+    private readonly Dictionary<string, int> _playerKillStreak   = new Dictionary<string, int>();
+    private readonly Dictionary<string, int> _playerKillTotal    = new Dictionary<string, int>();
+    private readonly Dictionary<string, int> _playerCaptureScore = new Dictionary<string, int>();
+    private readonly HashSet<string> _lowHpWarned = new HashSet<string>();
+    private int[]  _prevTeamPoints   = { 0, 0 };
+    private bool[] _teamPoints50Fired = { false, false };
+    private bool[] _teamPoints90Fired = { false, false };
+
     // ── Events (consumed by UI components) ───────────────────────────────────────
 
     /// Fired when a phone sends drive/turret input.
@@ -103,6 +114,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Game.OnRobotRespawned     += OnRobotRespawned;
             ServiceLocator.Game.OnGameWon            += OnGameWon;
             ServiceLocator.Game.OnRobotHitDirection  += OnHitDirection;
+            ServiceLocator.Game.OnRobotKilled        += OnRobotKilled;
         }
 
         // RFID tag scans
@@ -144,6 +156,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Game.OnRobotRespawned    -= OnRobotRespawned;
             ServiceLocator.Game.OnGameWon           -= OnGameWon;
             ServiceLocator.Game.OnRobotHitDirection -= OnHitDirection;
+            ServiceLocator.Game.OnRobotKilled       -= OnRobotKilled;
         }
 
         if (ServiceLocator.RobotServer != null)
@@ -658,6 +671,15 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             SendGameStartedToAll();
             ActivateAllRobots();
+            _gameStartTime = Time.time;
+            _firstBloodDone = false;
+            _playerKillStreak.Clear();
+            _playerKillTotal.Clear();
+            _playerCaptureScore.Clear();
+            _lowHpWarned.Clear();
+            System.Array.Clear(_prevTeamPoints,    0, _prevTeamPoints.Length);
+            System.Array.Clear(_teamPoints50Fired, 0, _teamPoints50Fired.Length);
+            System.Array.Clear(_teamPoints90Fired, 0, _teamPoints90Fired.Length);
         }
         else if (phase == GamePhase.Ended)
         {
@@ -731,6 +753,16 @@ public class PlayerWebSocketServer : MonoBehaviour
 
             SendSingleStateUpdate(connId);
         }
+
+        // Critical HP warning — once per robot per life, at ≤25%
+        int maxHp = ServiceLocator.GameSettings?.MaxHp ?? 100;
+        if (newHp > 0 && newHp <= maxHp / 4 && !_lowHpWarned.Contains(robotId))
+        {
+            _lowHpWarned.Add(robotId);
+            string warnName = GetPlayerNameForRobot(robotId);
+            if (!string.IsNullOrEmpty(warnName))
+                BroadcastDisplayEvent($"Warning — {warnName}'s tank is critical!");
+        }
     }
 
     void OnHitDirection(string targetId, string shooterId, byte rawMask, string cardinalDir)
@@ -756,6 +788,16 @@ public class PlayerWebSocketServer : MonoBehaviour
             BroadcastRaw(json);
             break;
         }
+
+        // Announce rear hits
+        if (cardinalDir == "S" && !string.IsNullOrEmpty(shooterName))
+        {
+            string targetPlayer = GetPlayerNameForRobot(targetId);
+            string rearMsg = string.IsNullOrEmpty(targetPlayer)
+                ? $"Rear hit! {shooterName} attacks from behind!"
+                : $"Rear hit! {shooterName} hits {targetPlayer} from behind!";
+            BroadcastDisplayEvent(rearMsg);
+        }
     }
 
     void OnRobotDied(string robotId)
@@ -779,6 +821,60 @@ public class PlayerWebSocketServer : MonoBehaviour
             BroadcastRaw(json);
             Debug.Log("[PlayerWS] Sent you_are_dead to " + kvp.Value);
         }
+    }
+
+    void OnRobotKilled(string shooterId, string targetId)
+    {
+        string targetName  = GetPlayerNameForRobot(targetId);
+        string shooterName = string.IsNullOrEmpty(shooterId) ? "" : GetPlayerNameForRobot(shooterId);
+
+        // Reset target's kill streak on death
+        if (!string.IsNullOrEmpty(targetName))
+            _playerKillStreak[targetName] = 0;
+
+        string text;
+        if (string.IsNullOrEmpty(shooterName))
+        {
+            text = string.IsNullOrEmpty(targetName) ? "A tank was destroyed!" : $"{targetName} was destroyed!";
+        }
+        else
+        {
+            if (!_playerKillTotal.ContainsKey(shooterName))    _playerKillTotal[shooterName]    = 0;
+            if (!_playerKillStreak.ContainsKey(shooterName)) _playerKillStreak[shooterName] = 0;
+            _playerKillTotal[shooterName]++;
+            _playerKillStreak[shooterName]++;
+            int streak = _playerKillStreak[shooterName];
+
+            string victim = string.IsNullOrEmpty(targetName) ? "an enemy" : targetName;
+
+            if (!_firstBloodDone)
+            {
+                _firstBloodDone = true;
+                text = $"First blood — {shooterName} eliminated {victim}!";
+            }
+            else if (streak == 2)
+            {
+                text = $"Double kill — {shooterName} eliminated {victim}!";
+            }
+            else if (streak == 3)
+            {
+                text = $"Triple kill — {shooterName} is on fire!";
+            }
+            else if (streak >= 4)
+            {
+                text = $"{shooterName} is unstoppable! Eliminated {victim}!";
+            }
+            else if (Time.time - _gameStartTime < 60f)
+            {
+                text = $"An early casualty — {shooterName} eliminated {victim}!";
+            }
+            else
+            {
+                text = $"{shooterName} eliminated {victim}!";
+            }
+        }
+
+        BroadcastDisplayEvent(text);
     }
 
     /// <summary>
@@ -837,6 +933,11 @@ public class PlayerWebSocketServer : MonoBehaviour
             SendSingleStateUpdate(kvp.Key);
             Debug.Log("[PlayerWS] Sent you_are_alive to " + kvp.Value);
         }
+
+        _lowHpWarned.Remove(robotId);
+        string respawnName = GetPlayerNameForRobot(robotId);
+        if (!string.IsNullOrEmpty(respawnName))
+            BroadcastDisplayEvent($"{respawnName} has returned to battle!");
     }
 
     // Called every Update — moves robots from DeadRobots → RespawningRobots after 5 s,
@@ -870,9 +971,41 @@ public class PlayerWebSocketServer : MonoBehaviour
     static string AllianceName(int index)
         => index == 0 ? "Desert Squad" : index == 1 ? "Jungle Squad" : "Unknown";
 
+    string GetPlayerNameForRobot(string robotId)
+    {
+        var dir = ServiceLocator.RobotDirectory;
+        if (string.IsNullOrEmpty(robotId) || dir == null || !dir.TryGet(robotId, out var info)) return "";
+        if (!string.IsNullOrEmpty(info.AssignedPlayer)) return info.AssignedPlayer;
+        if (!string.IsNullOrEmpty(info.Callsign))       return info.Callsign;
+        return "";
+    }
+
+    string CalculateBestPlayer()
+    {
+        var scores = new Dictionary<string, int>();
+        foreach (var kvp in _playerKillTotal)
+            scores[kvp.Key] = scores.GetValueOrDefault(kvp.Key) + kvp.Value * 10;
+        foreach (var kvp in _playerCaptureScore)
+            scores[kvp.Key] = scores.GetValueOrDefault(kvp.Key) + kvp.Value * 5;
+
+        string best = null;
+        int bestScore = 0;
+        foreach (var kvp in scores)
+            if (kvp.Value > bestScore) { bestScore = kvp.Value; best = kvp.Key; }
+        return best;
+    }
+
     void OnGameWon(int allianceIndex, string reason)
     {
         string teamName = AllianceName(allianceIndex);
+
+        // Full spoken announcement via display event (arrives before game_over, so speak() isn't cancelled)
+        string bestPlayer = CalculateBestPlayer();
+        string announcement = $"Game over! {teamName} are victorious!";
+        if (!string.IsNullOrEmpty(bestPlayer))
+            announcement += $" {bestPlayer} was the best player!";
+        BroadcastDisplayEvent(announcement);
+
         string json = "{\"cmd\":\"game_over\",\"winnerTeam\":\"" +
                       EscapeJson(teamName) + "\",\"reason\":\"" +
                       EscapeJson(reason) + "\"}";
@@ -982,9 +1115,27 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         string playerName = FindPlayerForLastCapture(allianceIndex);
         string text = string.IsNullOrEmpty(playerName)
-            ? $"Alliance {allianceIndex + 1} captured {pointName} Point!"
+            ? $"{AllianceName(allianceIndex)} captured {pointName} Point!"
             : $"{playerName} captured {pointName} Point!";
         BroadcastDisplayEvent(text);
+
+        // Credit capture for best-player scoring
+        if (!string.IsNullOrEmpty(playerName))
+        {
+            if (!_playerCaptureScore.ContainsKey(playerName)) _playerCaptureScore[playerName] = 0;
+            _playerCaptureScore[playerName]++;
+        }
+
+        // All three points captured by same alliance?
+        var gs = ServiceLocator.Game?.State;
+        if (gs?.CapturePointOwners != null && gs.CapturePointOwners.Length >= 3
+            && gs.CapturePointOwners[0] == allianceIndex
+            && gs.CapturePointOwners[1] == allianceIndex
+            && gs.CapturePointOwners[2] == allianceIndex)
+        {
+            BroadcastDisplayEvent($"{AllianceName(allianceIndex)} has captured all the points!");
+        }
+
         BroadcastDisplayUpdate();
     }
 
@@ -997,7 +1148,53 @@ public class PlayerWebSocketServer : MonoBehaviour
         return null;
     }
 
-    void OnTeamPointsChanged() => BroadcastDisplayUpdate();
+    void OnTeamPointsChanged()
+    {
+        BroadcastDisplayUpdate();
+
+        var gs       = ServiceLocator.Game?.State;
+        var settings = ServiceLocator.GameSettings;
+        if (gs == null || settings == null) return;
+
+        int max = settings.MaxTeamPoints;
+        int tp0 = gs.TeamPoints.Length > 0 ? gs.TeamPoints[0] : 0;
+        int tp1 = gs.TeamPoints.Length > 1 ? gs.TeamPoints[1] : 0;
+        int prev0 = _prevTeamPoints[0];
+        int prev1 = _prevTeamPoints[1];
+
+        // Milestone checks (each fires at most once per game)
+        for (int a = 0; a < 2; a++)
+        {
+            int pts  = a == 0 ? tp0 : tp1;
+            string n = AllianceName(a);
+
+            if (!_teamPoints50Fired[a] && pts >= max / 2)
+            {
+                _teamPoints50Fired[a] = true;
+                BroadcastDisplayEvent($"{n} is halfway to a points victory!");
+            }
+            if (!_teamPoints90Fired[a] && pts >= (max * 9) / 10)
+            {
+                _teamPoints90Fired[a] = true;
+                BroadcastDisplayEvent($"{n} is nearly victorious!");
+            }
+        }
+
+        // Overtake: announce when a team that was NOT leading becomes the leader.
+        // Require both teams to have scored to avoid "first kill = takes the lead" noise.
+        if (tp0 > 0 && tp1 > 0)
+        {
+            bool prev0Leading = prev0 > prev1;
+            bool prev1Leading = prev1 > prev0;
+            if (!prev0Leading && tp0 > tp1)
+                BroadcastDisplayEvent($"{AllianceName(0)} has taken the points lead!");
+            else if (!prev1Leading && tp1 > tp0)
+                BroadcastDisplayEvent($"{AllianceName(1)} has taken the points lead!");
+        }
+
+        _prevTeamPoints[0] = tp0;
+        _prevTeamPoints[1] = tp1;
+    }
 
     // ── State update helpers ──────────────────────────────────────────────────────
 
@@ -1187,14 +1384,19 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         bool paused = flow?.IsPaused ?? false;
 
+        float matchDuration = settings?.MatchDurationSeconds ?? 600f;
+
         sb.Append("{\"cmd\":\"display_update\"");
-        sb.Append(",\"phase\":\"");   sb.Append(phase); sb.Append("\"");
-        sb.Append(",\"paused\":");    sb.Append(paused ? "true" : "false");
-        sb.Append(",\"timer\":");     sb.Append(timer.ToString("F1"));
+        sb.Append(",\"phase\":\"");        sb.Append(phase); sb.Append("\"");
+        sb.Append(",\"paused\":");         sb.Append(paused ? "true" : "false");
+        sb.Append(",\"timer\":");          sb.Append(timer.ToString("F1"));
+        sb.Append(",\"matchDuration\":"); sb.Append(matchDuration.ToString("F0"));
         sb.Append(",\"playerCount\":"); sb.Append(playerCount);
         sb.Append(",\"maxPlayers\":"); sb.Append(maxPlayers);
         sb.Append(",\"teamPoints\":["); sb.Append(tp0); sb.Append(","); sb.Append(tp1); sb.Append("]");
         sb.Append(",\"maxTeamPoints\":"); sb.Append(maxTeamPts);
+        sb.Append(",\"allianceNames\":[\""); sb.Append(EscapeJson(AllianceName(0)));
+        sb.Append("\",\"");                  sb.Append(EscapeJson(AllianceName(1))); sb.Append("\"]");
 
         // Robots array
         sb.Append(",\"robots\":[");

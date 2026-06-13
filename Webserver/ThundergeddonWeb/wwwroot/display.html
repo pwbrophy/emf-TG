@@ -194,8 +194,8 @@
   <!-- Team points bar -->
   <div id="teambar-wrap">
     <div id="teambar-labels">
-      <span id="tp-label-0">Alliance 1 — 0 pts</span>
-      <span id="tp-label-1">0 pts — Alliance 2</span>
+      <span id="tp-label-0">Desert Squad — 0 pts</span>
+      <span id="tp-label-1">0 pts — Jungle Squad</span>
     </div>
     <div id="teambar-track">
       <div id="teambar-fill-0" style="width:0%"></div>
@@ -254,8 +254,8 @@
 <div id="fpv-overlay">
   <div id="fpv-teambar">
     <div id="fpv-tp-labels">
-      <span id="fpv-tp-label-0">Alliance 1 — 0 pts</span>
-      <span id="fpv-tp-label-1">0 pts — Alliance 2</span>
+      <span id="fpv-tp-label-0">Desert Squad — 0 pts</span>
+      <span id="fpv-tp-label-1">0 pts — Jungle Squad</span>
     </div>
     <div id="fpv-tp-track">
       <div id="fpv-tp-fill-0" style="width:0%"></div>
@@ -317,10 +317,16 @@ let state = {
   maxPlayers: 6,
   teamPoints: [0, 0],
   maxTeamPoints: 300,
+  allianceNames: ['Desert Squad', 'Jungle Squad'],
   robots: [],
   capturePoints: [{ name:'North', owner:-1 }, { name:'Centre', owner:-1 }, { name:'South', owner:-1 }]
 };
 let eventLines = [];
+
+// ── Timer milestone tracking ──────────────────────────────────────────────
+let _prevTimer = null;
+const _milestoneFired = {};
+const _spokenCountdownSecs = new Set();
 
 // ── SignalR connection ────────────────────────────────────────────────────
 const conn = new signalR.HubConnectionBuilder()
@@ -352,7 +358,7 @@ conn.on('GameOver', data => {
     ? `${data.winnerTeam} wins!`
     : `Game over!`;
   addEvent(msg);
-  speak(msg);
+  // Full spoken announcement arrives via DisplayEvent just before this — don't cancel it
 });
 
 conn.on('CountdownStarted', total => {
@@ -484,6 +490,7 @@ function applySpectateUpdate(data) {
 // ── Apply state update ────────────────────────────────────────────────────
 function applyDisplayUpdate(data) {
   const wasPlaying = (state.phase === 'playing');
+  const prevTimerVal = _prevTimer;
   state = Object.assign(state, data);
   const nowPlaying = (state.phase === 'playing');
 
@@ -492,8 +499,15 @@ function applyDisplayUpdate(data) {
 
   if (!wasPlaying && nowPlaying) {
     document.getElementById('countdown-overlay').classList.add('hidden');
+    // Reset milestone flags so the new game gets fresh announcements
+    Object.keys(_milestoneFired).forEach(k => delete _milestoneFired[k]);
+    _spokenCountdownSecs.clear();
     speak('To battle, show no mercy!');
   }
+
+  // Check timer milestones each update (function guards on phase + paused)
+  checkTimerMilestones(prevTimerVal, state.timer);
+  _prevTimer = state.timer;
 
   // Keep FPV HP strip in sync with live robot HP
   if (fpvState.active && data.robots) {
@@ -528,8 +542,9 @@ function renderFpv() {
   const w1  = Math.min(50, (tp[1] / max) * 100);
   document.getElementById('fpv-tp-fill-0').style.width = w0 + '%';
   document.getElementById('fpv-tp-fill-1').style.width = w1 + '%';
-  document.getElementById('fpv-tp-label-0').textContent = `Alliance 1 — ${tp[0]} pts`;
-  document.getElementById('fpv-tp-label-1').textContent = `${tp[1]} pts — Alliance 2`;
+  const an = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+  document.getElementById('fpv-tp-label-0').textContent = `${an[0]} — ${tp[0]} pts`;
+  document.getElementById('fpv-tp-label-1').textContent = `${tp[1]} pts — ${an[1]}`;
 
   // Player name + HP
   document.getElementById('fpv-player-name').textContent = fpvState.playerName;
@@ -556,6 +571,11 @@ function renderLobbyOverlay() {
   const avail = state.maxPlayers - state.playerCount;
   document.getElementById('qr-slots').textContent =
     `${avail} / ${state.maxPlayers} slots available`;
+
+  // Update squad name headings
+  const lobbyAn = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+  document.querySelector('.lobby-team-title.a0').textContent = lobbyAn[0];
+  document.querySelector('.lobby-team-title.a1').textContent = lobbyAn[1];
 
   // Build per-alliance player lists from robots
   const t0 = document.getElementById('lobby-team-0');
@@ -589,8 +609,9 @@ function renderTeamBar() {
 
   document.getElementById('teambar-fill-0').style.width = w0 + '%';
   document.getElementById('teambar-fill-1').style.width = w1 + '%';
-  document.getElementById('tp-label-0').textContent = `Alliance 1 — ${tp[0]} pts`;
-  document.getElementById('tp-label-1').textContent = `${tp[1]} pts — Alliance 2`;
+  const an2 = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+  document.getElementById('tp-label-0').textContent = `${an2[0]} — ${tp[0]} pts`;
+  document.getElementById('tp-label-1').textContent = `${tp[1]} pts — ${an2[1]}`;
 }
 
 function renderEventLog() {
@@ -618,7 +639,8 @@ function renderAlliances() {
     if (byAlliance[a].length === 0) return;
     const block = document.createElement('div');
     block.className = 'alliance-block';
-    block.innerHTML = `<div class="alliance-title a${a}">Alliance ${a + 1}</div>`;
+    const squadNames = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+    block.innerHTML = `<div class="alliance-title a${a}">${escHtml(squadNames[a])}</div>`;
 
     byAlliance[a].forEach(r => {
       const pct = Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
@@ -648,13 +670,59 @@ function renderCapturePoints() {
 // ── Text-to-speech announcer ──────────────────────────────────────────────
 let _muted = false;
 
+function checkTimerMilestones(prev, t) {
+  if (state.phase !== 'playing' || state.paused) return;
+  if (prev === null) return; // first update — no delta yet
+
+  const md      = state.matchDuration || 600;
+  const halfway = md / 2;
+
+  if (!_milestoneFired.halfway && prev > halfway && t <= halfway) {
+    _milestoneFired.halfway = true;
+    const mins = Math.round(t / 60);
+    speak(`${mins} minute${mins !== 1 ? 's' : ''} remaining`);
+  }
+  if (!_milestoneFired.twoMin && prev > 120 && t <= 120) {
+    _milestoneFired.twoMin = true;
+    speak('2 minutes remaining');
+  }
+  if (!_milestoneFired.oneMin && prev > 60 && t <= 60) {
+    _milestoneFired.oneMin = true;
+    speak('1 minute remaining');
+  }
+  if (!_milestoneFired.thirtySec && prev > 30 && t <= 30) {
+    _milestoneFired.thirtySec = true;
+    speak('30 seconds');
+  }
+  // 10-second countdown — speak each integer crossing once
+  for (let s = 10; s >= 1; s--) {
+    if (!_spokenCountdownSecs.has(s) && prev > s && t <= s) {
+      _spokenCountdownSecs.add(s);
+      speak(String(s));
+      break; // only one per update
+    }
+  }
+}
+
+let _speakTimer = null;
 function speak(text) {
   if (_muted || !window.speechSynthesis) return;
-  speechSynthesis.cancel(); // don't queue — latest event wins
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.rate  = 0.95; // slightly slower for announcer feel
-  utt.pitch = 1.0;
-  speechSynthesis.speak(utt);
+  if (_speakTimer) clearTimeout(_speakTimer);
+  if (speechSynthesis.speaking || speechSynthesis.pending) {
+    // Something is playing — cancel it, then delay before speaking to avoid
+    // Chrome's bug where speak() immediately after cancel() is silently dropped.
+    speechSynthesis.cancel();
+    _speakTimer = setTimeout(() => {
+      _speakTimer = null;
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.rate = 0.95; utt.pitch = 1.0;
+      speechSynthesis.speak(utt);
+    }, 60);
+  } else {
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.rate = 0.95; utt.pitch = 1.0;
+    speechSynthesis.speak(utt);
+  }
 }
 
 function toggleMute() {
