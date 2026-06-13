@@ -22,15 +22,19 @@ public class UnityBridgeService : BackgroundService
 
     private ClientWebSocket? _ws;
     private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
-    private bool _connectedToUnity = false;
-    private bool _joinAllowed      = false;
+    private bool   _connectedToUnity = false;
+    private bool   _joinAllowed      = false;
+    private string _currentPhase     = "mainmenu";
 
     /// <summary>True while the WebSocket connection to Unity's PlayerWebSocketServer is open.</summary>
     public bool IsConnectedToUnity => _connectedToUnity;
 
+    /// <summary>Last game phase received from Unity (e.g. "lobby", "playing", "ended").</summary>
+    public string CurrentPhase => _currentPhase;
+
     /// <summary>
-    /// True when Unity is reachable AND in a phase that accepts new players
-    /// (Lobby or Playing).  Phone clients should gate the join button on this.
+    /// True when Unity is reachable AND in Lobby (accepting new players).
+    /// Phone clients gate the join button on this.
     /// </summary>
     public bool IsGameReady => _connectedToUnity && _joinAllowed;
 
@@ -185,15 +189,19 @@ public class UnityBridgeService : BackgroundService
                 case "phase_changed":
                 {
                     string? phase = GetString(doc.RootElement, "phase");
-                    // Lobby and Playing both accept player joins (Playing allows reconnects).
-                    bool nowAllowed = phase == "lobby" || phase == "playing";
+                    _currentPhase = phase ?? "mainmenu";
+                    // Only Lobby allows new players to join; Playing and other phases lock the button.
+                    bool nowAllowed = phase == "lobby";
                     if (nowAllowed != _joinAllowed)
                     {
                         _joinAllowed = nowAllowed;
-                        _logger.LogInformation("[Bridge] phase_changed → {phase}, joinAllowed={a}", phase, nowAllowed);
-                        await _hub.Clients.All.SendAsync(
-                            nowAllowed ? "ServerConnected" : "ServerNotReady",
-                            CancellationToken.None);
+                        // Use distinct "GameInProgress" event for playing so the client can
+                        // grey the button without forcibly redirecting mid-game players.
+                        string evt = nowAllowed ? "ServerConnected"
+                                   : phase == "playing" ? "GameInProgress"
+                                   : "ServerNotReady";
+                        _logger.LogInformation("[Bridge] phase_changed → {phase}, event={evt}", phase, evt);
+                        await _hub.Clients.All.SendAsync(evt, CancellationToken.None);
                     }
                     else
                     {

@@ -28,7 +28,7 @@ app.MapGet("/api/serverip", () =>
 // Lightweight pre-join poll: phone checks this every 2 s so the join button
 // reflects the real Unity-bridge state before the user has connected SignalR.
 app.MapGet("/api/server-ready", (UnityBridgeService bridge) =>
-    Results.Ok(new { ready = bridge.IsGameReady }));
+    Results.Ok(new { ready = bridge.IsGameReady, phase = bridge.CurrentPhase }));
 
 // Fan-out MJPEG proxy: one connection to the robot, shared between all subscribers
 // (phone player + spectator display).  The robot always sees exactly one HTTP client.

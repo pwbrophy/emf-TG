@@ -310,6 +310,16 @@ public class PlayerWebSocketServer : MonoBehaviour
             return;
         }
 
+        // During Playing, only allow reconnects for players already in the game.
+        // New joins (including players who were kicked for not having a tank) are rejected.
+        if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing && !alreadyListed)
+        {
+            string reason = EscapeJson("Game is in progress. Please wait for the next game.");
+            BroadcastRaw("{\"cmd\":\"join_rejected\",\"connectionId\":\"" + EscapeJson(connId) + "\",\"reason\":\"" + reason + "\"}");
+            Debug.Log("[PlayerWS] Rejected new join during Playing: " + name);
+            return;
+        }
+
         _connToPlayer[connId] = name;
         if (_sessionToConns.TryGetValue(sessionId, out var conns)) conns.Add(connId);
 
@@ -322,6 +332,66 @@ public class PlayerWebSocketServer : MonoBehaviour
         // phone transitions to the playing screen without waiting for the next phase change.
         if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing)
             SendGameStarted(connId, name);
+
+        BroadcastPlayerList();
+        BroadcastRobotList();
+    }
+
+    /// <summary>
+    /// Sends every player who has no robot assignment back to the join screen,
+    /// then removes them from active state. Called just before StartGame().
+    /// </summary>
+    public void KickUnassignedPlayers()
+    {
+        var dir     = ServiceLocator.RobotDirectory;
+        var players = ServiceLocator.Players;
+        if (dir == null || players == null) return;
+
+        // Build the set of player names that DO have a robot
+        var assignedPlayers = new HashSet<string>();
+        foreach (var robot in dir.GetAll())
+            if (!string.IsNullOrEmpty(robot.AssignedPlayer))
+                assignedPlayers.Add(robot.AssignedPlayer);
+
+        // Collect names of players without a robot
+        var toKick = new List<string>();
+        foreach (var p in players.GetAll())
+            if (!assignedPlayers.Contains(p.Name))
+                toKick.Add(p.Name);
+
+        if (toKick.Count == 0) return;
+
+        string kickReason = EscapeJson("Game is starting — you are not assigned to a tank. Please wait for the next game.");
+
+        foreach (string playerName in toKick)
+        {
+            // Kick all active connections for this player
+            var connsToRemove = new List<string>();
+            foreach (var kvp in _connToPlayer)
+                if (kvp.Value == playerName)
+                    connsToRemove.Add(kvp.Key);
+
+            foreach (string connId in connsToRemove)
+            {
+                BroadcastRaw("{\"cmd\":\"join_rejected\"" +
+                             ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
+                             ",\"reason\":\""        + kickReason         + "\"}");
+                _connToPlayer.Remove(connId);
+            }
+
+            // Remove from PlayersService (find index fresh each iteration as list shifts)
+            var pl = players.GetAll();
+            for (int i = 0; i < pl.Count; i++)
+            {
+                if (pl[i].Name == playerName)
+                {
+                    players.RemovePlayerAt(i);
+                    break;
+                }
+            }
+
+            Debug.Log("[PlayerWS] Kicked unassigned player: " + playerName);
+        }
 
         BroadcastPlayerList();
         BroadcastRobotList();

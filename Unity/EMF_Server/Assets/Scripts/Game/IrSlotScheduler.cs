@@ -18,10 +18,33 @@ public class IrSlotScheduler : MonoBehaviour
         ServiceLocator.IrSlotScheduler = this;
     }
 
+    private void OnEnable()
+    {
+        var flow = ServiceLocator.GameFlow;
+        if (flow != null) flow.OnPhaseChanged += OnPhaseChanged;
+    }
+
+    private void OnDisable()
+    {
+        var flow = ServiceLocator.GameFlow;
+        if (flow != null) flow.OnPhaseChanged -= OnPhaseChanged;
+    }
+
     private void OnDestroy()
     {
         if (ServiceLocator.IrSlotScheduler == this)
             ServiceLocator.IrSlotScheduler = null;
+    }
+
+    private void OnPhaseChanged(GamePhase phase)
+    {
+        if (phase == GamePhase.Lobby || phase == GamePhase.Playing)
+        {
+            StopAllCoroutines();
+            _queue.Clear();
+            _busy = false;
+            Debug.Log($"[IrHs] Reset on phase → {phase}");
+        }
     }
 
     public void EnqueueFire(string shooterId)

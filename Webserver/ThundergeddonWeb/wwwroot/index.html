@@ -847,6 +847,11 @@ let fireCooldownPauseLeft  = 0;   // ms remaining when paused
 let _videoWs = null;
 
 // ── Join-button state helpers ──────────────────────────────────────────────
+// Tracks whether the lobby is currently open (Lobby phase). Updated by SignalR
+// events and the pre-join poll. Used to guard JoinRejected from re-enabling the
+// button when a game is already in progress.
+let _lobbyOpen = false;
+
 function setJoinReady() {
   const btn = document.getElementById('join-btn');
   btn.textContent = 'JOIN GAME';
@@ -856,6 +861,12 @@ function setJoinReady() {
 function setJoinWaiting() {
   const btn = document.getElementById('join-btn');
   btn.textContent = 'WAITING FOR SERVER';
+  btn.disabled = true;
+  btn.classList.add('btn-waiting');
+}
+function setJoinGameInProgress() {
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'GAME IN PROGRESS';
   btn.disabled = true;
   btn.classList.add('btn-waiting');
 }
@@ -871,7 +882,12 @@ function startServerPoll() {
     if (connection) return; // game connection active — SignalR events handle state
     fetch('/api/server-ready')
       .then(r => r.json())
-      .then(d => { if (d.ready) setJoinReady(); else setJoinWaiting(); })
+      .then(d => {
+        _lobbyOpen = d.ready;
+        if (d.ready)             setJoinReady();
+        else if (d.phase === 'playing') setJoinGameInProgress();
+        else                     setJoinWaiting();
+      })
       .catch(() => {}); // ignore network errors — button stays as-is
   }
   poll(); // immediate check on call
@@ -1065,22 +1081,35 @@ function buildConnection() {
   conn.on('FireResult',    text    => showFireToast(text));
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
-  // Unity not reachable — show grey button; keep SignalR alive for ServerConnected.
+  // Rejected join (name taken, or game in progress for kicked players).
+  // Only re-enable the button if the lobby is currently open; otherwise keep it grey.
   conn.on('JoinRejected', reason => {
     dbg('JoinRejected: ' + reason);
     setStatus(reason, true);
-    setJoinReady();
+    if (_lobbyOpen) setJoinReady(); else setJoinGameInProgress();
     showScreen('screen-join');
   });
+  // Unity in a non-lobby, non-playing phase (MainMenu / Ended) — grey button.
   conn.on('ServerNotReady', () => {
     dbg('SignalR: ServerNotReady');
+    _lobbyOpen = false;
     setJoinWaiting();
-    showScreen('screen-join');
+    if (!document.getElementById('screen-playing').classList.contains('active'))
+      showScreen('screen-join');
     setStatus('Waiting for game server…', false);
+  });
+  // Game is running — grey button; don't redirect players who are already playing.
+  conn.on('GameInProgress', () => {
+    dbg('SignalR: GameInProgress');
+    _lobbyOpen = false;
+    setJoinGameInProgress();
+    if (!document.getElementById('screen-playing').classList.contains('active'))
+      setStatus('Game in progress. Please wait for the next game.', false);
   });
   // Unity (re-)connected — enable button; auto-rejoin if the phone was waiting.
   conn.on('ServerConnected', () => {
     dbg('SignalR: ServerConnected');
+    _lobbyOpen = true;
     setJoinReady();
     if (document.getElementById('screen-join').classList.contains('active') && myName) {
       setStatus('Game server ready — joining…', false);
