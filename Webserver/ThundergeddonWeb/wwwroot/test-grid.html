@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Thundergeddon – Test Grid</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0d0d14;
+      color: #e8e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      background: #111120;
+      border-bottom: 1px solid #2e2e50;
+      flex-shrink: 0;
+    }
+
+    #toolbar h1 {
+      font-size: 0.95rem;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      background: linear-gradient(135deg, #ff4d1c, #ff8c00);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-right: 4px;
+    }
+
+    .btn {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+    }
+    .btn:active { opacity: 0.8; }
+    .btn-primary   { background: #ff4d1c; color: #fff; }
+    .btn-secondary { background: #2e2e50; color: #e8e8f0; }
+
+    #toolbar-right {
+      margin-left: auto;
+      font-size: 0.78rem;
+      color: #6b6b90;
+    }
+
+    #grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 3px;
+      padding: 3px;
+      overflow: hidden;
+    }
+
+    .cell {
+      display: flex;
+      flex-direction: column;
+      background: #1a1a28;
+      border: 1px solid #2e2e50;
+      border-radius: 5px;
+      overflow: hidden;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .cell-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      background: #0d0d14;
+      border-bottom: 1px solid #2e2e50;
+      flex-shrink: 0;
+      height: 28px;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #2e2e50;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status-dot.pending { background: #ff8c00; }
+    .status-dot.joined  { background: #22cc55; }
+
+    .player-num  { font-size: 0.7rem; color: #6b6b90; font-weight: 700; flex-shrink: 0; }
+    .player-name { font-size: 0.82rem; font-weight: 700; color: #ff8c00; flex: 1; }
+
+    .conn-btn {
+      padding: 2px 9px;
+      border: none;
+      border-radius: 4px;
+      background: #ff4d1c;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .conn-btn:active  { opacity: 0.8; }
+    .conn-btn:disabled { background: #2e2e50; color: #6b6b90; cursor: default; }
+    .conn-btn.joined   { background: #2a7a2a; }
+
+    iframe {
+      flex: 1;
+      border: none;
+      width: 100%;
+      min-height: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>THUNDERGEDDON TEST GRID</h1>
+  <button class="btn btn-primary"   onclick="connectAll()">Connect All</button>
+  <button class="btn btn-secondary" onclick="rerollNames()">New Names</button>
+  <button class="btn btn-secondary" onclick="reloadAll()">Reload All</button>
+  <span id="toolbar-right">6 players · same origin · all share the server</span>
+</div>
+
+<div id="grid"></div>
+
+<script>
+// ── Name pool ────────────────────────────────────────────────────────────────
+const NAME_POOL = [
+  'Blaze','Turbo','Nitro','Thunder','Viper','Storm',
+  'Ace','Bolt','Flash','Rex','Gunner','Shadow',
+  'Iron','Steel','Diesel','Hawk','Wolf','Bravo',
+  'Delta','Foxtrot','Kilo','Oscar','Zulu','Tank',
+];
+
+let playerNames = [];
+let connecting  = Array(6).fill(false);
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickNames() {
+  playerNames = shuffle(NAME_POOL).slice(0, 6);
+}
+
+// ── Grid builder ─────────────────────────────────────────────────────────────
+function buildGrid() {
+  connecting = Array(6).fill(false);
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+
+  for (let i = 0; i < 6; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.id = 'cell-' + i;
+    cell.innerHTML = `
+      <div class="cell-header">
+        <div class="status-dot" id="dot-${i}"></div>
+        <span class="player-num">P${i + 1}</span>
+        <span class="player-name" id="name-label-${i}">${playerNames[i]}</span>
+        <button class="conn-btn" id="conn-btn-${i}" onclick="connectPlayer(${i})">Connect</button>
+      </div>
+      <iframe id="frame-${i}" src="/"></iframe>
+    `;
+    grid.appendChild(cell);
+    wireFrameLoad(i);
+  }
+}
+
+// Pre-fill name as soon as the iframe finishes loading.
+function wireFrameLoad(i) {
+  const frame = document.getElementById('frame-' + i);
+  frame.addEventListener('load', () => {
+    try {
+      const input = frame.contentDocument.getElementById('name-input');
+      if (input) input.value = playerNames[i];
+    } catch (_) {}
+  });
+}
+
+// ── Per-player connect ────────────────────────────────────────────────────────
+function connectPlayer(i) {
+  if (connecting[i]) return;
+  connecting[i] = true;
+
+  document.getElementById('dot-' + i).className  = 'status-dot pending';
+  const btn = document.getElementById('conn-btn-' + i);
+  btn.textContent = '…';
+  btn.disabled    = true;
+
+  function tryJoin() {
+    try {
+      const doc = document.getElementById('frame-' + i).contentDocument;
+      if (!doc || doc.readyState !== 'complete') { setTimeout(tryJoin, 300); return; }
+
+      // If already in lobby or playing, just mark green.
+      const lobby   = doc.getElementById('screen-lobby');
+      const playing = doc.getElementById('screen-playing');
+      if ((lobby   && lobby.classList.contains('active')) ||
+          (playing && playing.classList.contains('active'))) {
+        markJoined(i);
+        return;
+      }
+
+      // Ensure name is set (load handler may have run, but double-check).
+      const input = doc.getElementById('name-input');
+      if (input) input.value = playerNames[i];
+
+      const joinBtn = doc.getElementById('join-btn');
+      if (!joinBtn) { setTimeout(tryJoin, 300); return; }
+
+      if (!joinBtn.disabled) {
+        joinBtn.click();
+        markJoined(i);
+      } else {
+        setTimeout(tryJoin, 400);
+      }
+    } catch (_) {
+      setTimeout(tryJoin, 500);
+    }
+  }
+
+  tryJoin();
+}
+
+function markJoined(i) {
+  document.getElementById('dot-' + i).className = 'status-dot joined';
+  const btn = document.getElementById('conn-btn-' + i);
+  btn.textContent = 'Joined';
+  btn.classList.add('joined');
+}
+
+// ── Toolbar actions ───────────────────────────────────────────────────────────
+function connectAll() {
+  for (let i = 0; i < 6; i++) connectPlayer(i);
+}
+
+function rerollNames() {
+  pickNames();
+  for (let i = 0; i < 6; i++) {
+    document.getElementById('name-label-' + i).textContent = playerNames[i];
+    try {
+      const input = document.getElementById('frame-' + i).contentDocument.getElementById('name-input');
+      if (input) input.value = playerNames[i];
+    } catch (_) {}
+  }
+}
+
+function reloadAll() {
+  pickNames();
+  buildGrid();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+pickNames();
+buildGrid();
+</script>
+</body>
+</html>

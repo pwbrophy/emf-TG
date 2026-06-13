@@ -6,7 +6,7 @@ using UnityEngine.UI;
 /// <summary>
 /// Displays a scrollable list of player rows. Each row has:
 ///   - Editable name field
-///   - Alliance dropdown (hardcoded: Alliance 1 / Alliance 2)
+///   - Alliance dropdown (hardcoded: Desert Squad / Jungle Squad)
 ///   - Robot dropdown (None + connected robots; exclusive — one player per robot)
 ///   - Remove button
 ///

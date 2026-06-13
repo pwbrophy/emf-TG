@@ -6712,7 +6712,7 @@ GameObject:
   - component: {fileID: 474970823}
   - component: {fileID: 474970822}
   m_Layer: 0
-  m_Name: Alliance 2 Base UIDRow
+  m_Name: Jungle Squad Base UIDRow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -12799,7 +12799,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Alliance 2 Base UID:'
+  m_text: 'Jungle Squad Base UID:'
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 0}
   m_sharedMaterial: {fileID: 0}
@@ -13314,7 +13314,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Alliance 1 Base UID:'
+  m_text: 'Desert Squad Base UID:'
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 0}
   m_sharedMaterial: {fileID: 0}
@@ -26759,7 +26759,7 @@ GameObject:
   - component: {fileID: 1762279131}
   - component: {fileID: 1762279130}
   m_Layer: 0
-  m_Name: Alliance 1 Base UIDRow
+  m_Name: Desert Squad Base UIDRow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

@@ -3,17 +3,28 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Tug-of-war team points bar. Blue fills from the left, red from the right.
+/// Tug-of-war team points bar. Desert Squad fills from the left, Jungle Squad from the right.
 /// Subscribes to CapturePointService.OnTeamPointsChanged.
 /// </summary>
 public class TeamPointsBarUI : MonoBehaviour
 {
-    [SerializeField] public RectTransform fill0;   // blue (Alliance 1, left)
-    [SerializeField] public RectTransform fill1;   // red  (Alliance 2, right)
+    [SerializeField] public RectTransform fill0;   // Desert Squad (tan, left)
+    [SerializeField] public RectTransform fill1;   // Jungle Squad (olive, right)
     [SerializeField] public TextMeshProUGUI label0;
     [SerializeField] public TextMeshProUGUI label1;
 
+    static readonly Color C_A0 = new Color(1.000f, 0.835f, 0.580f);  // Desert Squad #FFD594
+    static readonly Color C_A1 = new Color(0.200f, 0.549f, 0.184f);  // Jungle Squad #338C2F
+
     private CapturePointService _cp;
+
+    private void Awake()
+    {
+        if (fill0 != null) { var img = fill0.GetComponent<Image>(); if (img != null) img.color = C_A0; }
+        if (fill1 != null) { var img = fill1.GetComponent<Image>(); if (img != null) img.color = C_A1; }
+        if (label0 != null) label0.color = C_A0;
+        if (label1 != null) label1.color = C_A1;
+    }
 
     private void OnEnable()
     {
@@ -54,7 +65,7 @@ public class TeamPointsBarUI : MonoBehaviour
             fill1.offsetMin = Vector2.zero;
             fill1.offsetMax = Vector2.zero;
         }
-        if (label0 != null) label0.text = $"ALLIANCE 1 — {pts0} PTS";
-        if (label1 != null) label1.text = $"{pts1} PTS — ALLIANCE 2";
+        if (label0 != null) label0.text = $"DESERT SQUAD — {pts0} PTS";
+        if (label1 != null) label1.text = $"{pts1} PTS — JUNGLE SQUAD";
     }
 }

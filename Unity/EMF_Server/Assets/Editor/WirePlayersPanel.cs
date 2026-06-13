@@ -187,7 +187,7 @@ public static class WirePlayersPanel
 
         // Alliance Dropdown
         var alliGO = MakeDropdown("AllianceDropdown", root.transform, font,
-                                  new List<string> { "Alliance 1", "Alliance 2" });
+                                  new List<string> { "Desert Squad", "Jungle Squad" });
         var alliLE = alliGO.AddComponent<LayoutElement>();
         alliLE.preferredWidth = 78; alliLE.minWidth = 78;
         rowUI.allianceDropdown = alliGO.GetComponent<TMP_Dropdown>();

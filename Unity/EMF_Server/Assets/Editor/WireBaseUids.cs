@@ -46,16 +46,16 @@ public static class WireBaseUids
 
         if (a0 == null)
         {
-            a0 = CreateUidInputRow(settingsPanel.transform, "Alliance 1 Base UID");
+            a0 = CreateUidInputRow(settingsPanel.transform, "Desert Squad Base UID");
             SetField(comp, "alliance0BaseField", a0);
-            Debug.Log("[WireBaseUids] Added Alliance 1 base UID row.");
+            Debug.Log("[WireBaseUids] Added Desert Squad base UID row.");
         }
 
         if (a1 == null)
         {
-            a1 = CreateUidInputRow(settingsPanel.transform, "Alliance 2 Base UID");
+            a1 = CreateUidInputRow(settingsPanel.transform, "Jungle Squad Base UID");
             SetField(comp, "alliance1BaseField", a1);
-            Debug.Log("[WireBaseUids] Added Alliance 2 base UID row.");
+            Debug.Log("[WireBaseUids] Added Jungle Squad base UID row.");
         }
 
         EditorUtility.SetDirty(settingsPanel);

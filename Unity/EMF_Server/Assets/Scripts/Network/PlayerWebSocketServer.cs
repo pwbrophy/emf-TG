@@ -21,7 +21,7 @@
 //   {"cmd":"you_are_dead", "connectionId":"abc"}
 //
 // Unity → ASP.NET (broadcast — no connectionId):
-//   {"cmd":"game_over","winnerTeam":"Alliance 1","reason":"elimination"}
+//   {"cmd":"game_over","winnerTeam":"Desert Squad","reason":"elimination"}
 
 using System;
 using System.Collections.Generic;
@@ -285,6 +285,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                 HandleLeave(msg.connectionId);
                 if (_sessionToConns.TryGetValue(sessionId, out var s)) s.Remove(msg.connectionId);
                 BroadcastPlayerList();
+                BroadcastRobotList();
                 break;
 
             case "drive":
@@ -571,6 +572,13 @@ public class PlayerWebSocketServer : MonoBehaviour
         // lookups in IrSlotScheduler stay valid for their (still-connected) robot.
         // SignalR's onreconnected handler will call JoinLobby again automatically.
         if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing) return;
+
+        // Release any robot this player had claimed so it becomes available again.
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir != null)
+            foreach (var robot in dir.GetAll())
+                if (robot.AssignedPlayer == playerName)
+                    dir.ClearAssignedPlayer(robot.RobotId);
 
         var players = ServiceLocator.Players?.GetAll();
         if (players == null) return;

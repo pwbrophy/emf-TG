@@ -13,8 +13,8 @@ public class TeamRosterPanel : MonoBehaviour
 {
     [SerializeField] public RectTransform rowContainer;
 
-    static readonly Color C_BLUE    = new Color(0.29f, 0.62f, 1.00f);
-    static readonly Color C_RED     = new Color(1.00f, 0.42f, 0.21f);
+    static readonly Color C_A0      = new Color(1.000f, 0.835f, 0.580f);  // Desert Squad #FFD594
+    static readonly Color C_A1      = new Color(0.200f, 0.549f, 0.184f);  // Jungle Squad #338C2F
     static readonly Color C_DIM     = new Color(0.40f, 0.40f, 0.40f);
     static readonly Color C_HDR_BG  = new Color(0.07f, 0.07f, 0.07f);
 
@@ -132,8 +132,8 @@ public class TeamRosterPanel : MonoBehaviour
         lbl.transform.SetParent(go.transform, false);
 
         var tmp = lbl.AddComponent<TextMeshProUGUI>();
-        tmp.text             = a == 0 ? "ALLIANCE 1" : "ALLIANCE 2";
-        tmp.color            = a == 0 ? C_BLUE : C_RED;
+        tmp.text             = a == 0 ? "DESERT SQUAD" : "JUNGLE SQUAD";
+        tmp.color            = a == 0 ? C_A0 : C_A1;
         tmp.fontSize         = 10f;
         tmp.fontStyle        = FontStyles.Bold;
         tmp.alignment        = TextAlignmentOptions.MidlineLeft;
@@ -228,7 +228,7 @@ public class TeamRosterPanel : MonoBehaviour
 
     private static Color BarColor(float pct, int alliance)
     {
-        Color full = alliance == 0 ? C_BLUE : C_RED;
+        Color full = alliance == 0 ? C_A0 : C_A1;
         return Color.Lerp(new Color(1f, 0.2f, 0.2f), full, pct);
     }
 
