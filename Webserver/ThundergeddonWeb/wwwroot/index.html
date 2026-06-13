@@ -690,9 +690,15 @@
 <!-- ── Screen 2: Lobby ─────────────────────────────────────────────── -->
 <div id="screen-lobby" class="screen">
   <div class="lobby-header">
-    <div class="waiting-anim"></div>
-    <h2>LOBBY</h2>
-    <p>Waiting for the game to start…</p>
+    <div id="lobby-pick-squad-msg">
+      <h2>LOBBY</h2>
+      <p>Pick a tank below to join a squad</p>
+    </div>
+    <div id="lobby-waiting-msg" style="display:none">
+      <div class="waiting-anim"></div>
+      <h2>LOBBY</h2>
+      <p>Waiting for the game to start…</p>
+    </div>
   </div>
 
   <!-- Unassigned players -->
@@ -710,11 +716,11 @@
   <!-- Desert Squad + Jungle Squad side by side -->
   <div class="lobby-squads">
     <div class="lobby-section">
-      <div class="lobby-section-title" style="color:#b8905a">DESERT SQUAD</div>
+      <div class="lobby-section-title" style="color:#FFD594">DESERT SQUAD</div>
       <div id="lobby-desert"><div class="empty-state">No robots</div></div>
     </div>
     <div class="lobby-section">
-      <div class="lobby-section-title" style="color:#4a7a4a">JUNGLE SQUAD</div>
+      <div class="lobby-section-title" style="color:#338C2F">JUNGLE SQUAD</div>
       <div id="lobby-jungle"><div class="empty-state">No robots</div></div>
     </div>
   </div>
@@ -823,6 +829,7 @@ let isDead      = false;      // true during 5-s explosion — all controls bloc
 let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
 let _deadTimer  = null;       // interval driving the countdown
 let gamePaused  = false;      // true between GamePaused and GameResumed — freezes timer label
+let _rejoinAttempted = false; // prevents poll from re-triggering auto-rejoin
 
 let maxHp       = 100;
 let currentHp   = 100;
@@ -891,9 +898,23 @@ function startServerPoll() {
       .then(r => r.json())
       .then(d => {
         _lobbyOpen = d.ready;
-        if (d.ready)             setJoinReady();
-        else if (d.phase === 'playing') setJoinGameInProgress();
-        else                     setJoinWaiting();
+        if (d.ready) {
+          setJoinReady();
+        } else if (d.phase === 'playing') {
+          // Auto-rejoin once if there's a saved name (page refresh mid-game).
+          const savedName = document.getElementById('name-input').value.trim();
+          if (savedName && !_rejoinAttempted) {
+            _rejoinAttempted = true;
+            setStatus('Rejoining game…', false);
+            joinLobby();
+          } else {
+            setJoinGameInProgress();
+            if (savedName)
+              setStatus('Game in progress — tap to rejoin.', false);
+          }
+        } else {
+          setJoinWaiting();
+        }
       })
       .catch(() => {}); // ignore network errors — button stays as-is
   }
@@ -1028,8 +1049,9 @@ function returnToJoin(message) {
     connection = null;
     old.stop().catch(() => {});
   }
-  isDead     = false;
-  isDeadWalk = false;
+  isDead           = false;
+  isDeadWalk       = false;
+  _rejoinAttempted = false;
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
   joyL = joyR = turretSpeed = 0;
   joystickActive = false;
@@ -1108,13 +1130,17 @@ function buildConnection() {
       showScreen('screen-join');
     setStatus('Waiting for game server…', false);
   });
-  // Game is running — grey button; don't redirect players who are already playing.
+  // Game is running — allow rejoin if name is saved; otherwise grey the button.
   conn.on('GameInProgress', () => {
     dbg('SignalR: GameInProgress');
     _lobbyOpen = false;
     setJoinGameInProgress();
-    if (!document.getElementById('screen-playing').classList.contains('active'))
-      setStatus('Game in progress. Please wait for the next game.', false);
+    if (!document.getElementById('screen-playing').classList.contains('active')) {
+      const savedName = document.getElementById('name-input').value.trim();
+      setStatus(savedName
+        ? 'Game in progress — tap to rejoin.'
+        : 'Game in progress. Please wait for the next game.', false);
+    }
   });
   // Unity (re-)connected — enable button; auto-rejoin if the phone was waiting.
   conn.on('ServerConnected', () => {
@@ -1136,7 +1162,7 @@ function buildConnection() {
     hideReconnectOverlay();
     setStatus('', false);
     const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
-    if (joined && !document.getElementById('screen-playing').classList.contains('active'))
+    if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active'))
       showScreen('screen-lobby');
   });
   conn.onclose(err => {
@@ -1177,7 +1203,7 @@ async function joinLobby() {
     myName = name;
     const joined = await connection.invoke('JoinLobby', name);
     dbg('JoinLobby returned joined=' + joined);
-    if (joined && !document.getElementById('screen-playing').classList.contains('active')) {
+    if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active')) {
       dbg('→ screen-lobby');
       showScreen('screen-lobby');
     } else if (!joined) {
@@ -1227,6 +1253,11 @@ function onLobbyUpdate(players) {
 }
 
 function renderLobby() {
+  // Toggle lobby header based on squad assignment
+  const inSquad = !!myRobotId;
+  document.getElementById('lobby-pick-squad-msg').style.display = inSquad ? 'none' : '';
+  document.getElementById('lobby-waiting-msg').style.display    = inSquad ? ''     : 'none';
+
   // Players without a robot yet
   const unassigned = _playerList.filter(p => {
     const robot = typeof p === 'string' ? '' : (p.robot ?? '');
@@ -1720,7 +1751,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v21</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v22</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
@@ -1822,7 +1853,7 @@ function toggleDbgPanel() {
 }
 
 // ── Log startup info immediately ─────────────────────────────────────────────
-dbg('page load v20');
+dbg('page load v22');
 dbg('UA: ' + navigator.userAgent.slice(0, 80));
 dbg('IS_IOS=' + IS_IOS);
 dbg('signalR type: ' + typeof signalR);

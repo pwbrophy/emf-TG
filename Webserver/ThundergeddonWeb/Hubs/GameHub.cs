@@ -17,12 +17,22 @@ public class GameHub : Hub
     /// <summary>
     /// Returns true if the join was forwarded to Unity, false if Unity is not yet connected.
     /// The client uses the return value to decide whether to show the lobby screen.
+    /// During Playing, the join is forwarded to Unity which accepts reconnects for known
+    /// players and rejects unknown names with join_rejected.
     /// </summary>
     public async Task<bool> JoinLobby(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return false;
 
-        if (!_bridge.IsGameReady)
+        if (!_bridge.IsConnectedToUnity)
+        {
+            await Clients.Caller.SendAsync("ServerNotReady");
+            return false;
+        }
+
+        // Allow joins in Lobby (normal) and Playing (reconnect after page refresh).
+        // All other phases (MainMenu, Ended) are not joinable.
+        if (!_bridge.IsGameReady && _bridge.CurrentPhase != "playing")
         {
             await Clients.Caller.SendAsync("ServerNotReady");
             return false;
@@ -97,8 +107,10 @@ public class GameHub : Hub
     /// </summary>
     public override async Task OnConnectedAsync()
     {
-        await Clients.Caller.SendAsync(
-            _bridge.IsGameReady ? "ServerConnected" : "ServerNotReady");
+        string evt = _bridge.IsGameReady        ? "ServerConnected"
+                   : _bridge.CurrentPhase == "playing" ? "GameInProgress"
+                   : "ServerNotReady";
+        await Clients.Caller.SendAsync(evt);
         await base.OnConnectedAsync();
     }
 
