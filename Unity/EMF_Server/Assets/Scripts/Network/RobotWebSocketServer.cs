@@ -659,6 +659,19 @@ public class RobotWebSocketServer : MonoBehaviour
         return ok;
     }
 
+    public bool SendCountdownTick(string robotId, int count, int total)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"countdown_tick\",\"count\":{count},\"total\":{total}}}";
+        return SendJsonToRobot(robotId, json);
+    }
+
+    public bool SendGameStartFanfare(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        return SendJsonToRobot(robotId, "{\"cmd\":\"game_start_fanfare\"}");
+    }
+
     // ===== Internals =====
 
     private WebSocketSharp.Server.WebSocketSessionManager ServiceSessions()

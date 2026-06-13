@@ -210,6 +210,22 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "countdown_start":
+                {
+                    int total = GetInt(doc.RootElement, "total", 5);
+                    await _hub.Clients.All.SendAsync("CountdownStarted", total);
+                    _logger.LogInformation("[Bridge] countdown_start total={total}", total);
+                    break;
+                }
+
+                case "countdown_tick":
+                {
+                    int count = GetInt(doc.RootElement, "count", 1);
+                    int total = GetInt(doc.RootElement, "total", 5);
+                    await _hub.Clients.All.SendAsync("CountdownTick", count, total);
+                    break;
+                }
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;

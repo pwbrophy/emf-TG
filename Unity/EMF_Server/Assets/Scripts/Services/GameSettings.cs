@@ -42,6 +42,10 @@ public class GameSettings : MonoBehaviour
     public string[] CentrePointUids = new string[0];
     public string[] SouthPointUids  = new string[0];
 
+    [Header("Countdown")]
+    [Tooltip("Seconds to count down before the match begins. Default 5.")]
+    public int CountdownDuration = 5;
+
     [Header("Phone Controls")]
     [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]
     public float SlowTurretSpeed = 0.4f;
@@ -94,6 +98,7 @@ public class GameSettings : MonoBehaviour
                 maxPlayers               = MaxPlayers,
                 maxTeamPoints            = MaxTeamPoints,
                 teamPointsPerKill        = TeamPointsPerKill,
+                countdownDuration        = CountdownDuration,
                 slowTurretSpeed          = SlowTurretSpeed,
                 driveAcceleration        = DriveAcceleration,
                 driveDeceleration        = DriveDeceleration,
@@ -127,6 +132,7 @@ public class GameSettings : MonoBehaviour
             if (data.maxPlayers               > 0) MaxPlayers               = data.maxPlayers;
             if (data.maxTeamPoints            > 0) MaxTeamPoints            = data.maxTeamPoints;
             if (data.teamPointsPerKill        > 0) TeamPointsPerKill        = data.teamPointsPerKill;
+            if (data.countdownDuration        > 0) CountdownDuration        = data.countdownDuration;
             if (data.slowTurretSpeed          > 0) SlowTurretSpeed          = data.slowTurretSpeed;
             // Physics params are valid at zero, so always restore them.
             DriveAcceleration  = data.driveAcceleration;
@@ -156,6 +162,7 @@ public class GameSettings : MonoBehaviour
         public int   maxPlayers;
         public int   maxTeamPoints;
         public int   teamPointsPerKill;
+        public int   countdownDuration;
         public float slowTurretSpeed;
         public float driveAcceleration;
         public float driveDeceleration;

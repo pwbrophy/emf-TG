@@ -274,6 +274,24 @@ public class RobotDirectory : IRobotDirectory
         OnRobotUpdated?.Invoke(r);
     }
 
+    public void ClearAllAssignedPlayers()
+    {
+        foreach (var r in _byId.Values)
+        {
+            if (!string.IsNullOrEmpty(r.AssignedPlayer))
+            {
+                r.AssignedPlayer = null;
+                OnRobotUpdated?.Invoke(r);
+            }
+        }
+        // Clear preferredPlayer in memory only — do NOT call SaveToDisk() here.
+        // If called before robots have connected, _savedById is empty and SaveToDisk
+        // would overwrite robots.json with an empty list, losing all alliance preferences.
+        // The LoadFromDisk path already strips preferredPlayer on restart.
+        foreach (var rec in _savedById.Values)
+            rec.preferredPlayer = null;
+    }
+
     public bool Remove(string robotId)
     {
         if (!_byId.ContainsKey(robotId))
@@ -369,6 +387,7 @@ public class RobotDirectory : IRobotDirectory
                     if (string.IsNullOrWhiteSpace(rec.id))
                         continue;
 
+                    rec.preferredPlayer = null; // player names are ephemeral; never carry over across restarts
                     _savedById[rec.id] = rec;
                 }
             }

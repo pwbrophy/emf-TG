@@ -12,4 +12,5 @@ public static class ServiceLocator
     public static GameSettings         GameSettings;   // Set by AppBootstrap
     public static MatchTimer           MatchTimer;     // Set by AppBootstrap
     public static CapturePointService  CapturePoints;  // Set by AppBootstrap
+    public static CountdownController  Countdown;      // Set by AppBootstrap
 }

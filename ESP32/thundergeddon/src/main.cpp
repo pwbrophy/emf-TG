@@ -470,6 +470,108 @@ static void updateBuzzerCaptureEffect(uint32_t now)
     ledcWrite(BUZZER_LEDC_CH, pipOff < PIP_ON ? CAPTURE_PIP_DUTIES[pipIdx] : 0);
 }
 
+// ---- Buzzer countdown tick effect ----
+// Chunky noise pulse with fade-in → sustain → fade-out envelope.
+// baseFreq and targetDuty both rise each tick (pitch and volume increase toward game start).
+static uint8_t  g_buzzerCountdownPhase      = 0; // 0=off, 1=playing
+static uint32_t g_buzzerCountdownStart      = 0;
+static uint32_t g_buzzerCountdownBaseFreq   = 100;
+static uint8_t  g_buzzerCountdownTargetDuty = 100;
+
+static const uint32_t CDOWN_FADEIN_MS  = 20u;
+static const uint32_t CDOWN_SUSTAIN_MS = 15u;
+static const uint32_t CDOWN_FADEOUT_MS = 40u;
+
+static void startBuzzerCountdownTick(uint32_t baseFreq, uint8_t targetDuty)
+{
+    g_buzzerActive              = false;
+    g_buzzerCountdownBaseFreq   = baseFreq;
+    g_buzzerCountdownTargetDuty = targetDuty;
+    ledcSetup(BUZZER_LEDC_CH, baseFreq, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    g_buzzerCountdownPhase = 1;
+    g_buzzerCountdownStart = millis();
+}
+
+static void updateBuzzerCountdownEffect(uint32_t now)
+{
+    if (g_buzzerCountdownPhase == 0) return;
+
+    uint32_t elapsed  = now - g_buzzerCountdownStart;
+    const uint32_t P2 = CDOWN_FADEIN_MS;
+    const uint32_t P3 = CDOWN_FADEIN_MS + CDOWN_SUSTAIN_MS;
+    const uint32_t PE = CDOWN_FADEIN_MS + CDOWN_SUSTAIN_MS + CDOWN_FADEOUT_MS;
+
+    if (elapsed >= PE) {
+        silenceBuzzer();
+        g_buzzerCountdownPhase = 0;
+        return;
+    }
+
+    uint8_t duty;
+    if (elapsed < P2) {
+        duty = (uint8_t)((float)g_buzzerCountdownTargetDuty * (float)elapsed / (float)CDOWN_FADEIN_MS);
+    } else if (elapsed < P3) {
+        duty = g_buzzerCountdownTargetDuty;
+    } else {
+        float t = (float)(elapsed - P3) / (float)CDOWN_FADEOUT_MS;
+        duty = (uint8_t)((float)g_buzzerCountdownTargetDuty * (1.0f - t));
+    }
+    ledcWrite(BUZZER_LEDC_CH, duty);
+}
+
+// ---- Buzzer game-start fanfare ----
+// 4 ascending pips: 500 → 700 → 1000 → 1400 Hz, 90 ms on / 20 ms off per pip.
+static uint8_t  g_buzzerFanfarePhase = 0; // 0=off, 1=playing
+static uint32_t g_buzzerFanfareStart = 0;
+static uint8_t  g_buzzerFanfarePip   = 255;
+
+static const uint32_t FANFARE_PIP_FREQS[4]  = {500, 700, 1000, 1400};
+static const uint8_t  FANFARE_PIP_DUTIES[4] = {140, 155, 170,  200};
+
+static void startBuzzerFanfareEffect()
+{
+    g_buzzerActive          = false;
+    g_buzzerFirePhase       = 0;
+    g_buzzerHitPhase        = 0;
+    g_buzzerHealPhase       = 0;
+    g_buzzerDeathPhase      = 0;
+    g_buzzerCapturePhase    = 0;
+    g_buzzerCountdownPhase  = 0;
+    ledcSetup(BUZZER_LEDC_CH, FANFARE_PIP_FREQS[0], 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    g_buzzerFanfarePhase = 1;
+    g_buzzerFanfareStart = millis();
+    g_buzzerFanfarePip   = 255;
+}
+
+static void updateBuzzerFanfareEffect(uint32_t now)
+{
+    if (g_buzzerFanfarePhase == 0) return;
+
+    const uint32_t PIP_SLOT = 110u; // 90 ms on + 20 ms off
+    const uint32_t PIP_ON   = 90u;
+    uint32_t elapsed = now - g_buzzerFanfareStart;
+
+    if (elapsed >= 4u * PIP_SLOT) {
+        silenceBuzzer();
+        g_buzzerFanfarePhase = 0;
+        return;
+    }
+
+    uint8_t  pipIdx = (uint8_t)(elapsed / PIP_SLOT);
+    uint32_t pipOff = elapsed % PIP_SLOT;
+
+    if (pipIdx != g_buzzerFanfarePip) {
+        g_buzzerFanfarePip = pipIdx;
+        ledcSetup(BUZZER_LEDC_CH, FANFARE_PIP_FREQS[pipIdx], 8);
+        ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    }
+    ledcWrite(BUZZER_LEDC_CH, pipOff < PIP_ON ? FANFARE_PIP_DUTIES[pipIdx] : 0);
+}
+
 // ---- OTA audio/LED callbacks ----
 
 static void otaProgressCb(uint8_t pct)
@@ -826,6 +928,31 @@ static void handleWsText(const String& s)
         return;
     }
 
+    // ---- Pre-game countdown ----
+
+    if (strcmp(cmd, "countdown_tick") == 0) {
+        int count = doc["count"] | 1;
+        int total = doc["total"] | 5;
+
+        // LED bar dims one step per second: show count/total fraction
+        leds.setHp(count, total);
+
+        // All bloops the same low pitch; last tick (count=1) jumps to a higher "beeep"
+        uint32_t baseFreq   = (count == 1) ? 350u : 110u;
+        uint8_t  targetDuty = (count == 1) ? 128u :  90u; // last is slightly louder
+        startBuzzerCountdownTick(baseFreq, targetDuty);
+        Serial.printf("[COUNTDOWN] tick count=%d/%d freq=%u duty=%u\n", count, total, baseFreq, targetDuty);
+        return;
+    }
+
+    if (strcmp(cmd, "game_start_fanfare") == 0) {
+        // Restore full HP display (game starts at full HP)
+        leds.setHp(100, 100);
+        startBuzzerFanfareEffect();
+        Serial.println("[COUNTDOWN] game_start_fanfare");
+        return;
+    }
+
 }
 
 // ---- WebSocket — connect (blocking until handshake completes or fails) ----
@@ -1039,11 +1166,13 @@ void loop()
 
     // ---- Buzzer ----
     updateBuzzer(now);
+    updateBuzzerCountdownEffect(now);
     updateBuzzerFireEffect(now);
     updateBuzzerHitEffect(now);
     updateBuzzerHealEffect(now);
     updateBuzzerDeathEffect(now);
     updateBuzzerCaptureEffect(now);
+    updateBuzzerFanfareEffect(now);
 
     // ---- RFID tag scan ----
     {

@@ -25,6 +25,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 using WebSocketSharp;
@@ -397,6 +398,58 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastRobotList();
     }
 
+    /// <summary>
+    /// Sends unassigned players back to the join screen without removing them from state.
+    /// Called after StartGame() to clean up any remaining players with no robot (non-kick path).
+    /// </summary>
+    public void RedirectUnassignedPlayers()
+    {
+        var dir     = ServiceLocator.RobotDirectory;
+        var players = ServiceLocator.Players;
+        if (dir == null || players == null) return;
+
+        var assigned = new HashSet<string>();
+        foreach (var r in dir.GetAll())
+            if (!string.IsNullOrEmpty(r.AssignedPlayer))
+                assigned.Add(r.AssignedPlayer);
+
+        string reason = EscapeJson("Game is starting — you are not assigned to a tank. Please wait for the next game.");
+
+        foreach (var kvp in _connToPlayer.ToList())
+        {
+            string connId     = kvp.Key;
+            string playerName = kvp.Value;
+            if (assigned.Contains(playerName)) continue;
+
+            BroadcastRaw("{\"cmd\":\"join_rejected\"" +
+                         ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
+                         ",\"reason\":\""        + reason             + "\"}");
+            Debug.Log("[PlayerWS] Redirected unassigned player: " + playerName);
+        }
+    }
+
+    /// <summary>
+    /// Resets player and robot assignment state for a fresh lobby session.
+    /// Sends all currently-connected phones back to the join screen, then clears
+    /// the player list and all robot assignments.
+    /// </summary>
+    void ResetForNewGame()
+    {
+        string reason = EscapeJson("A new lobby has opened. Please rejoin to play.");
+        foreach (var connId in _connToPlayer.Keys.ToList())
+        {
+            BroadcastRaw("{\"cmd\":\"join_rejected\"" +
+                         ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
+                         ",\"reason\":\""        + reason             + "\"}");
+        }
+        _connToPlayer.Clear();
+
+        ServiceLocator.Players?.ClearAll();
+        ServiceLocator.RobotDirectory?.ClearAllAssignedPlayers();
+
+        Debug.Log("[PlayerWS] Reset for new game: players and robot assignments cleared.");
+    }
+
     // Find the first unassigned robot in the player's chosen squad and give it to playerName.
     // Falls back to any unassigned robot if no squad match exists.
     void TryAssignFreeRobotToPlayer(string playerName, int alliance = -1)
@@ -620,6 +673,8 @@ public class PlayerWebSocketServer : MonoBehaviour
             // Reset all robot LED displays to full HP bar immediately so the
             // dead-blink effect clears as soon as the lobby opens.
             ResetAllRobotLeds();
+            // Reset player and assignment state for a fresh game session.
+            ResetForNewGame();
         }
     }
 
@@ -1231,6 +1286,18 @@ public class PlayerWebSocketServer : MonoBehaviour
         float slow = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.4f;
         string json = "{\"cmd\":\"turret_settings\",\"slowSpeed\":" + slow.ToString("F3") + "}";
         BroadcastRaw(json);
+    }
+
+    public void BroadcastCountdownStart(int total)
+    {
+        BroadcastRaw("{\"cmd\":\"countdown_start\",\"total\":" + total + "}");
+        Debug.Log("[PlayerWS] countdown_start total=" + total);
+    }
+
+    public void BroadcastCountdownTick(int count, int total)
+    {
+        BroadcastRaw("{\"cmd\":\"countdown_tick\",\"count\":" + count + ",\"total\":" + total + "}");
+        Debug.Log("[PlayerWS] countdown_tick count=" + count + "/" + total);
     }
 
     void BroadcastRaw(string json)

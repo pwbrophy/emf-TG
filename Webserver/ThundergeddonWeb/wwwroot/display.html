@@ -129,6 +129,20 @@
   #status-banner { position: fixed; bottom: 10px; right: 10px; background: #222;
     color: #888; font-size: 0.75em; padding: 4px 10px; border-radius: 4px; z-index: 20; }
 
+  /* Countdown overlay */
+  #countdown-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.94);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; z-index: 60; pointer-events: none; }
+  #countdown-overlay.hidden { display: none; }
+  #countdown-number { font-size: 35vmin; font-weight: 900; color: #fff; line-height: 1;
+    text-shadow: 0 0 80px rgba(240,192,64,0.95); animation: countpulse 0.5s cubic-bezier(0.22,1,0.36,1); }
+  #countdown-get-ready { font-size: 2em; letter-spacing: 5px; text-transform: uppercase;
+    color: #f0c040; font-weight: 700; }
+  @keyframes countpulse {
+    from { transform: scale(1.6); opacity: 0.4; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
   /* ── FPV overlay ────────────────────────────────────────────────── */
   #fpv-overlay { position: fixed; inset: 0; background: #000; z-index: 25; display: none;
     flex-direction: column; }
@@ -260,6 +274,11 @@
   </div>
 </div>
 
+<div id="countdown-overlay" class="hidden">
+  <div id="countdown-number">5</div>
+  <div id="countdown-get-ready">GET READY!</div>
+</div>
+
 <div id="paused-overlay" class="hidden">
   <div id="paused-title">&#9646;&#9646; PAUSED</div>
   <div id="paused-sub">Game paused by operator</div>
@@ -334,6 +353,20 @@ conn.on('GameOver', data => {
     : `Game over!`;
   addEvent(msg);
   speak(msg);
+});
+
+conn.on('CountdownStarted', total => {
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = total;
+  numEl.style.animation = 'none'; numEl.offsetHeight; numEl.style.animation = '';
+  document.getElementById('countdown-overlay').classList.remove('hidden');
+});
+
+conn.on('CountdownTick', (count, total) => {
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = count;
+  numEl.style.animation = 'none'; numEl.offsetHeight; numEl.style.animation = '';
+  speak(count.toString());
 });
 
 conn.on('GamePaused',  () => {
@@ -450,9 +483,17 @@ function applySpectateUpdate(data) {
 
 // ── Apply state update ────────────────────────────────────────────────────
 function applyDisplayUpdate(data) {
+  const wasPlaying = (state.phase === 'playing');
   state = Object.assign(state, data);
+  const nowPlaying = (state.phase === 'playing');
+
   document.getElementById('paused-overlay')
     .classList.toggle('hidden', !state.paused);
+
+  if (!wasPlaying && nowPlaying) {
+    document.getElementById('countdown-overlay').classList.add('hidden');
+    speak('To battle, show no mercy!');
+  }
 
   // Keep FPV HP strip in sync with live robot HP
   if (fpvState.active && data.robots) {

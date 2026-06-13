@@ -12,6 +12,7 @@ public class GameSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField damageField;
     [SerializeField] private TMP_InputField durationField;
     [SerializeField] private TMP_InputField maxTeamPointsField;
+    [SerializeField] private TMP_InputField countdownField;
 
     private GameSettings _settings;
 
@@ -24,11 +25,13 @@ public class GameSettingsPanel : MonoBehaviour
         if (damageField)        damageField.SetTextWithoutNotify(_settings.DamagePerHit.ToString());
         if (durationField)      durationField.SetTextWithoutNotify(_settings.MatchDurationSeconds.ToString("F0"));
         if (maxTeamPointsField) maxTeamPointsField.SetTextWithoutNotify(_settings.MaxTeamPoints.ToString());
+        if (countdownField)     countdownField.SetTextWithoutNotify(_settings.CountdownDuration.ToString());
 
         if (maxHpField)         maxHpField.onValueChanged.AddListener(OnMaxHpChanged);
         if (damageField)        damageField.onValueChanged.AddListener(OnDamageChanged);
         if (durationField)      durationField.onValueChanged.AddListener(OnDurationChanged);
         if (maxTeamPointsField) maxTeamPointsField.onValueChanged.AddListener(OnMaxTeamPointsChanged);
+        if (countdownField)     countdownField.onValueChanged.AddListener(OnCountdownChanged);
     }
 
     private void OnDisable()
@@ -37,6 +40,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (damageField)        damageField.onValueChanged.RemoveListener(OnDamageChanged);
         if (durationField)      durationField.onValueChanged.RemoveListener(OnDurationChanged);
         if (maxTeamPointsField) maxTeamPointsField.onValueChanged.RemoveListener(OnMaxTeamPointsChanged);
+        if (countdownField)     countdownField.onValueChanged.RemoveListener(OnCountdownChanged);
     }
 
     private void OnMaxHpChanged(string v)
@@ -75,6 +79,16 @@ public class GameSettingsPanel : MonoBehaviour
         if (int.TryParse(v, out int n) && n > 0)
         {
             _settings.MaxTeamPoints = n;
+            _settings.SaveToDisk();
+        }
+    }
+
+    private void OnCountdownChanged(string v)
+    {
+        if (_settings == null) return;
+        if (int.TryParse(v, out int n) && n >= 1 && n <= 60)
+        {
+            _settings.CountdownDuration = n;
             _settings.SaveToDisk();
         }
     }

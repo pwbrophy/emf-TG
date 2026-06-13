@@ -94,7 +94,7 @@ public class GameFlowPresenter : MonoBehaviour
 
         if (unassigned.Count == 0)
         {
-            _flow.StartGame();
+            ServiceLocator.Countdown?.TriggerStart(false);
             return;
         }
 
@@ -117,8 +117,7 @@ public class GameFlowPresenter : MonoBehaviour
     void StartGameWithKick()
     {
         if (_confirmOverlay != null) _confirmOverlay.SetActive(false);
-        ServiceLocator.PlayerServer?.KickUnassignedPlayers();
-        _flow?.StartGame();
+        ServiceLocator.Countdown?.TriggerStart(true);
     }
 
     // ── Confirm dialog builder ───────────────────────────────────────────────────

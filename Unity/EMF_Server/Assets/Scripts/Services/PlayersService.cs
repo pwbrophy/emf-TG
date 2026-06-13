@@ -67,6 +67,15 @@ public class PlayersService
         SaveToDisk();
     }
 
+    // Remove all players — called when entering a new lobby session.
+    public void ClearAll()
+    {
+        if (_players.Count == 0) return;
+        _players.Clear();
+        OnChanged?.Invoke();
+        SaveToDisk();
+    }
+
     // Remove a player at a specific index.
     public void RemovePlayerAt(int index)
     {

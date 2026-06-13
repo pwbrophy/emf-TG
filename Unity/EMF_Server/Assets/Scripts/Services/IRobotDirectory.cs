@@ -21,6 +21,7 @@ public interface IRobotDirectory
     void SetCallsign(string robotId, string newCallsign);
     void SetAssignedPlayer(string robotId, string playerName);
     void ClearAssignedPlayer(string robotId);
+    void ClearAllAssignedPlayers();
     void SetPreferredAlliance(string robotId, int alliance);
     void SetFlip(string robotId, bool hflip, bool vflip);
     void SetDriveConfig(string robotId, bool invThrottle, bool invSteer, bool invTurret);

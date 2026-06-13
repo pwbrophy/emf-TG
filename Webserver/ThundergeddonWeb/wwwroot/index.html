@@ -369,30 +369,6 @@
       background: rgba(255,255,255,0.30);
     }
 
-    /* ── Rotate notice (portrait mode) ── */
-    #rotate-notice {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 9999;
-      background: var(--bg);
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      text-align: center;
-      padding: 24px;
-    }
-    /* Only enforce landscape on the playing screen */
-    @media (orientation: portrait) {
-      body.game-active #rotate-notice { display: flex; }
-    }
-    #rotate-notice svg { opacity: 0.6; animation: rotateHint 2s ease-in-out infinite; }
-    @keyframes rotateHint {
-      0%, 100% { transform: rotate(0deg); }
-      50%       { transform: rotate(90deg); }
-    }
-    #rotate-notice p { color: var(--muted); font-size: 1rem; }
 
     /* ── Fire button ── */
     #fire-btn {
@@ -645,9 +621,48 @@
       white-space: nowrap;
     }
     #rfid-toast.visible { opacity: 1; }
+
+    /* ── Countdown overlay ── */
+    #countdown-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.93);
+      z-index: 300;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    #countdown-overlay.active { display: flex; }
+    #countdown-number {
+      font-size: 40vmin;
+      font-weight: 900;
+      color: #fff;
+      line-height: 1;
+      text-shadow: 0 0 60px rgba(255,77,28,0.9);
+      animation: countpulse 0.5s cubic-bezier(0.22,1,0.36,1);
+    }
+    #countdown-label {
+      font-size: 1.3rem;
+      color: var(--muted);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    @keyframes countpulse {
+      from { transform: scale(1.5); opacity: 0.5; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
   </style>
 </head>
 <body>
+
+<!-- ── Countdown overlay ───────────────────────────────────────────── -->
+<div id="countdown-overlay">
+  <div id="countdown-number">5</div>
+  <div id="countdown-label">Get ready!</div>
+</div>
 
 <!-- ── Connection lost overlay ────────────────────────────────────── -->
 <div id="reconnect-overlay">
@@ -659,14 +674,6 @@
 <!-- ── RFID toast ─────────────────────────────────────────────────── -->
 <div id="rfid-toast"></div>
 
-<!-- ── Rotate notice (portrait only) ──────────────────────────────── -->
-<div id="rotate-notice">
-  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="5" y="2" width="14" height="20" rx="2"/>
-    <path d="M12 18h.01"/>
-  </svg>
-  <p>Rotate your device to landscape</p>
-</div>
 
 <!-- ── Screen 1: Join ──────────────────────────────────────────────── -->
 <div id="screen-join" class="screen active">
@@ -990,7 +997,6 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   // Landscape lock only applies during gameplay
-  document.body.classList.toggle('game-active', id === 'screen-playing');
   // Reposition debug panel so it never blocks gameplay controls
   positionDbgPanel(id);
 }
@@ -1035,6 +1041,7 @@ function returnToJoin(message) {
   stopVideoWs();
   const _sc = document.getElementById('stream-canvas');
   _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
+  hideCountdown();
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
   document.getElementById('game-paused-overlay').classList.remove('active');
   gamePaused = false;
@@ -1069,7 +1076,9 @@ function buildConnection() {
 
   conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); onLobbyUpdate(players); });
   conn.on('RobotListUpdate', robots  => { dbg('SignalR: RobotListUpdate ' + robots.length + ' robots'); robotList = robots || []; renderLobby(); });
-  conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); onGameStarted(data); });
+  conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); hideCountdown(); onGameStarted(data); });
+  conn.on('CountdownStarted', total  => { dbg('SignalR: CountdownStarted total=' + total); showCountdown(total); });
+  conn.on('CountdownTick',   (count, total) => { dbg('SignalR: CountdownTick ' + count); updateCountdown(count); });
   conn.on('TurretSettings',  speed   => { slowTurretSpeed = speed; });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
   conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
@@ -1085,6 +1094,7 @@ function buildConnection() {
   // Only re-enable the button if the lobby is currently open; otherwise keep it grey.
   conn.on('JoinRejected', reason => {
     dbg('JoinRejected: ' + reason);
+    hideCountdown();
     setStatus(reason, true);
     if (_lobbyOpen) setJoinReady(); else setJoinGameInProgress();
     showScreen('screen-join');
@@ -1307,6 +1317,32 @@ function toggleFullscreen() {
   } else {
     enterFullscreenLandscape();
   }
+}
+
+// ════════════════════════════════════════════════════════
+// Countdown overlay
+// ════════════════════════════════════════════════════════
+function showCountdown(total) {
+  // Only show to players who are in the lobby (i.e. assigned a tank and waiting)
+  if (!document.getElementById('screen-lobby').classList.contains('active')) return;
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = total;
+  numEl.style.animation = 'none';
+  numEl.offsetHeight; // trigger reflow to restart animation
+  numEl.style.animation = '';
+  document.getElementById('countdown-overlay').classList.add('active');
+}
+
+function updateCountdown(count) {
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = count;
+  numEl.style.animation = 'none';
+  numEl.offsetHeight;
+  numEl.style.animation = '';
+}
+
+function hideCountdown() {
+  document.getElementById('countdown-overlay').classList.remove('active');
 }
 
 function onGameStarted(data) {
