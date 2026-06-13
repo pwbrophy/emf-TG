@@ -1524,6 +1524,19 @@ document.querySelectorAll('.turret-btn').forEach(btn => {
 // Capture phase (true) intercepts before any element handler fires.
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
 
+// Prevent Safari pinch-zoom during gameplay.
+// iOS 10+ ignores user-scalable=no in the viewport meta tag (Apple re-enabled
+// it for accessibility), so we must suppress the gesture events directly.
+// gesturestart/gesturechange are WebKit-specific events fired when a multi-finger
+// gesture begins — blocking them stops the zoom before it starts.
+// touchstart preventDefault on 2+ fingers is a belt-and-suspenders backup.
+document.addEventListener('gesturestart',  e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturechange', e => e.preventDefault(), { passive: false });
+document.addEventListener('gestureend',    e => e.preventDefault(), { passive: false });
+document.addEventListener('touchstart', e => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
 // ════════════════════════════════════════════════════════
 // Fire button
 // ════════════════════════════════════════════════════════
@@ -1608,7 +1621,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v19</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v20</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
@@ -1710,7 +1723,7 @@ function toggleDbgPanel() {
 }
 
 // ── Log startup info immediately ─────────────────────────────────────────────
-dbg('page load v19');
+dbg('page load v20');
 dbg('UA: ' + navigator.userAgent.slice(0, 80));
 dbg('IS_IOS=' + IS_IOS);
 dbg('signalR type: ' + typeof signalR);
