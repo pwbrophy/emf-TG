@@ -1056,6 +1056,12 @@ function buildConnection() {
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
   // Unity not reachable — show grey button; keep SignalR alive for ServerConnected.
+  conn.on('JoinRejected', reason => {
+    dbg('JoinRejected: ' + reason);
+    setStatus(reason, true);
+    setJoinReady();
+    showScreen('screen-join');
+  });
   conn.on('ServerNotReady', () => {
     dbg('SignalR: ServerNotReady');
     setJoinWaiting();

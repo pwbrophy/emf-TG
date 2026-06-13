@@ -286,16 +286,25 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (string.IsNullOrWhiteSpace(connId) || string.IsNullOrWhiteSpace(name)) return;
         if (_connToPlayer.ContainsKey(connId)) return;
 
-        _connToPlayer[connId] = name;
-        if (_sessionToConns.TryGetValue(sessionId, out var conns)) conns.Add(connId);
-
-        // Skip AddPlayer if already listed — preserves the correct alliance index
-        // when a phone reconnects during an active game (HandleLeave keeps the entry).
+        // Check if name already exists
         bool alreadyListed = false;
         var existingList = ServiceLocator.Players?.GetAll();
         if (existingList != null)
             foreach (var p in existingList)
                 if (p.Name == name) { alreadyListed = true; break; }
+
+        // Reject duplicate names in Lobby. During Playing, same name = reconnect — allow it.
+        if (alreadyListed && ServiceLocator.GameFlow?.Phase == GamePhase.Lobby)
+        {
+            string reason = EscapeJson("\"" + name + "\" is already taken — please choose a different name.");
+            BroadcastRaw("{\"cmd\":\"join_rejected\",\"connectionId\":\"" + EscapeJson(connId) + "\",\"reason\":\"" + reason + "\"}");
+            Debug.Log("[PlayerWS] Rejected duplicate name: " + name + " (conn=" + connId + ")");
+            return;
+        }
+
+        _connToPlayer[connId] = name;
+        if (_sessionToConns.TryGetValue(sessionId, out var conns)) conns.Add(connId);
+
         if (!alreadyListed)
             ServiceLocator.Players?.AddPlayer(name, -1); // -1 = unassigned until squad chosen
 

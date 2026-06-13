@@ -117,6 +117,15 @@ public class UnityBridgeService : BackgroundService
                     await HandlePlayerList(doc.RootElement);
                     break;
 
+                case "join_rejected":
+                {
+                    string? connId = GetString(doc.RootElement, "connectionId");
+                    string? reason = GetString(doc.RootElement, "reason") ?? "Name already taken.";
+                    if (!string.IsNullOrEmpty(connId))
+                        await _hub.Clients.Client(connId).SendAsync("JoinRejected", reason);
+                    break;
+                }
+
                 case "game_started":
                     await HandleGameStarted(doc.RootElement);
                     break;
