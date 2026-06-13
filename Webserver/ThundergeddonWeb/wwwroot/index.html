@@ -694,6 +694,12 @@
     <div id="lobby-unassigned"><div class="empty-state">–</div></div>
   </div>
 
+  <!-- Robots without a squad assignment (hidden when empty) -->
+  <div class="lobby-section" id="lobby-other-section" style="display:none">
+    <div class="lobby-section-title">AVAILABLE TANKS</div>
+    <div id="lobby-other"></div>
+  </div>
+
   <!-- Desert Squad + Jungle Squad side by side -->
   <div class="lobby-squads">
     <div class="lobby-section">
@@ -1205,6 +1211,18 @@ function renderLobby() {
   // Robots by squad
   const desertRobots = robotList.filter(r => r.alliance === 0);
   const jungleRobots = robotList.filter(r => r.alliance === 1);
+  const otherRobots  = robotList.filter(r => r.alliance !== 0 && r.alliance !== 1);
+
+  const otherSection = document.getElementById('lobby-other-section');
+  const otherEl      = document.getElementById('lobby-other');
+  if (otherSection && otherEl) {
+    if (otherRobots.length) {
+      otherEl.innerHTML        = otherRobots.map(makeRobotRow).join('');
+      otherSection.style.display = '';
+    } else {
+      otherSection.style.display = 'none';
+    }
+  }
 
   function makeRobotRow(r) {
     const name     = r.name || r.id || '?';

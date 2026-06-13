@@ -324,6 +324,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             SendGameStarted(connId, name);
 
         BroadcastPlayerList();
+        BroadcastRobotList();
     }
 
     // Find the first unassigned robot in the player's chosen squad and give it to playerName.
