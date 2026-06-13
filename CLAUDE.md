@@ -132,7 +132,7 @@ All services are created once in `AppBootstrap` (`[DefaultExecutionOrder(-1000)]
 
 | Class | Role |
 |-------|------|
-| `RobotWebSocketServer` | `WebSocketSharp` server at `ws://<ip>:8080/esp32`. Thread-safe `PostMain` queue for Unity safety. Heartbeat timeout sweep every 2s. Auto-starts via `Start()`. Events: `OnPong`, `OnIrEmitReady`, `OnIrResult`. **Important:** `hello` is accepted at any game phase — do not add a phase gate, or robots that reconnect during Playing will never register and all commands will fail. `OnClosed` does NOT remove the robot from `RobotDirectory`; only the heartbeat sweep removes stale entries. |
+| `RobotWebSocketServer` | `WebSocketSharp` server at `ws://<ip>:8080/esp32`. Thread-safe `PostMain` queue for Unity safety. Heartbeat timeout sweep every 2s. Auto-starts via `Start()`. Events: `OnPong`, `OnIrEmitAck`, `OnIrWindowResult`. **Important:** `hello` is accepted at any game phase — do not add a phase gate, or robots that reconnect during Playing will never register and all commands will fail. `OnClosed` does NOT remove the robot from `RobotDirectory`; only the heartbeat sweep removes stale entries. |
 | `PlayerWebSocketServer` | `WebSocketSharp` server at `ws://127.0.0.1:8081/players`. Receives join/leave/drive/turret/fire JSON from `UnityBridgeService`. Routes drive+turret to `RobotWebSocketServer`, fire to `ShootingController.RequestFire`. Subscribes to `GameFlow.OnPhaseChanged`, `GameService.OnHpChanged/OnRobotDied/OnGameWon`. On `Playing`: sends `game_started` per connection. Sends `state_update` (HP + timer) per connection at 1 Hz and immediately on HP change. Fires `OnPlayerInput` event for `PlayerInputMonitor`. **`HandleJoin` calls `TryAssignFreeRobotToPlayer` immediately after adding the player**, so any already-connected unassigned robot is auto-assigned to the new player. |
 | `UdpDiscoveryListener` | Background thread on UDP port 30560. Auto-starts via `Start()`. Replies to robot announces with WebSocket URL. Tracks `_repliedTo` set to suppress per-robot log spam on the 2s broadcast cadence. |
 | `ESP32VideoReceiver` | Receives JPEG byte arrays, decodes into `Texture2D` on a `RawImage`. |
@@ -144,7 +144,8 @@ All services are created once in `AppBootstrap` (`[DefaultExecutionOrder(-1000)]
 | `GameFlowPresenter` | Shows/hides panels by `GamePhase`. Wires nav buttons to `GameFlow`. **Note:** wired to `_flow` captured at `OnEnable` — null-safe (`_flow?.Method()`) |
 | `ServerPanelPresenter` | Updates robot count label from `RobotDirectory` events |
 | `RobotSelectionPanel` | Cycle robots. On select: `stream_on + motors_on`. On deselect: `stream_off + motors_off` |
-| `ShootingController` | Realtime fire with 3s per-robot cooldown. IR sequence: `ir_emit_prepare → ir_emit_ready → ir_listen_and_report → ir_result`. Calls `GameService.ApplyDamage`, sends `flash_fire`/`flash_hit`/`set_hp`. Registers as `ServiceLocator.Shooting` on Awake. Public `RequestFire(robotId)` called by `PlayerWebSocketServer` for phone fire inputs. **Important:** `SendFlashFire` is called before the enemy-count check so the shooter always gets visual/audio feedback even when no valid targets exist. |
+| `ShootingController` | Realtime fire with 3s per-robot cooldown. On fire: sends `flash_fire` to shooter, then delegates IR to `IrSlotScheduler.EnqueueFire(shooterId)`. Registers as `ServiceLocator.Shooting` on Awake. Public `RequestFire(robotId)` called by `PlayerWebSocketServer` for phone fire inputs. |
+| `IrSlotScheduler` | ACK-driven IR shot queue (`Assets/Scripts/Game/IrSlotScheduler.cs`). One shot executes at a time. Protocol: `ir_emit_left` → wait `ir_emit_ack` → `ir_listen_window` to all enemies (collect b1 masks) → if any b1≠0: `ir_emit_right` + `ir_listen_window` (collect b2 masks) → hit where b1 & b2 ≠ 0 → call `GameService.ApplyDamage`, send `flash_hit`/`set_hp`. |
 | `RobotPingButton` | On PlayingPanel's `PingRow`. Sends `ping` to the selected robot and displays RTT. Subscribes to `RobotWebSocketServer.OnPong`. Wired by `WirePingButton` editor script. |
 | `RobotsPanelPresenter` | Scrollable robot list. Instantiates `Assets/Prefabs/RobotRow.prefab` into `RobotsScrollView/Viewport/Content` (which has `VerticalLayoutGroup` + `ContentSizeFitter`). Each row: Name / IP / Player / Edit button |
 | `PlayersEditorPanel` | Per-player row list. Each row: editable name, alliance dropdown (hardcoded 2), robot dropdown (exclusive — one player per robot), remove button. Requires `PlayerRow.prefab` + `rowContainer` (scroll view Content) wired by `WirePlayersPanel` editor script. |
@@ -259,9 +260,10 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 | `flash_fire` | — | White flash: robot is firing |
 | `flash_hit` | — | Red flash: robot was hit |
 | `set_hp` | `hp`, `max` | Update HP bar LEDs on robot |
-| `ir_emit_prepare` | — | Motors off, IR LEDs on, carrier on. Robot replies `ir_emit_ready` |
-| `ir_emit_stop` | — | IR LEDs off, carrier off, motors on |
-| `ir_listen_and_report` | `ms` | Listen for IR for window, auto-reply `ir_result` |
+| `ir_emit_left` | — | Activate left IR barrel (GPIO39). Robot replies `ir_emit_ack` |
+| `ir_emit_right` | — | Activate right IR barrel (GPIO40). No ACK wait — sent simultaneously with `ir_listen_window` in phase 2 |
+| `ir_emit_stop` | — | IR LEDs off, carrier off |
+| `ir_listen_window` | `ms` | Listen for IR for `ms` ms; robot replies `ir_window_result` with 8-bit receiver bitmask |
 | `set_name` | `name` | Save human-readable name to robot NVS (`tg_id`). Robot sends it back in future `hello` messages. |
 | `ping` | — | Connectivity test. Robot replies `pong` immediately. |
 
@@ -272,10 +274,10 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 | `hello` | `id`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret` | Robot registers itself. `name` is the human-readable name saved in NVS (empty string if never set). |
 | `hb` | `t` | Heartbeat (millis timestamp) |
 | `pong` | — | Reply to `ping`; used by `RobotPingButton` to display RTT |
-| `ir_emit_ready` | — | Robot is ready to emit IR |
-| `ir_result` | `hit` (0/1), `dir` (string e.g. `"SE"`) | Result of IR listen window. `dir` is compass direction of hit receiver |
+| `ir_emit_ack` | — | Shooter acknowledges `ir_emit_left` or `ir_emit_right` |
+| `ir_window_result` | `mask` (uint8) | 8-bit bitmask of triggered IR receivers: bit 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW |
 
-**Directional damage:** `dir` values `"S"`, `"SE"`, `"SW"` are rear hits → `RearMultiplier` (default 3×). All other directions → 1×.
+**Directional damage:** `IrSlotScheduler.ResolveAveragedCardinal` vector-averages the `mask` bits to one of N/W/S/E. `"S"` = rear hit → `RearMultiplier` (default 3×). All other directions → 1×. A hit requires both b1 (left LED) and b2 (right LED) masks to be non-zero for the same enemy.
 
 ## UDP Discovery Protocol
 
@@ -312,8 +314,6 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 ## Not Yet Implemented
 
 - **RobotTestPanel** — subsystem test buttons (drive, turret sweep, flash, IR) in Lobby
-- **RenamePopup** — Implemented. Edit button opens modal to rename robot and reassign player. Name is pushed to robot NVS via `set_name` command so it persists across servers.
-- **Phase 4: Player-facing display** — second monitor panel with QR code, scoreboard not started
 - **`PetersUtils.GetLocalIPAddress()`** — referenced in `RobotWebSocketServer` and `UdpDiscoveryListener`; must pick LAN IPv4 (avoids loopback/VPN)
 
 ## Known Issues / Gotchas
@@ -342,6 +342,7 @@ Serves on `http://0.0.0.0:5000` (all interfaces). Players navigate to `http://<l
 | `Hubs/GameHub.cs` | SignalR hub. `JoinLobby(name)`, `SendDrive(l,r)`, `SendTurret(speed)`, `Fire()`. `OnDisconnectedAsync` sends leave. |
 | `Services/UnityBridgeService.cs` | `BackgroundService`. `ClientWebSocket` connects to `ws://127.0.0.1:8081/players`. Reconnects every 3s on failure. Routes inbound Unity messages (`player_list`, `game_started`, `state_update`, `you_are_dead`, `game_over`) to correct SignalR clients. `SendToUnity(object)` serialises to JSON. |
 | `wwwroot/index.html` | Mobile-first dark-theme SPA with 5 screens (see below). Uses `@microsoft/signalr` from unpkg CDN. |
+| `wwwroot/display.html` | Operator/spectator display page (`display v7`). Navigate to `http://<laptop-ip>:5000/display.html` on a second screen. Connects via SignalR (`DisplayUpdate`, `DisplayEvent`, `SpectateUpdate`, `GameOver`, `GamePaused`/`GameResumed` events — read-only, does not call `JoinLobby`). Shows: lobby overlay with QR code (fetches LAN IP from `/api/serverip`), team points tug-of-war bar, event log with TTS announcer (mutable), per-alliance HP rows with capture point circles (North/Centre/South), FPV spectate overlay (MJPEG via `/api/robot-stream` proxy), and game-paused overlay. XSS-safe: all player names/callsigns pass through `escHtml()`. |
 | `appsettings.json` | `"Urls": "http://0.0.0.0:5000"` |
 
 ### Phone SPA screens
@@ -475,7 +476,7 @@ DRV8833 INx truth table:
 | `CameraController.h` | PCLK=8, XCLK=16 (corrected from old code); MJPEG frames sent over WebSocket. |
 | `MjpegServer.h` | esp_http_server MJPEG stream on port 81 (`http://<robot-ip>:81/stream`). Phones connect directly. |
 | `OtaSupport.h` | ArduinoOTA. Hostname `thunder-<MAC12>`, password `thunder123`, port 3232. Stops camera + disables motors before update. |
-| `main.cpp` | Wires all modules. Handles `drive`, `turret`, `motors_on/off`, `stream_on/off`, `flash_fire`, `flash_hit`, `set_hp`, `ir_emit_prepare`, `ir_listen_and_report`, `ping`. Sends `hello`, `hb`, `pong`, `ir_emit_ready`, `ir_result`. |
+| `main.cpp` | Wires all modules. Handles `drive`, `turret`, `motors_on/off`, `stream_on/off`, `flash_fire`, `flash_hit`, `set_hp`, `ir_emit_left`, `ir_emit_right`, `ir_emit_stop`, `ir_listen_window`, `ping`. Sends `hello`, `hb`, `pong`, `ir_emit_ack`, `ir_window_result`. |
 
 ### OTA
 - Hostname: `thunder-<MAC12>` (this robot: `thunder-9CF218697090`)

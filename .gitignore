@@ -20,3 +20,16 @@ Reference_Code/
 __pycache__/
 *.pyc
 **/Assets/_Recovery/
+
+# ── Unity generated (never commit) ───────────────────────
+**/Library/
+**/Temp/
+**/Logs/
+**/UserSettings/
+
+# ── .NET / ASP.NET build output ──────────────────────────
+**/obj/
+**/bin/
+
+# ── PlatformIO build cache ────────────────────────────────
+**/.pio/
