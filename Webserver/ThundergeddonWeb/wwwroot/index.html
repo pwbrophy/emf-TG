@@ -1227,7 +1227,7 @@ function renderLobby() {
   function makeRobotRow(r) {
     const name     = r.name || r.id || '?';
     const assigned = r.assignedPlayer || '';
-    const isMine   = r.id === myRobotId;
+    const isMine   = !!myName && r.assignedPlayer === myName;
     const isTaken  = !!assigned && !isMine;
     const btnClass = isMine ? 'mine' : isTaken ? 'taken' : 'available';
     const btnLabel = isMine ? 'Leave' : isTaken ? 'Taken' : 'Join';
