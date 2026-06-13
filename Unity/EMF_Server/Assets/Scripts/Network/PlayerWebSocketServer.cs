@@ -79,6 +79,13 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (ServiceLocator.Players != null)
             ServiceLocator.Players.OnChanged += OnPlayersChanged;
 
+        // Robot assignment changes (operator reassigning robots in the lobby)
+        if (ServiceLocator.RobotDirectory != null)
+        {
+            ServiceLocator.RobotDirectory.OnRobotUpdated += OnRobotUpdated;
+            ServiceLocator.RobotDirectory.OnRobotAdded   += OnRobotUpdated;
+        }
+
         // Game phase changes
         if (ServiceLocator.GameFlow != null)
         {
@@ -114,6 +121,12 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (ServiceLocator.Players != null)
             ServiceLocator.Players.OnChanged -= OnPlayersChanged;
+
+        if (ServiceLocator.RobotDirectory != null)
+        {
+            ServiceLocator.RobotDirectory.OnRobotUpdated -= OnRobotUpdated;
+            ServiceLocator.RobotDirectory.OnRobotAdded   -= OnRobotUpdated;
+        }
 
         if (ServiceLocator.GameFlow != null)
         {
@@ -778,6 +791,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     }
 
     void OnPlayersChanged() => BroadcastPlayerList();
+    void OnRobotUpdated(RobotInfo _) => BroadcastPlayerList();
 
     void OnMatchTimerTick(float remaining)
     {
