@@ -172,30 +172,33 @@
     .player-robot { font-size: 0.75em; color: var(--muted); margin-top: 2px; }
     .empty-state { padding: 14px; color: var(--muted); font-size: 0.85rem; text-align: center; }
 
-    /* Persistent squad action buttons */
-    .squad-action-btns {
+    /* Robot selection rows in lobby squads */
+    .robot-row {
       display: flex;
-      gap: 8px;
-      width: 100%;
-      max-width: 360px;
-      margin-bottom: 14px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      gap: 10px;
     }
-    .squad-action-btn {
-      flex: 1;
-      padding: 10px 4px;
+    .robot-row:last-child { border-bottom: none; }
+    .robot-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .robot-name { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .robot-player-assigned { font-size: 0.72em; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .robot-actions { flex-shrink: 0; }
+    .role-btn {
+      padding: 7px 12px;
       border: none;
-      border-radius: 8px;
-      font-size: 0.78rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
       font-weight: 700;
-      letter-spacing: 0.03em;
       cursor: pointer;
       transition: filter 0.12s, opacity 0.12s;
     }
-    .squad-action-btn:active:not(:disabled) { filter: brightness(0.82); }
-    .squad-action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-    .squad-action-btn.desert { background: #b8905a; color: #fff; }
-    .squad-action-btn.jungle { background: #4a7a4a; color: #fff; }
-    .squad-action-btn.leave  { background: #3a3a3a; color: #bbb; }
+    .role-btn:active:not(:disabled) { filter: brightness(0.82); }
+    .role-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .role-btn.available { background: var(--accent); color: #fff; }
+    .role-btn.mine      { background: var(--accent2); color: #000; }
+    .role-btn.taken     { background: #2a2a3a; color: var(--muted); }
 
     .waiting-anim {
       display: inline-block;
@@ -685,12 +688,6 @@
     <p>Waiting for the game to start…</p>
   </div>
 
-  <!-- Squad action buttons -->
-  <div class="squad-action-btns">
-    <button id="squad-btn-desert" class="squad-action-btn desert" onclick="joinSquad(0)" disabled>Join Desert</button>
-    <button id="squad-btn-jungle" class="squad-action-btn jungle" onclick="joinSquad(1)" disabled>Join Jungle</button>
-    <button id="squad-btn-leave"  class="squad-action-btn leave"  onclick="joinSquad(-1)" disabled>Leave Squad</button>
-  </div>
   <!-- Unassigned players -->
   <div class="lobby-section">
     <div class="lobby-section-title">UNASSIGNED</div>
@@ -701,11 +698,11 @@
   <div class="lobby-squads">
     <div class="lobby-section">
       <div class="lobby-section-title" style="color:#b8905a">DESERT SQUAD</div>
-      <div id="lobby-desert"><div class="empty-state">–</div></div>
+      <div id="lobby-desert"><div class="empty-state">No robots</div></div>
     </div>
     <div class="lobby-section">
       <div class="lobby-section-title" style="color:#4a7a4a">JUNGLE SQUAD</div>
-      <div id="lobby-jungle"><div class="empty-state">–</div></div>
+      <div id="lobby-jungle"><div class="empty-state">No robots</div></div>
     </div>
   </div>
 </div>
@@ -805,6 +802,9 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 // ════════════════════════════════════════════════════════
 let myName      = '';
 let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
+let myRobotId   = '';
+let robotList   = [];
+let _playerList = [];
 let connection  = null;
 let isDead      = false;      // true during 5-s explosion — all controls blocked
 let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
@@ -1019,7 +1019,10 @@ function returnToJoin(message) {
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
   document.getElementById('fire-toast').classList.remove('visible');
   clearHitOverlay();
-  myAlliance = -1;
+  myAlliance  = -1;
+  myRobotId   = '';
+  _playerList = [];
+  robotList   = [];
   setJoinWaiting();
   showScreen('screen-join');
   if (message) setStatus(message, true);
@@ -1042,7 +1045,8 @@ function buildConnection() {
     .withAutomaticReconnect([0, 2000, 5000, 10000])
     .build();
 
-  conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); renderPlayerList(players); });
+  conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); onLobbyUpdate(players); });
+  conn.on('RobotListUpdate', robots  => { dbg('SignalR: RobotListUpdate ' + robots.length + ' robots'); robotList = robots || []; renderLobby(); });
   conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); onGameStarted(data); });
   conn.on('TurretSettings',  speed   => { slowTurretSpeed = speed; });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
@@ -1143,28 +1147,16 @@ async function joinLobby() {
   }
 }
 
-async function joinSquad(alliance) {
-  myAlliance = alliance;
-  updateSquadButtons();
+async function pickRobot(robotId) {
+  myRobotId = robotId || '';
+  renderLobby();
   if (!connection) return;
   try {
-    await connection.invoke('JoinSquad', alliance);
-    dbg('joinSquad sent alliance=' + alliance);
+    await connection.invoke('PickRobot', robotId || '');
+    dbg('pickRobot sent robotId=' + robotId);
   } catch (err) {
-    dbg('joinSquad failed: ' + err.message);
+    dbg('pickRobot failed: ' + err.message);
   }
-}
-
-function updateSquadButtons() {
-  const inDesert = myAlliance === 0;
-  const inJungle = myAlliance === 1;
-  const inSquad  = inDesert || inJungle;
-  const d = document.getElementById('squad-btn-desert');
-  const j = document.getElementById('squad-btn-jungle');
-  const l = document.getElementById('squad-btn-leave');
-  if (d) d.disabled = inDesert;
-  if (j) j.disabled = inJungle;
-  if (l) l.disabled = !inSquad;
 }
 
 function setStatus(msg, isError) {
@@ -1176,49 +1168,72 @@ function setStatus(msg, isError) {
 // ════════════════════════════════════════════════════════
 // Lobby
 // ════════════════════════════════════════════════════════
-function renderPlayerList(players) {
-  const unassigned = [], desert = [], jungle = [];
-
-  if (players) {
-    for (const p of players) {
-      const name     = typeof p === 'string' ? p : (p.name ?? '');
-      const alliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
-      const robot    = typeof p === 'string' ? '' : (p.robot ?? '');
-      if (name === myName) myAlliance = alliance;
-      const entry = { name, robot };
-      if      (alliance === 0) desert.push(entry);
-      else if (alliance === 1) jungle.push(entry);
-      else                     unassigned.push(entry);
+function onLobbyUpdate(players) {
+  _playerList = players || [];
+  for (const p of _playerList) {
+    const name = typeof p === 'string' ? p : (p.name ?? '');
+    if (name === myName) {
+      myAlliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
+      myRobotId  = typeof p === 'string' ? '' : (p.robot ?? '');
+      break;
     }
   }
+  renderLobby();
+}
 
-  updateSquadButtons();
+function renderLobby() {
+  // Players without a robot yet
+  const unassigned = _playerList.filter(p => {
+    const robot = typeof p === 'string' ? '' : (p.robot ?? '');
+    return !robot;
+  });
 
-  function makeRow({ name, robot }, dotColor) {
-    const isSelf = name === myName;
-    return `<div class="player-row">
-      <div class="player-dot" style="background:${dotColor}"></div>
-      <div class="player-info">
-        <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
-        ${robot ? `<span class="player-robot">${escHtml(robot)}</span>` : ''}
+  const unEl = document.getElementById('lobby-unassigned');
+  if (unEl) unEl.innerHTML = unassigned.length
+    ? unassigned.map(p => {
+        const name   = typeof p === 'string' ? p : (p.name ?? '');
+        const isSelf = name === myName;
+        return `<div class="player-row">
+          <div class="player-dot"></div>
+          <div class="player-info">
+            <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+          </div>
+        </div>`;
+      }).join('')
+    : '<div class="empty-state">–</div>';
+
+  // Robots by squad
+  const desertRobots = robotList.filter(r => r.alliance === 0);
+  const jungleRobots = robotList.filter(r => r.alliance === 1);
+
+  function makeRobotRow(r) {
+    const name     = r.name || r.id || '?';
+    const assigned = r.assignedPlayer || '';
+    const isMine   = r.id === myRobotId;
+    const isTaken  = !!assigned && !isMine;
+    const btnClass = isMine ? 'mine' : isTaken ? 'taken' : 'available';
+    const clickId  = isMine ? '' : r.id;
+    const btnClick = isTaken ? '' : `onclick="pickRobot('${escHtml(clickId)}')"`;
+    return `<div class="robot-row">
+      <div class="robot-info">
+        <span class="robot-name">${escHtml(name)}</span>
+        ${assigned ? `<span class="robot-player-assigned">${escHtml(assigned)}${isMine ? ' (you)' : ''}</span>` : ''}
+      </div>
+      <div class="robot-actions">
+        <button class="role-btn ${btnClass}" ${isTaken ? 'disabled' : ''} ${btnClick}>Drive</button>
       </div>
     </div>`;
   }
 
-  const unEl = document.getElementById('lobby-unassigned');
-  if (unEl) unEl.innerHTML = unassigned.length
-    ? unassigned.map(e => makeRow(e, 'var(--green)')).join('')
-    : '<div class="empty-state">–</div>';
-
   const dEl = document.getElementById('lobby-desert');
-  if (dEl) dEl.innerHTML = desert.length
-    ? desert.map(e => makeRow(e, '#b8905a')).join('')
-    : '<div class="empty-state">–</div>';
+  if (dEl) dEl.innerHTML = desertRobots.length
+    ? desertRobots.map(makeRobotRow).join('')
+    : '<div class="empty-state">No robots</div>';
 
   const jEl = document.getElementById('lobby-jungle');
-  if (jEl) jEl.innerHTML = jungle.length
-    ? jungle.map(e => makeRow(e, '#4a7a4a')).join('')
-    : '<div class="empty-state">–</div>';
+  if (jEl) jEl.innerHTML = jungleRobots.length
+    ? jungleRobots.map(makeRobotRow).join('')
+    : '<div class="empty-state">No robots</div>';
 }
 
 // ════════════════════════════════════════════════════════
@@ -1621,7 +1636,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v20</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v21</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

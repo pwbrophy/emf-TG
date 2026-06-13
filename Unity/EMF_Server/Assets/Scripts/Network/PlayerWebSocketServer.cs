@@ -84,6 +84,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             ServiceLocator.RobotDirectory.OnRobotUpdated += OnRobotUpdated;
             ServiceLocator.RobotDirectory.OnRobotAdded   += OnRobotUpdated;
+            ServiceLocator.RobotDirectory.OnRobotRemoved += OnRobotRemoved;
         }
 
         // Game phase changes
@@ -126,6 +127,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             ServiceLocator.RobotDirectory.OnRobotUpdated -= OnRobotUpdated;
             ServiceLocator.RobotDirectory.OnRobotAdded   -= OnRobotUpdated;
+            ServiceLocator.RobotDirectory.OnRobotRemoved -= OnRobotRemoved;
         }
 
         if (ServiceLocator.GameFlow != null)
@@ -224,6 +226,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         _sessionToConns[sessionId] = new HashSet<string>();
         Debug.Log("[PlayerWS] Bridge connected: " + sessionId);
         BroadcastPlayerList();
+        BroadcastRobotList();
         // Tell the newly-connected bridge what phase we're in so it can gate player joins.
         BroadcastPhase(ServiceLocator.GameFlow?.Phase ?? GamePhase.MainMenu);
     }
@@ -238,6 +241,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             _sessionToConns.Remove(sessionId);
         }
         BroadcastPlayerList();
+        BroadcastRobotList();
     }
 
     // ── Message dispatch (main thread) ───────────────────────────────────────────
@@ -257,6 +261,10 @@ public class PlayerWebSocketServer : MonoBehaviour
 
             case "squad":
                 HandleSquad(msg.connectionId, msg.alliance);
+                break;
+
+            case "pick_robot":
+                HandlePickRobot(msg.connectionId, msg.robotId ?? "");
                 break;
 
             case "leave":
@@ -377,6 +385,40 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastPlayerList();
         string action = alliance >= 0 ? "joined squad " + AllianceName(alliance) : "left squad";
         Debug.Log("[PlayerWS] Player " + playerName + " " + action);
+    }
+
+    void HandlePickRobot(string connId, string robotId)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null) return;
+
+        // Clear current robot assignment for this player
+        foreach (var robot in dir.GetAll())
+            if (robot.AssignedPlayer == playerName)
+                dir.ClearAssignedPlayer(robot.RobotId);
+
+        if (!string.IsNullOrEmpty(robotId))
+        {
+            // Assign specific robot; derive alliance from its PreferredAlliance
+            if (dir.TryGet(robotId, out var robotInfo))
+            {
+                dir.SetAssignedPlayer(robotId, playerName);
+                int alliance = robotInfo.PreferredAlliance;
+                ServiceLocator.Players?.SetAllianceByName(playerName, alliance >= 0 ? alliance : -1);
+                Debug.Log("[PlayerWS] " + playerName + " picked robot " + robotId + " (alliance=" + alliance + ")");
+            }
+        }
+        else
+        {
+            // Deselected — go unassigned
+            ServiceLocator.Players?.SetAllianceByName(playerName, -1);
+            Debug.Log("[PlayerWS] " + playerName + " deselected robot");
+        }
+
+        BroadcastPlayerList();
+        BroadcastRobotList();
     }
 
     void HandleLeave(string connId)
@@ -800,7 +842,8 @@ public class PlayerWebSocketServer : MonoBehaviour
     }
 
     void OnPlayersChanged() => BroadcastPlayerList();
-    void OnRobotUpdated(RobotInfo _) => BroadcastPlayerList();
+    void OnRobotUpdated(RobotInfo _) { BroadcastPlayerList(); BroadcastRobotList(); }
+    void OnRobotRemoved(string _)    { BroadcastPlayerList(); BroadcastRobotList(); }
 
     void OnMatchTimerTick(float remaining)
     {
@@ -968,6 +1011,31 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
         sb.Append("]}");
         return sb.ToString();
+    }
+
+    // ── Robot list broadcast ──────────────────────────────────────────────────────
+
+    void BroadcastRobotList()
+    {
+        var dir = ServiceLocator.RobotDirectory;
+        var sb = new StringBuilder("{\"cmd\":\"robot_list\",\"robots\":[");
+        bool first = true;
+        if (dir != null)
+        {
+            foreach (var robot in dir.GetAll())
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                string callsign = string.IsNullOrEmpty(robot.Callsign) ? robot.RobotId : robot.Callsign;
+                sb.Append("{\"id\":\"");             sb.Append(EscapeJson(robot.RobotId));             sb.Append("\"");
+                sb.Append(",\"name\":\"");           sb.Append(EscapeJson(callsign));                  sb.Append("\"");
+                sb.Append(",\"alliance\":");         sb.Append(robot.PreferredAlliance);
+                sb.Append(",\"assignedPlayer\":\""); sb.Append(EscapeJson(robot.AssignedPlayer ?? "")); sb.Append("\"");
+                sb.Append("}");
+            }
+        }
+        sb.Append("]}");
+        BroadcastRaw(sb.ToString());
     }
 
     // ── Display page broadcast ────────────────────────────────────────────────────
@@ -1157,6 +1225,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         public float  r;
         public float  speed;
         public int    alliance = -1;
+        public string robotId;
     }
 
     // ── WebSocket behaviour ──────────────────────────────────────────────────────

@@ -126,6 +126,10 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "robot_list":
+                    await HandleRobotList(doc.RootElement);
+                    break;
+
                 case "game_started":
                     await HandleGameStarted(doc.RootElement);
                     break;
@@ -228,6 +232,25 @@ public class UnityBridgeService : BackgroundService
             .ToList();
 
         await _hub.Clients.All.SendAsync("LobbyUpdate", players);
+    }
+
+    private async Task HandleRobotList(JsonElement root)
+    {
+        if (!root.TryGetProperty("robots", out var robotsEl)) return;
+
+        var robots = robotsEl
+            .EnumerateArray()
+            .Select(e =>
+            {
+                string id             = e.TryGetProperty("id",             out var i)  ? i.GetString()  ?? "" : "";
+                string name           = e.TryGetProperty("name",           out var n)  ? n.GetString()  ?? "" : "";
+                int    alliance       = e.TryGetProperty("alliance",       out var a) && a.TryGetInt32(out int ai) ? ai : -1;
+                string assignedPlayer = e.TryGetProperty("assignedPlayer", out var ap) ? ap.GetString() ?? "" : "";
+                return new { id, name, alliance, assignedPlayer };
+            })
+            .ToList();
+
+        await _hub.Clients.All.SendAsync("RobotListUpdate", robots);
     }
 
     private async Task HandleGameStarted(JsonElement root)

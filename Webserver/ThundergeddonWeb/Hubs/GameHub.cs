@@ -47,6 +47,16 @@ public class GameHub : Hub
         });
     }
 
+    public async Task PickRobot(string robotId)
+    {
+        await _bridge.SendToUnity(new
+        {
+            cmd          = "pick_robot",
+            robotId      = robotId ?? "",
+            connectionId = Context.ConnectionId
+        });
+    }
+
     // ── Gameplay inputs ──────────────────────────────────────────────────────────
 
     public async Task SendDrive(float left, float right)
