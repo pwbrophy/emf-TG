@@ -167,7 +167,9 @@
     }
     .player-row:last-child { border-bottom: none; }
     .player-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 10px; flex-shrink: 0; }
+    .player-info { display: flex; flex-direction: column; }
     .player-name-self { font-weight: 700; color: var(--accent2); }
+    .player-robot { font-size: 0.75em; color: var(--muted); margin-top: 2px; }
     .empty-state { padding: 14px; color: var(--muted); font-size: 0.85rem; text-align: center; }
 
     /* Persistent squad action buttons */
@@ -689,8 +691,6 @@
     <button id="squad-btn-jungle" class="squad-action-btn jungle" onclick="joinSquad(1)" disabled>Join Jungle</button>
     <button id="squad-btn-leave"  class="squad-action-btn leave"  onclick="joinSquad(-1)" disabled>Leave Squad</button>
   </div>
-  <div id="my-robot-label" style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;min-height:1.1em"></div>
-
   <!-- Unassigned players -->
   <div class="lobby-section">
     <div class="lobby-section-title">UNASSIGNED</div>
@@ -1173,48 +1173,45 @@ function setStatus(msg, isError) {
 function renderPlayerList(players) {
   const unassigned = [], desert = [], jungle = [];
 
-  let myRobot = '';
   if (players) {
     for (const p of players) {
       const name     = typeof p === 'string' ? p : (p.name ?? '');
       const alliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
-      // Sync our own alliance and robot from authoritative server data
-      if (name === myName) {
-        myAlliance = alliance;
-        myRobot    = typeof p === 'string' ? '' : (p.robot ?? '');
-      }
-      if      (alliance === 0) desert.push(name);
-      else if (alliance === 1) jungle.push(name);
-      else                     unassigned.push(name);
+      const robot    = typeof p === 'string' ? '' : (p.robot ?? '');
+      if (name === myName) myAlliance = alliance;
+      const entry = { name, robot };
+      if      (alliance === 0) desert.push(entry);
+      else if (alliance === 1) jungle.push(entry);
+      else                     unassigned.push(entry);
     }
   }
 
-  const robotLabel = document.getElementById('my-robot-label');
-  if (robotLabel) robotLabel.textContent = myRobot ? 'Your tank: ' + myRobot : '';
-
   updateSquadButtons();
 
-  function makeRow(name, dotColor) {
+  function makeRow({ name, robot }, dotColor) {
     const isSelf = name === myName;
     return `<div class="player-row">
       <div class="player-dot" style="background:${dotColor}"></div>
-      <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+      <div class="player-info">
+        <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
+        ${robot ? `<span class="player-robot">${escHtml(robot)}</span>` : ''}
+      </div>
     </div>`;
   }
 
   const unEl = document.getElementById('lobby-unassigned');
   if (unEl) unEl.innerHTML = unassigned.length
-    ? unassigned.map(n => makeRow(n, 'var(--green)')).join('')
+    ? unassigned.map(e => makeRow(e, 'var(--green)')).join('')
     : '<div class="empty-state">–</div>';
 
   const dEl = document.getElementById('lobby-desert');
   if (dEl) dEl.innerHTML = desert.length
-    ? desert.map(n => makeRow(n, '#b8905a')).join('')
+    ? desert.map(e => makeRow(e, '#b8905a')).join('')
     : '<div class="empty-state">–</div>';
 
   const jEl = document.getElementById('lobby-jungle');
   if (jEl) jEl.innerHTML = jungle.length
-    ? jungle.map(n => makeRow(n, '#4a7a4a')).join('')
+    ? jungle.map(e => makeRow(e, '#4a7a4a')).join('')
     : '<div class="empty-state">–</div>';
 }
 
