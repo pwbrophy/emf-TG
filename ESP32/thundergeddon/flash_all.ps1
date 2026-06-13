@@ -1,22 +1,34 @@
 #Requires -Version 5.1
+param(
+    [int[]]$Only = @()   # e.g. .\flash_all.ps1 1,2,7,8  -- omit to flash all
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # --- Robot list --------------------------------------------------------------
 # Comment out any robot that is offline or not yet provisioned.
-$Robots = @(
-    [pscustomobject]@{ Name = "Robot 1";  Ip = "192.168.86.101" }
-    [pscustomobject]@{ Name = "Robot 2";  Ip = "192.168.86.102" }
-    [pscustomobject]@{ Name = "Robot 3";  Ip = "192.168.86.103" }
-    [pscustomobject]@{ Name = "Robot 4";  Ip = "192.168.86.104" }
-    [pscustomobject]@{ Name = "Robot 5";  Ip = "192.168.86.105" }
-    [pscustomobject]@{ Name = "Robot 6";  Ip = "192.168.86.106" }
-    [pscustomobject]@{ Name = "Robot 7";  Ip = "192.168.86.107" }
-    [pscustomobject]@{ Name = "Robot 8";  Ip = "192.168.86.108" }
-    [pscustomobject]@{ Name = "Robot 9";  Ip = "192.168.86.109" }
-    [pscustomobject]@{ Name = "Robot 10"; Ip = "192.168.86.110" }
+$AllRobots = @(
+    [pscustomobject]@{ Num = 1;  Name = "Robot 1";  Ip = "192.168.86.101" }
+    [pscustomobject]@{ Num = 2;  Name = "Robot 2";  Ip = "192.168.86.102" }
+    [pscustomobject]@{ Num = 3;  Name = "Robot 3";  Ip = "192.168.86.103" }
+    [pscustomobject]@{ Num = 4;  Name = "Robot 4";  Ip = "192.168.86.104" }
+    [pscustomobject]@{ Num = 5;  Name = "Robot 5";  Ip = "192.168.86.105" }
+    [pscustomobject]@{ Num = 6;  Name = "Robot 6";  Ip = "192.168.86.106" }
+    [pscustomobject]@{ Num = 7;  Name = "Robot 7";  Ip = "192.168.86.107" }
+    [pscustomobject]@{ Num = 8;  Name = "Robot 8";  Ip = "192.168.86.108" }
+    [pscustomobject]@{ Num = 9;  Name = "Robot 9";  Ip = "192.168.86.109" }
+    [pscustomobject]@{ Num = 10; Name = "Robot 10"; Ip = "192.168.86.110" }
 )
+
+$Robots = if ($Only.Count -gt 0) {
+    $AllRobots | Where-Object { $Only -contains $_.Num }
+} else {
+    $AllRobots
+}
+
+if ($Robots.Count -eq 0) { Write-Error "No robots matched: $Only" }
+
 $Auth     = "thunder123"
 $OtaPort  = 3232
 $BuildEnv = "thundergeddon_ota"
