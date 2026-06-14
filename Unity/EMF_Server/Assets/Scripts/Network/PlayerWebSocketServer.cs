@@ -315,6 +315,22 @@ public class PlayerWebSocketServer : MonoBehaviour
             case "fire":
                 HandleFire(msg.connectionId);
                 break;
+
+            case "set_two_player":
+                HandleSetTwoPlayer(msg.connectionId, msg.enabled);
+                break;
+
+            case "join_as_gunner":
+                HandleJoinAsGunner(msg.connectionId, msg.robotId ?? "");
+                break;
+
+            case "leave_gunner":
+                HandleLeaveGunner(msg.connectionId);
+                break;
+
+            case "swap_roles":
+                HandleSwapRoles(msg.connectionId);
+                break;
         }
     }
 
@@ -378,11 +394,13 @@ public class PlayerWebSocketServer : MonoBehaviour
         var players = ServiceLocator.Players;
         if (dir == null || players == null) return;
 
-        // Build the set of player names that DO have a robot
+        // Build the set of player names that DO have a robot (as driver or gunner)
         var assignedPlayers = new HashSet<string>();
         foreach (var robot in dir.GetAll())
-            if (!string.IsNullOrEmpty(robot.AssignedPlayer))
-                assignedPlayers.Add(robot.AssignedPlayer);
+        {
+            if (!string.IsNullOrEmpty(robot.AssignedPlayer)) assignedPlayers.Add(robot.AssignedPlayer);
+            if (!string.IsNullOrEmpty(robot.GunnerPlayer))   assignedPlayers.Add(robot.GunnerPlayer);
+        }
 
         // Collect names of players without a robot
         var toKick = new List<string>();
@@ -575,6 +593,129 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastRobotList();
     }
 
+    void HandleSetTwoPlayer(string connId, bool enabled)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null) return;
+
+        // Only the assigned driver can toggle 2-player mode
+        string robotId = PlayerToRobot(playerName);
+        if (robotId == null) return;
+
+        dir.SetTwoPlayerEnabled(robotId, enabled);
+        Debug.Log($"[PlayerWS] {playerName} set TwoPlayerEnabled={enabled} on {robotId}");
+        BroadcastRobotList();
+    }
+
+    void HandleJoinAsGunner(string connId, string robotId)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        if (string.IsNullOrEmpty(robotId)) return;
+
+        var settings = ServiceLocator.GameSettings;
+        if (settings == null || !settings.TwoPlayerModeEnabled)
+        {
+            Debug.Log("[PlayerWS] join_as_gunner rejected — TwoPlayerModeEnabled is off");
+            return;
+        }
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null || !dir.TryGet(robotId, out var robotInfo)) return;
+
+        if (!robotInfo.TwoPlayerEnabled)
+        {
+            Debug.Log($"[PlayerWS] join_as_gunner rejected — robot {robotId} has not enabled 2-player");
+            return;
+        }
+        if (!string.IsNullOrEmpty(robotInfo.GunnerPlayer))
+        {
+            Debug.Log($"[PlayerWS] join_as_gunner rejected — gunner slot already taken by {robotInfo.GunnerPlayer}");
+            return;
+        }
+        if (robotInfo.AssignedPlayer == playerName)
+        {
+            Debug.Log($"[PlayerWS] join_as_gunner rejected — {playerName} is already the driver");
+            return;
+        }
+        // Player cannot be gunner for a different robot if they're already a driver or gunner somewhere
+        if (PlayerToRobot(playerName) != null || GunnerToRobot(playerName) != null)
+        {
+            Debug.Log($"[PlayerWS] join_as_gunner rejected — {playerName} is already assigned to a robot");
+            return;
+        }
+
+        dir.SetGunnerPlayer(robotId, playerName);
+        // Add to PlayersService with the robot's alliance so they appear in the player list
+        int alliance = robotInfo.PreferredAlliance;
+        if (!ServiceLocator.Players?.GetAll().Any(p => p.Name == playerName) ?? false)
+            ServiceLocator.Players?.AddPlayer(playerName, alliance >= 0 ? alliance : -1);
+        else
+            ServiceLocator.Players?.SetAllianceByName(playerName, alliance >= 0 ? alliance : -1);
+
+        Debug.Log($"[PlayerWS] {playerName} joined as gunner on {robotId}");
+        BroadcastPlayerList();
+        BroadcastRobotList();
+    }
+
+    void HandleLeaveGunner(string connId)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null) return;
+
+        string robotId = GunnerToRobot(playerName);
+        if (robotId == null) return;
+
+        dir.ClearGunnerPlayer(robotId);
+
+        // Remove from PlayersService during lobby (gunner has no robot now)
+        if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing)
+        {
+            var players = ServiceLocator.Players?.GetAll();
+            if (players != null)
+                for (int i = 0; i < players.Count; i++)
+                    if (players[i].Name == playerName)
+                    { ServiceLocator.Players.RemovePlayerAt(i); break; }
+        }
+
+        Debug.Log($"[PlayerWS] {playerName} left gunner slot on {robotId}");
+        BroadcastPlayerList();
+        BroadcastRobotList();
+    }
+
+    void HandleSwapRoles(string connId)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null) return;
+
+        string robotId = PlayerToRobot(playerName) ?? GunnerToRobot(playerName);
+        if (robotId == null || !dir.TryGet(robotId, out var info)) return;
+
+        if (string.IsNullOrEmpty(info.GunnerPlayer) || string.IsNullOrEmpty(info.AssignedPlayer))
+        {
+            Debug.Log("[PlayerWS] swap_roles rejected — need both driver and gunner assigned");
+            return;
+        }
+
+        string oldDriver = info.AssignedPlayer;
+        string oldGunner = info.GunnerPlayer;
+
+        // Clear both slots so PickAssignedPlayer sees neither as taken
+        dir.ClearAssignedPlayer(robotId);
+        dir.ClearGunnerPlayer(robotId);
+        // Re-assign swapped: old gunner becomes driver, old driver becomes gunner
+        dir.SetAssignedPlayer(robotId, oldGunner);
+        dir.SetGunnerPlayer(robotId, oldDriver);
+
+        Debug.Log($"[PlayerWS] Roles swapped on {robotId}: driver={oldGunner}, gunner={oldDriver}");
+        BroadcastPlayerList();
+        BroadcastRobotList();
+    }
+
     void HandleLeave(string connId)
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
@@ -589,12 +730,18 @@ public class PlayerWebSocketServer : MonoBehaviour
         // SignalR's onreconnected handler will call JoinLobby again automatically.
         if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing) return;
 
-        // Release any robot this player had claimed so it becomes available again.
+        // Release any robot this player had claimed (as driver or gunner) so it becomes available again.
         var dir = ServiceLocator.RobotDirectory;
         if (dir != null)
+        {
             foreach (var robot in dir.GetAll())
+            {
                 if (robot.AssignedPlayer == playerName)
                     dir.ClearAssignedPlayer(robot.RobotId);
+                if (robot.GunnerPlayer == playerName)
+                    dir.ClearGunnerPlayer(robot.RobotId);
+            }
+        }
 
         var players = ServiceLocator.Players?.GetAll();
         if (players == null) return;
@@ -631,11 +778,30 @@ public class PlayerWebSocketServer : MonoBehaviour
         _lastTurret[connId] = GetLastTurret(_connToPlayer.TryGetValue(connId, out var nm) ? nm : "");
     }
 
+    // Returns the robot a player may use for turret/fire: their gunner robot, or their
+    // driver robot only if no gunner is assigned (solo mode). Returns null if denied.
+    string ConnToGunRobot(string connId)
+    {
+        if (!_connToPlayer.TryGetValue(connId, out string playerName)) return null;
+
+        // Gunner always gets gun controls
+        string robotId = GunnerToRobot(playerName);
+        if (robotId != null) return robotId;
+
+        // Solo driver: AssignedPlayer with no gunner assigned
+        string driverRobot = PlayerToRobot(playerName);
+        if (driverRobot == null) return null;
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir != null && dir.TryGet(driverRobot, out var info) && !string.IsNullOrEmpty(info.GunnerPlayer))
+            return null; // driver of a two-player tank — no gun access
+        return driverRobot;
+    }
+
     void HandleTurret(string connId, float speed)
     {
         if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
 
-        string robotId = ConnToRobot(connId);
+        string robotId = ConnToGunRobot(connId);
         if (robotId == null) return;
 
         // Block during explosion phase
@@ -654,7 +820,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
 
-        string robotId = ConnToRobot(connId);
+        string robotId = ConnToGunRobot(connId);
         if (robotId == null) return;
 
         // Block fire while dead (exploding) or in dead walk (respawning)
@@ -776,12 +942,12 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnHpChanged(string robotId, int newHp)
     {
-        // Find all connections whose player drives this robot
+        // Find all connections whose player is on this robot (driver or gunner)
         foreach (var kvp in _connToPlayer)
         {
             string connId    = kvp.Key;
             string playerName = kvp.Value;
-            string rId       = PlayerToRobot(playerName);
+            string rId       = PlayerToRobotAny(playerName);
             if (rId != robotId) continue;
 
             SendSingleStateUpdate(connId);
@@ -792,7 +958,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (newHp > 0 && newHp <= maxHp / 4 && !_lowHpWarned.Contains(robotId))
         {
             _lowHpWarned.Add(robotId);
-            string warnName = GetPlayerNameForRobot(robotId);
+            string warnName = GetCrewNamesForRobot(robotId);
             if (!string.IsNullOrEmpty(warnName))
                 BroadcastDisplayEvent($"Warning — {warnName}'s tank is critical!");
         }
@@ -800,35 +966,28 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnHitDirection(string targetId, string shooterId, byte rawMask, string cardinalDir)
     {
-        // Resolve shooter's player name from their robot ID
-        string shooterName = "";
-        if (!string.IsNullOrEmpty(shooterId))
-        {
-            var dir2 = ServiceLocator.RobotDirectory;
-            if (dir2 != null && dir2.TryGet(shooterId, out var sInfo))
-                shooterName = sInfo.AssignedPlayer ?? "";
-        }
+        // Resolve shooter's crew name (both players if two-player tank)
+        string shooterName = GetCrewNamesForRobot(shooterId);
 
-        // Send hit_taken to the target robot's assigned player
+        // Send hit_taken to all connections on the target robot (driver and gunner)
         foreach (var kvp in _connToPlayer)
         {
-            if (PlayerToRobot(kvp.Value) != targetId) continue;
+            if (PlayerToRobotAny(kvp.Value) != targetId) continue;
 
             string json = "{\"cmd\":\"hit_taken\"" +
                           ",\"connectionId\":\"" + EscapeJson(kvp.Key) + "\"" +
                           ",\"shooter\":\"" + EscapeJson(shooterName) + "\"" +
                           ",\"dir\":\"" + EscapeJson(cardinalDir ?? "") + "\"}";
             BroadcastRaw(json);
-            break;
         }
 
         // Announce rear hits
         if (cardinalDir == "S" && !string.IsNullOrEmpty(shooterName))
         {
-            string targetPlayer = GetPlayerNameForRobot(targetId);
-            string rearMsg = string.IsNullOrEmpty(targetPlayer)
+            string targetCrew = GetCrewNamesForRobot(targetId);
+            string rearMsg = string.IsNullOrEmpty(targetCrew)
                 ? $"Rear hit! {shooterName} attacks from behind!"
-                : $"Rear hit! {shooterName} hits {targetPlayer} from behind!";
+                : $"Rear hit! {shooterName} hits {targetCrew} from behind!";
             BroadcastDisplayEvent(rearMsg);
         }
     }
@@ -843,10 +1002,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         robotServer?.SendMotorsOff(robotId);
         robotServer?.SendFlashDeath(robotId);
 
-        // Notify the assigned player's phone
+        // Notify all players on this robot's phone (driver and gunner)
         foreach (var kvp in _connToPlayer)
         {
-            string rId = PlayerToRobot(kvp.Value);
+            string rId = PlayerToRobotAny(kvp.Value);
             if (rId != robotId) continue;
 
             string json = "{\"cmd\":\"you_are_dead\",\"connectionId\":\"" +
@@ -858,8 +1017,8 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnRobotKilled(string shooterId, string targetId)
     {
-        string targetName  = GetPlayerNameForRobot(targetId);
-        string shooterName = string.IsNullOrEmpty(shooterId) ? "" : GetPlayerNameForRobot(shooterId);
+        string targetName  = GetCrewNamesForRobot(targetId);
+        string shooterName = string.IsNullOrEmpty(shooterId) ? "" : GetCrewNamesForRobot(shooterId);
 
         // Reset target's kill streak on death
         if (!string.IsNullOrEmpty(targetName))
@@ -943,10 +1102,10 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         foreach (var kvp in _connToPlayer)
         {
-            if (kvp.Value == robotInfo.AssignedPlayer)
+            if (kvp.Value == robotInfo.AssignedPlayer || kvp.Value == robotInfo.GunnerPlayer)
             {
-                SendGameStarted(kvp.Key, robotInfo.AssignedPlayer);
-                Debug.Log($"[PlayerWS] Robot {robotId} rejoined → re-sent game_started to {robotInfo.AssignedPlayer}");
+                SendGameStarted(kvp.Key, kvp.Value);
+                Debug.Log($"[PlayerWS] Robot {robotId} rejoined → re-sent game_started to {kvp.Value}");
             }
         }
     }
@@ -955,22 +1114,21 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         foreach (var kvp in _connToPlayer)
         {
-            if (PlayerToRobot(kvp.Value) != shooterRobotId) continue;
+            if (PlayerToRobotAny(kvp.Value) != shooterRobotId) continue;
             string json = "{\"cmd\":\"fire_result\"" +
                           ",\"connectionId\":\"" + EscapeJson(kvp.Key) + "\"" +
                           ",\"text\":\"" + EscapeJson(resultText) + "\"}";
             BroadcastRaw(json);
             Debug.Log($"[PlayerWS] fire_result → {kvp.Value}: {resultText}");
-            return;
         }
     }
 
     void OnRobotRespawned(string robotId)
     {
-        // Notify the assigned player so their phone can exit the dead screen
+        // Notify all players on this robot so their phone can exit the dead screen
         foreach (var kvp in _connToPlayer)
         {
-            if (PlayerToRobot(kvp.Value) != robotId) continue;
+            if (PlayerToRobotAny(kvp.Value) != robotId) continue;
 
             string json = "{\"cmd\":\"you_are_alive\",\"connectionId\":\"" +
                           EscapeJson(kvp.Key) + "\"}";
@@ -980,9 +1138,9 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
 
         _lowHpWarned.Remove(robotId);
-        string respawnName = GetPlayerNameForRobot(robotId);
+        string respawnName = GetCrewNamesForRobot(robotId);
         if (!string.IsNullOrEmpty(respawnName))
-            BroadcastDisplayEvent($"{respawnName} has returned to battle!");
+            BroadcastDisplayEvent($"{respawnName} have returned to battle!");
     }
 
     // Called every Update — moves robots from DeadRobots → RespawningRobots after 5 s,
@@ -1023,6 +1181,20 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (!string.IsNullOrEmpty(info.AssignedPlayer)) return info.AssignedPlayer;
         if (!string.IsNullOrEmpty(info.Callsign))       return info.Callsign;
         return "";
+    }
+
+    // Returns "Driver" for single-player, or "Driver and Gunner" for two-player tanks.
+    string GetCrewNamesForRobot(string robotId)
+    {
+        var dir = ServiceLocator.RobotDirectory;
+        if (string.IsNullOrEmpty(robotId) || dir == null || !dir.TryGet(robotId, out var info)) return "";
+        string driver = info.AssignedPlayer ?? "";
+        string gunner = info.GunnerPlayer   ?? "";
+        if (string.IsNullOrEmpty(driver) && string.IsNullOrEmpty(gunner))
+            return string.IsNullOrEmpty(info.Callsign) ? "" : info.Callsign;
+        if (string.IsNullOrEmpty(gunner)) return driver;
+        if (string.IsNullOrEmpty(driver)) return gunner;
+        return driver + " and " + gunner;
     }
 
     string CalculateBestPlayer()
@@ -1301,15 +1473,25 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void SendGameStarted(string connId, string playerName)
     {
-        string robotId = PlayerToRobot(playerName);
+        string robotId = PlayerToRobotAny(playerName);
         var dir = ServiceLocator.RobotDirectory;
         string callsign = robotId;
         string ip       = "";
 
+        // Determine role: solo (no gunner), driver, or gunner
+        string role        = "solo";
+        string partnerName = "";
         if (robotId != null && dir != null && dir.TryGet(robotId, out var rInfo))
         {
             callsign = string.IsNullOrEmpty(rInfo.Callsign) ? robotId : rInfo.Callsign;
             ip       = rInfo.Ip ?? "";
+            if (!string.IsNullOrEmpty(rInfo.GunnerPlayer))
+            {
+                if (rInfo.AssignedPlayer == playerName)
+                { role = "driver"; partnerName = rInfo.GunnerPlayer; }
+                else
+                { role = "gunner"; partnerName = rInfo.AssignedPlayer ?? ""; }
+            }
         }
 
         int maxHp   = ServiceLocator.GameSettings?.MaxHp ?? 100;
@@ -1320,16 +1502,18 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         string json =
             "{\"cmd\":\"game_started\"" +
-            ",\"connectionId\":\""  + EscapeJson(connId)    + "\"" +
-            ",\"callsign\":\""      + EscapeJson(callsign)  + "\"" +
-            ",\"videoUrl\":\""      + EscapeJson(videoUrl)  + "\"" +
-            ",\"hp\":"              + hp                           +
-            ",\"maxHp\":"           + maxHp                        +
-            ",\"slowTurretSpeed\":" + slowT.ToString("F3")         +
+            ",\"connectionId\":\""  + EscapeJson(connId)       + "\"" +
+            ",\"callsign\":\""      + EscapeJson(callsign)     + "\"" +
+            ",\"videoUrl\":\""      + EscapeJson(videoUrl)     + "\"" +
+            ",\"hp\":"              + hp                               +
+            ",\"maxHp\":"           + maxHp                            +
+            ",\"slowTurretSpeed\":" + slowT.ToString("F3")             +
+            ",\"role\":\""          + EscapeJson(role)          + "\"" +
+            ",\"partnerName\":\""   + EscapeJson(partnerName)   + "\"" +
             "}";
 
         BroadcastRaw(json);
-        Debug.Log("[PlayerWS] Sent game_started to " + playerName + " (robot=" + callsign + ")");
+        Debug.Log($"[PlayerWS] Sent game_started to {playerName} (robot={callsign}, role={role})");
     }
 
     void BroadcastStateUpdates()
@@ -1343,7 +1527,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
 
-        string robotId = PlayerToRobot(playerName);
+        string robotId = PlayerToRobotAny(playerName);
         int maxHp      = ServiceLocator.GameSettings?.MaxHp ?? 100;
         int hp         = GetCurrentHp(robotId, maxHp);
         float timer    = ServiceLocator.MatchTimer?.Remaining ?? 0f;
@@ -1419,7 +1603,10 @@ public class PlayerWebSocketServer : MonoBehaviour
     void BroadcastRobotList()
     {
         var dir = ServiceLocator.RobotDirectory;
-        var sb = new StringBuilder("{\"cmd\":\"robot_list\",\"robots\":[");
+        bool twoPlayerMode = ServiceLocator.GameSettings?.TwoPlayerModeEnabled ?? false;
+        var sb = new StringBuilder("{\"cmd\":\"robot_list\"");
+        sb.Append(",\"twoPlayerModeEnabled\":"); sb.Append(twoPlayerMode ? "true" : "false");
+        sb.Append(",\"robots\":[");
         bool first = true;
         if (dir != null)
         {
@@ -1428,10 +1615,12 @@ public class PlayerWebSocketServer : MonoBehaviour
                 if (!first) sb.Append(',');
                 first = false;
                 string callsign = string.IsNullOrEmpty(robot.Callsign) ? robot.RobotId : robot.Callsign;
-                sb.Append("{\"id\":\"");             sb.Append(EscapeJson(robot.RobotId));             sb.Append("\"");
-                sb.Append(",\"name\":\"");           sb.Append(EscapeJson(callsign));                  sb.Append("\"");
-                sb.Append(",\"alliance\":");         sb.Append(robot.PreferredAlliance);
-                sb.Append(",\"assignedPlayer\":\""); sb.Append(EscapeJson(robot.AssignedPlayer ?? "")); sb.Append("\"");
+                sb.Append("{\"id\":\"");              sb.Append(EscapeJson(robot.RobotId));              sb.Append("\"");
+                sb.Append(",\"name\":\"");            sb.Append(EscapeJson(callsign));                   sb.Append("\"");
+                sb.Append(",\"alliance\":");          sb.Append(robot.PreferredAlliance);
+                sb.Append(",\"assignedPlayer\":\"");  sb.Append(EscapeJson(robot.AssignedPlayer ?? "")); sb.Append("\"");
+                sb.Append(",\"gunnerPlayer\":\"");    sb.Append(EscapeJson(robot.GunnerPlayer   ?? "")); sb.Append("\"");
+                sb.Append(",\"twoPlayerEnabled\":"); sb.Append(robot.TwoPlayerEnabled ? "true" : "false");
                 sb.Append("}");
             }
         }
@@ -1561,6 +1750,13 @@ public class PlayerWebSocketServer : MonoBehaviour
         Debug.Log("[PlayerWS] spectate_update → player=" + playerName + " url=" + videoUrl);
     }
 
+    public void BroadcastTwoPlayerModeChanged(bool enabled)
+    {
+        BroadcastRaw("{\"cmd\":\"two_player_mode\",\"enabled\":" + (enabled ? "true" : "false") + "}");
+        BroadcastRobotList(); // refresh lobby so phones pick up the new setting
+        Debug.Log("[PlayerWS] BroadcastTwoPlayerModeChanged: " + enabled);
+    }
+
     public void BroadcastTurretSettings()
     {
         float slow = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.4f;
@@ -1605,6 +1801,20 @@ public class PlayerWebSocketServer : MonoBehaviour
         return null;
     }
 
+    string GunnerToRobot(string playerName)
+    {
+        if (string.IsNullOrEmpty(playerName)) return null;
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null) return null;
+        foreach (var r in dir.GetAll())
+            if (r.GunnerPlayer == playerName) return r.RobotId;
+        return null;
+    }
+
+    // Returns the robot for a player regardless of whether they are driver or gunner.
+    string PlayerToRobotAny(string playerName)
+        => PlayerToRobot(playerName) ?? GunnerToRobot(playerName);
+
     int GetCurrentHp(string robotId, int defaultMax)
     {
         if (string.IsNullOrEmpty(robotId)) return defaultMax;
@@ -1644,6 +1854,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         public float  speed;
         public int    alliance = -1;
         public string robotId;
+        public bool   enabled;
     }
 
     // ── WebSocket behaviour ──────────────────────────────────────────────────────

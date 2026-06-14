@@ -73,6 +73,10 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Seconds to coast to a stop after turret input is released. 0 = instant stop.")]
     public float TurretDeceleration = 0f;
 
+    [Header("Two-Player Mode")]
+    [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
+    public bool TwoPlayerModeEnabled = false;
+
     [Header("Audio")]
     [Tooltip("When disabled, no buzzer sounds play on any robot.")]
     public bool BuzzerEnabled = true;
@@ -126,6 +130,7 @@ public class GameSettings : MonoBehaviour
                 handshakeAckTimeoutMs    = HandshakeAckTimeoutMs,
                 handshakeWindowTimeoutMs = HandshakeWindowTimeoutMs,
                 buzzerEnabled            = BuzzerEnabled ? 1 : 0,
+                twoPlayerModeEnabled     = TwoPlayerModeEnabled ? 1 : 0,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -163,6 +168,8 @@ public class GameSettings : MonoBehaviour
             if (data.handshakeWindowTimeoutMs > 0) HandshakeWindowTimeoutMs = data.handshakeWindowTimeoutMs;
             // buzzerEnabled: -1 = not yet written (old save) → keep default true
             if (data.buzzerEnabled >= 0) BuzzerEnabled = data.buzzerEnabled != 0;
+            // twoPlayerModeEnabled: -1 = not yet written → keep default false
+            if (data.twoPlayerModeEnabled >= 0) TwoPlayerModeEnabled = data.twoPlayerModeEnabled != 0;
 
             Debug.Log("[GameSettings] Loaded from " + SavePath);
         }
@@ -192,6 +199,7 @@ public class GameSettings : MonoBehaviour
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;
         public int   handshakeWindowTimeoutMs;
-        public int   buzzerEnabled = -1; // -1 = not set (old save); 0 = off; 1 = on
+        public int   buzzerEnabled = -1;         // -1 = not set (old save); 0 = off; 1 = on
+        public int   twoPlayerModeEnabled = -1;  // -1 = not set (old save); 0 = off; 1 = on
     }
 }

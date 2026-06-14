@@ -245,6 +245,15 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "two_player_mode":
+                {
+                    bool enabled = doc.RootElement.TryGetProperty("enabled", out var tpEl)
+                        && tpEl.ValueKind == JsonValueKind.True;
+                    await _hub.Clients.All.SendAsync("TwoPlayerMode", enabled);
+                    _logger.LogInformation("[Bridge] TwoPlayerMode → {en}", enabled);
+                    break;
+                }
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;
@@ -281,19 +290,25 @@ public class UnityBridgeService : BackgroundService
     {
         if (!root.TryGetProperty("robots", out var robotsEl)) return;
 
+        bool twoPlayerModeEnabled = root.TryGetProperty("twoPlayerModeEnabled", out var tpme)
+            && tpme.ValueKind == JsonValueKind.True;
+
         var robots = robotsEl
             .EnumerateArray()
             .Select(e =>
             {
-                string id             = e.TryGetProperty("id",             out var i)  ? i.GetString()  ?? "" : "";
-                string name           = e.TryGetProperty("name",           out var n)  ? n.GetString()  ?? "" : "";
-                int    alliance       = e.TryGetProperty("alliance",       out var a) && a.TryGetInt32(out int ai) ? ai : -1;
-                string assignedPlayer = e.TryGetProperty("assignedPlayer", out var ap) ? ap.GetString() ?? "" : "";
-                return new { id, name, alliance, assignedPlayer };
+                string id               = e.TryGetProperty("id",             out var i)  ? i.GetString()  ?? "" : "";
+                string name             = e.TryGetProperty("name",           out var n)  ? n.GetString()  ?? "" : "";
+                int    alliance         = e.TryGetProperty("alliance",       out var a) && a.TryGetInt32(out int ai) ? ai : -1;
+                string assignedPlayer   = e.TryGetProperty("assignedPlayer", out var ap) ? ap.GetString() ?? "" : "";
+                string gunnerPlayer     = e.TryGetProperty("gunnerPlayer",   out var gp) ? gp.GetString() ?? "" : "";
+                bool   twoPlayerEnabled = e.TryGetProperty("twoPlayerEnabled", out var tp)
+                    && tp.ValueKind == JsonValueKind.True;
+                return new { id, name, alliance, assignedPlayer, gunnerPlayer, twoPlayerEnabled };
             })
             .ToList();
 
-        await _hub.Clients.All.SendAsync("RobotListUpdate", robots);
+        await _hub.Clients.All.SendAsync("RobotListUpdate", new { robots, twoPlayerModeEnabled });
     }
 
     private async Task HandleGameStarted(JsonElement root)
@@ -301,16 +316,19 @@ public class UnityBridgeService : BackgroundService
         string? connId   = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        string callsign        = GetString(root, "callsign") ?? "";
-        string videoUrl        = GetString(root, "videoUrl") ?? "";
+        string callsign        = GetString(root, "callsign")    ?? "";
+        string videoUrl        = GetString(root, "videoUrl")    ?? "";
         int    hp              = GetInt(root, "hp");
         int    maxHp           = GetInt(root, "maxHp", 100);
         float  slowTurretSpeed = GetFloat(root, "slowTurretSpeed", 0.4f);
+        string role            = GetString(root, "role")        ?? "solo";
+        string partnerName     = GetString(root, "partnerName") ?? "";
 
         await _hub.Clients.Client(connId).SendAsync("GameStarted",
-            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed });
+            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed, role, partnerName });
 
-        _logger.LogInformation("[Bridge] GameStarted → conn {c} (robot={r})", connId, callsign);
+        _logger.LogInformation("[Bridge] GameStarted → conn {c} (robot={r}, role={role})",
+            connId, callsign, role);
     }
 
     private async Task HandleStateUpdate(JsonElement root)

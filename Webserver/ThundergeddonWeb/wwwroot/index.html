@@ -307,6 +307,27 @@
       z-index: 10;
     }
 
+    /* ── Role / partner labels ── */
+    #role-label {
+      position: absolute;
+      top: 50px; left: 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: rgba(255,200,0,0.9);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+      letter-spacing: 0.08em;
+    }
+    #partner-label {
+      position: absolute;
+      top: 64px; left: 10px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+    }
+
     /* ── Controls overlay (full screen so children can use vh/vw) ── */
     #controls {
       position: absolute;
@@ -783,6 +804,8 @@
   <!-- Timer & robot label -->
   <div id="timer-label">3:00</div>
   <div id="robot-label"></div>
+  <div id="role-label"></div>
+  <div id="partner-label"></div>
 
   <!-- Fullscreen button -->
   <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"
@@ -854,6 +877,9 @@ let myName      = '';
 let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
 let myRobotId   = '';
 let myTankColor = ''; // colour name assigned to this player's tank (e.g. "RED")
+let myRole      = ''; // 'solo' | 'driver' | 'gunner' — set at game start
+let partnerName = ''; // the other crew member's name (two-player mode)
+let twoPlayerMode = false; // server-level two-player mode enabled flag
 let robotList   = [];
 let _playerList = [];
 let connection  = null;
@@ -1106,7 +1132,17 @@ function returnToJoin(message) {
   myAlliance  = -1;
   myRobotId   = '';
   myTankColor = '';
+  myRole      = '';
+  partnerName = '';
   updateTankColorLabel();
+  // Restore controls that may have been hidden by role gating
+  document.getElementById('joystick-base').style.display  = '';
+  document.getElementById('fire-btn').style.display       = '';
+  document.getElementById('turret-buttons').style.display = '';
+  const roleEl    = document.getElementById('role-label');
+  const partnerEl = document.getElementById('partner-label');
+  if (roleEl)    roleEl.textContent    = '';
+  if (partnerEl) partnerEl.textContent = '';
   _playerList = [];
   robotList   = [];
   setJoinWaiting();
@@ -1132,7 +1168,18 @@ function buildConnection() {
     .build();
 
   conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); onLobbyUpdate(players); });
-  conn.on('RobotListUpdate', robots  => { dbg('SignalR: RobotListUpdate ' + robots.length + ' robots'); robotList = robots || []; renderLobby(); });
+  conn.on('RobotListUpdate', data    => {
+    // data is { robots: [...], twoPlayerModeEnabled: bool } (or legacy array)
+    if (Array.isArray(data)) {
+      robotList = data;
+    } else {
+      robotList     = data.robots || [];
+      twoPlayerMode = !!data.twoPlayerModeEnabled;
+    }
+    dbg('SignalR: RobotListUpdate ' + robotList.length + ' robots, 2P=' + twoPlayerMode);
+    renderLobby();
+  });
+  conn.on('TwoPlayerMode', enabled => { twoPlayerMode = !!enabled; dbg('TwoPlayerMode=' + twoPlayerMode); renderLobby(); });
   conn.on('TankColor',       color   => { dbg('SignalR: TankColor ' + color); myTankColor = color || ''; updateTankColorLabel(); });
   conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); hideCountdown(); onGameStarted(data); });
   conn.on('CountdownStarted', total  => { dbg('SignalR: CountdownStarted total=' + total); showCountdown(total); });
@@ -1266,6 +1313,30 @@ async function pickRobot(robotId) {
   }
 }
 
+async function setTwoPlayer(enabled) {
+  if (!connection) return;
+  try { await connection.invoke('SetTwoPlayer', !!enabled); }
+  catch (err) { dbg('setTwoPlayer failed: ' + err.message); }
+}
+
+async function joinAsGunner(robotId) {
+  if (!connection) return;
+  try { await connection.invoke('JoinAsGunner', robotId); }
+  catch (err) { dbg('joinAsGunner failed: ' + err.message); }
+}
+
+async function leaveGunner() {
+  if (!connection) return;
+  try { await connection.invoke('LeaveGunner'); }
+  catch (err) { dbg('leaveGunner failed: ' + err.message); }
+}
+
+async function swapRoles() {
+  if (!connection) return;
+  try { await connection.invoke('SwapRoles'); }
+  catch (err) { dbg('swapRoles failed: ' + err.message); }
+}
+
 function setStatus(msg, isError) {
   const el = document.getElementById('join-status');
   el.textContent = msg;
@@ -1350,21 +1421,55 @@ function renderLobby() {
   }
 
   function makeRobotRow(r) {
-    const name     = r.name || r.id || '?';
-    const assigned = r.assignedPlayer || '';
-    const isMine   = !!myName && r.assignedPlayer === myName;
-    const isTaken  = !!assigned && !isMine;
-    const btnClass = isMine ? 'mine' : isTaken ? 'taken' : 'available';
-    const btnLabel = isMine ? 'Leave' : isTaken ? 'Taken' : 'Join';
-    const clickId  = isMine ? '' : r.id;
-    const btnClick = isTaken ? '' : `onclick="pickRobot('${escHtml(clickId)}')"`;
+    const name       = r.name || r.id || '?';
+    const assigned   = r.assignedPlayer || '';
+    const gunner     = r.gunnerPlayer   || '';
+    const twoPE      = !!r.twoPlayerEnabled;
+    const iAmDriver  = !!myName && assigned === myName;
+    const iAmGunner  = !!myName && gunner   === myName;
+
+    // Info text (driver / gunner labels)
+    let infoHtml = '';
+    if (assigned) infoHtml += `<span class="robot-player-assigned">Driver: ${escHtml(assigned)}${iAmDriver ? ' (you)' : ''}</span>`;
+    if (twoPE && gunner)    infoHtml += `<span class="robot-player-assigned">Gunner: ${escHtml(gunner)}${iAmGunner ? ' (you)' : ''}</span>`;
+    if (twoPE && !gunner && iAmDriver) infoHtml += `<span class="robot-player-assigned" style="color:var(--accent2)">Gunner slot open</span>`;
+
+    // Action buttons
+    let actHtml = '';
+    if (iAmDriver) {
+      actHtml += `<button class="role-btn mine" onclick="pickRobot('')">Leave</button>`;
+      if (twoPlayerMode) {
+        actHtml += `<label style="display:flex;align-items:center;gap:5px;font-size:0.75rem;margin-top:5px;cursor:pointer;color:var(--text)">
+          <input type="checkbox" ${twoPE ? 'checked' : ''} onchange="setTwoPlayer(this.checked)" style="cursor:pointer;accent-color:var(--accent)">2-player
+        </label>`;
+        if (twoPE && gunner) {
+          actHtml += `<button class="role-btn mine" style="margin-top:5px;font-size:0.72rem;padding:5px 10px" onclick="swapRoles()">Swap</button>`;
+        }
+      }
+    } else if (iAmGunner) {
+      actHtml += `<button class="role-btn mine" onclick="leaveGunner()">Leave</button>`;
+      actHtml += `<button class="role-btn mine" style="margin-top:5px;font-size:0.72rem;padding:5px 10px" onclick="swapRoles()">Swap</button>`;
+    } else if (twoPlayerMode && twoPE && !gunner && assigned) {
+      // can join as gunner — not already driver/gunner anywhere
+      const alreadyInTank = !!myRobotId || robotList.some(rb => rb.gunnerPlayer === myName);
+      if (!alreadyInTank) {
+        actHtml += `<button class="role-btn available" onclick="joinAsGunner('${escHtml(r.id)}')">Join Gunner</button>`;
+      } else {
+        actHtml += `<button class="role-btn taken" disabled>Taken</button>`;
+      }
+    } else if (!assigned) {
+      actHtml += `<button class="role-btn available" onclick="pickRobot('${escHtml(r.id)}')">Join</button>`;
+    } else {
+      actHtml += `<button class="role-btn taken" disabled>Taken</button>`;
+    }
+
     return `<div class="robot-row">
       <div class="robot-info">
         <span class="robot-name">${escHtml(name)}</span>
-        ${assigned ? `<span class="robot-player-assigned">${escHtml(assigned)}${isMine ? ' (you)' : ''}</span>` : ''}
+        ${infoHtml}
       </div>
-      <div class="robot-actions">
-        <button class="role-btn ${btnClass}" ${isTaken ? 'disabled' : ''} ${btnClick}>${btnLabel}</button>
+      <div class="robot-actions" style="display:flex;flex-direction:column;align-items:flex-end">
+        ${actHtml}
       </div>
     </div>`;
   }
@@ -1434,7 +1539,7 @@ function hideCountdown() {
 }
 
 function onGameStarted(data) {
-  dbg('onGameStarted: callsign=' + data.callsign + ' videoUrl=' + data.videoUrl);
+  dbg('onGameStarted: callsign=' + data.callsign + ' videoUrl=' + data.videoUrl + ' role=' + data.role);
   maxHp           = data.maxHp           || 100;
   currentHp       = data.hp              || maxHp;
   if (data.slowTurretSpeed) slowTurretSpeed = data.slowTurretSpeed;
@@ -1442,6 +1547,21 @@ function onGameStarted(data) {
   isDeadWalk = false;
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
   document.getElementById('screen-dead').classList.remove('active', 'walkmode');
+
+  // Role gating
+  myRole      = data.role        || 'solo';
+  partnerName = data.partnerName || '';
+  const isGunner = myRole === 'gunner';
+  const isDriver = myRole === 'driver';
+  document.getElementById('joystick-base').style.display  = isGunner ? 'none' : '';
+  document.getElementById('fire-btn').style.display       = isDriver ? 'none' : '';
+  document.getElementById('turret-buttons').style.display = isDriver ? 'none' : '';
+
+  const roleEl    = document.getElementById('role-label');
+  const partnerEl = document.getElementById('partner-label');
+  if (roleEl)    roleEl.textContent    = isGunner ? 'GUNNER' : isDriver ? 'DRIVER' : '';
+  if (partnerEl) partnerEl.textContent = partnerName
+    ? (isGunner ? 'Driver: ' : 'Gunner: ') + partnerName : '';
 
   enterFullscreenLandscape();
 
@@ -1451,7 +1571,7 @@ function onGameStarted(data) {
 
   updateHpBar();
   showScreen('screen-playing');
-  dbg('onGameStarted done → screen-playing shown');
+  dbg('onGameStarted done → screen-playing shown role=' + myRole);
   startGameLoop();
 }
 
@@ -1625,6 +1745,7 @@ function startGameLoop() {
 function gameLoop(ts) {
   rafId = requestAnimationFrame(gameLoop);
   if (isDead) return;
+  if (myRole === 'gunner') return; // gunners never send drive
 
   // Drive at up to DRIVE_HZ
   const now = performance.now();

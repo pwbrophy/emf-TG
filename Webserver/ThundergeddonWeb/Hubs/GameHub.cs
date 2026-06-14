@@ -67,6 +67,46 @@ public class GameHub : Hub
         });
     }
 
+    // ── Two-player lobby actions ─────────────────────────────────────────────────
+
+    public async Task SetTwoPlayer(bool enabled)
+    {
+        await _bridge.SendToUnity(new
+        {
+            cmd          = "set_two_player",
+            connectionId = Context.ConnectionId,
+            enabled      = enabled
+        });
+    }
+
+    public async Task JoinAsGunner(string robotId)
+    {
+        await _bridge.SendToUnity(new
+        {
+            cmd          = "join_as_gunner",
+            connectionId = Context.ConnectionId,
+            robotId      = robotId ?? ""
+        });
+    }
+
+    public async Task LeaveGunner()
+    {
+        await _bridge.SendToUnity(new
+        {
+            cmd          = "leave_gunner",
+            connectionId = Context.ConnectionId
+        });
+    }
+
+    public async Task SwapRoles()
+    {
+        await _bridge.SendToUnity(new
+        {
+            cmd          = "swap_roles",
+            connectionId = Context.ConnectionId
+        });
+    }
+
     // ── Gameplay inputs ──────────────────────────────────────────────────────────
 
     public async Task SendDrive(float left, float right)

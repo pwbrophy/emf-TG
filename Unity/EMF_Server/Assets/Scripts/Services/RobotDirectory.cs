@@ -274,15 +274,43 @@ public class RobotDirectory : IRobotDirectory
         OnRobotUpdated?.Invoke(r);
     }
 
+    public void SetGunnerPlayer(string robotId, string playerName)
+    {
+        if (!_byId.TryGetValue(robotId, out var r)) return;
+        if (r.GunnerPlayer == playerName) return;
+        r.GunnerPlayer = playerName;
+        OnRobotUpdated?.Invoke(r);
+    }
+
+    public void ClearGunnerPlayer(string robotId)
+    {
+        if (!_byId.TryGetValue(robotId, out var r)) return;
+        if (string.IsNullOrEmpty(r.GunnerPlayer)) return;
+        r.GunnerPlayer = null;
+        OnRobotUpdated?.Invoke(r);
+    }
+
+    public void SetTwoPlayerEnabled(string robotId, bool enabled)
+    {
+        if (!_byId.TryGetValue(robotId, out var r)) return;
+        if (r.TwoPlayerEnabled == enabled) return;
+        r.TwoPlayerEnabled = enabled;
+        if (!enabled && !string.IsNullOrEmpty(r.GunnerPlayer))
+        {
+            r.GunnerPlayer = null; // clear gunner when 2P is disabled
+        }
+        OnRobotUpdated?.Invoke(r);
+    }
+
     public void ClearAllAssignedPlayers()
     {
         foreach (var r in _byId.Values)
         {
-            if (!string.IsNullOrEmpty(r.AssignedPlayer))
-            {
-                r.AssignedPlayer = null;
-                OnRobotUpdated?.Invoke(r);
-            }
+            bool changed = false;
+            if (!string.IsNullOrEmpty(r.AssignedPlayer)) { r.AssignedPlayer = null; changed = true; }
+            if (!string.IsNullOrEmpty(r.GunnerPlayer))   { r.GunnerPlayer   = null; changed = true; }
+            if (r.TwoPlayerEnabled)                       { r.TwoPlayerEnabled = false; changed = true; }
+            if (changed) OnRobotUpdated?.Invoke(r);
         }
         // Clear preferredPlayer in memory only — do NOT call SaveToDisk() here.
         // If called before robots have connected, _savedById is empty and SaveToDisk

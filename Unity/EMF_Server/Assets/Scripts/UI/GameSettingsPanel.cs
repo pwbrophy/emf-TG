@@ -19,6 +19,9 @@ public class GameSettingsPanel : MonoBehaviour
     [Header("Audio")]
     [SerializeField] private Toggle buzzerToggle;
 
+    [Header("Two-Player Mode")]
+    [SerializeField] private Toggle twoPlayerToggle;
+
     private GameSettings _settings;
 
     private void OnEnable()
@@ -41,6 +44,8 @@ public class GameSettingsPanel : MonoBehaviour
         if (countdownField)     countdownField.onValueChanged.AddListener(OnCountdownChanged);
         if (buzzerToggle)       buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
         if (buzzerToggle)       buzzerToggle.onValueChanged.AddListener(OnBuzzerChanged);
+        if (twoPlayerToggle)    twoPlayerToggle.SetIsOnWithoutNotify(_settings.TwoPlayerModeEnabled);
+        if (twoPlayerToggle)    twoPlayerToggle.onValueChanged.AddListener(OnTwoPlayerChanged);
     }
 
     private void OnDisable()
@@ -52,6 +57,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (killPointsField)    killPointsField.onValueChanged.RemoveListener(OnKillPointsChanged);
         if (countdownField)     countdownField.onValueChanged.RemoveListener(OnCountdownChanged);
         if (buzzerToggle)       buzzerToggle.onValueChanged.RemoveListener(OnBuzzerChanged);
+        if (twoPlayerToggle)    twoPlayerToggle.onValueChanged.RemoveListener(OnTwoPlayerChanged);
     }
 
     private void OnMaxHpChanged(string v)
@@ -120,5 +126,13 @@ public class GameSettingsPanel : MonoBehaviour
         _settings.BuzzerEnabled = enabled;
         _settings.SaveToDisk();
         ServiceLocator.RobotServer?.BroadcastBuzzerToAll(enabled);
+    }
+
+    private void OnTwoPlayerChanged(bool enabled)
+    {
+        if (_settings == null) return;
+        _settings.TwoPlayerModeEnabled = enabled;
+        _settings.SaveToDisk();
+        ServiceLocator.PlayerServer?.BroadcastTwoPlayerModeChanged(enabled);
     }
 }
