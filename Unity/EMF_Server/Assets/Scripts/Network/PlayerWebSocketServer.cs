@@ -458,8 +458,10 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         var assigned = new HashSet<string>();
         foreach (var r in dir.GetAll())
-            if (!string.IsNullOrEmpty(r.AssignedPlayer))
-                assigned.Add(r.AssignedPlayer);
+        {
+            if (!string.IsNullOrEmpty(r.AssignedPlayer)) assigned.Add(r.AssignedPlayer);
+            if (!string.IsNullOrEmpty(r.GunnerPlayer))   assigned.Add(r.GunnerPlayer);
+        }
 
         string reason = EscapeJson("Game is starting — you are not assigned to a tank. Please wait for the next game.");
 
