@@ -87,7 +87,7 @@ public class GameFlowPresenter : MonoBehaviour
             {
                 bool hasRobot = false;
                 foreach (var r in dir.GetAll())
-                    if (r.AssignedPlayer == p.Name) { hasRobot = true; break; }
+                    if (r.AssignedPlayer == p.Name || r.GunnerPlayer == p.Name) { hasRobot = true; break; }
                 if (!hasRobot) unassigned.Add(p.Name);
             }
         }

@@ -646,6 +646,18 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
 
         dir.SetGunnerPlayer(robotId, playerName);
+
+        // Send tank colour to gunner if robot already has one (driver got it on assignment)
+        if (_robotColorIndex.TryGetValue(robotId, out int colorIdx))
+        {
+            var (colorName, cr, cg, cb) = PlayerColors[colorIdx];
+            string gunnerConn = FindConnForPlayer(playerName);
+            if (!string.IsNullOrEmpty(gunnerConn))
+                BroadcastRaw("{\"cmd\":\"tank_color\",\"connectionId\":\"" +
+                             EscapeJson(gunnerConn) + "\",\"colorName\":\"" +
+                             EscapeJson(colorName) + "\"}");
+        }
+
         // Add to PlayersService with the robot's alliance so they appear in the player list
         int alliance = robotInfo.PreferredAlliance;
         if (!ServiceLocator.Players?.GetAll().Any(p => p.Name == playerName) ?? false)
@@ -1580,7 +1592,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                 string robotCallsign = "";
                 if (dir != null)
                     foreach (var robot in dir.GetAll())
-                        if (robot.AssignedPlayer == players[i].Name)
+                        if (robot.AssignedPlayer == players[i].Name || robot.GunnerPlayer == players[i].Name)
                         {
                             robotCallsign = string.IsNullOrEmpty(robot.Callsign) ? robot.RobotId : robot.Callsign;
                             break;
