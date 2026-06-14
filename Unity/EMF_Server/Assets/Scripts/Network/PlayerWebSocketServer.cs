@@ -54,7 +54,6 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     // Throttle state broadcasts to ~1 Hz
     private float _lastStateUpdate = 0f;
-    private float _lastCaptureTick = 0f;
 
     // robotId → Time.time when the robot died (used to time the 5-s explosion → dead-walk transition)
     private readonly Dictionary<string, float> _deathTimes = new Dictionary<string, float>();
@@ -127,8 +126,6 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.CapturePoints.OnPointCaptured    += OnCapturePointCaptured;
             ServiceLocator.CapturePoints.OnTeamPointsChanged += OnTeamPointsChanged;
         }
-        if (ServiceLocator.MatchTimer != null)
-            ServiceLocator.MatchTimer.OnTick += OnMatchTimerTick;
     }
 
     private void OnDestroy()
@@ -167,9 +164,6 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.CapturePoints.OnPointCaptured    -= OnCapturePointCaptured;
             ServiceLocator.CapturePoints.OnTeamPointsChanged -= OnTeamPointsChanged;
         }
-        if (ServiceLocator.MatchTimer != null)
-            ServiceLocator.MatchTimer.OnTick -= OnMatchTimerTick;
-
         if (ServiceLocator.PlayerServer == this)
             ServiceLocator.PlayerServer = null;
 
@@ -205,6 +199,10 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         PumpMain();
         CheckDeathTransitions();
+
+        // Award capture-point victory points every frame (smooth, evenly-spaced intervals)
+        if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing)
+            ServiceLocator.CapturePoints?.Tick(Time.deltaTime);
 
         // Push state updates (timer) to all players and display at ~1 Hz
         if (_started && Time.time - _lastStateUpdate >= 1.0f)
@@ -721,6 +719,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (dir == null || ws == null) return;
         foreach (var robot in dir.GetAll())
         {
+            if (string.IsNullOrEmpty(robot.AssignedPlayer)) continue;
             ws.SendStreamOn(robot.RobotId);
             ws.SendMotorsOn(robot.RobotId);
         }
@@ -883,6 +882,18 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
 
         BroadcastDisplayEvent(text);
+
+        // Signal display page to play kill burn animation on bar + HP row
+        int killerAlliance = string.IsNullOrEmpty(shooterId) ? -1 : GetRobotAllianceIndex(shooterId);
+        string tCallsign   = "";
+        var rdir = ServiceLocator.RobotDirectory;
+        if (rdir != null && rdir.TryGet(targetId, out var tInfo))
+            tCallsign = string.IsNullOrEmpty(tInfo.Callsign) ? targetId : tInfo.Callsign;
+        int killPts = ServiceLocator.GameSettings?.TeamPointsPerKill ?? 0;
+        BroadcastRaw("{\"cmd\":\"kill_event\"" +
+            ",\"teamIndex\":" + killerAlliance +
+            ",\"targetCallsign\":\"" + EscapeJson(tCallsign) + "\"" +
+            ",\"points\":" + killPts + "}");
     }
 
     /// <summary>
@@ -1085,6 +1096,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             foreach (var robot in dir.GetAll())
             {
+                if (string.IsNullOrEmpty(robot.AssignedPlayer)) continue;
                 if (paused)
                 {
                     robotServer.SendMotorsOff(robot.RobotId);
@@ -1105,15 +1117,17 @@ public class PlayerWebSocketServer : MonoBehaviour
     }
 
     void OnPlayersChanged() => BroadcastPlayerList();
-    void OnRobotUpdated(RobotInfo _) { BroadcastPlayerList(); BroadcastRobotList(); }
-    void OnRobotRemoved(string _)    { BroadcastPlayerList(); BroadcastRobotList(); }
-
-    void OnMatchTimerTick(float remaining)
+    void OnRobotUpdated(RobotInfo robot)
     {
-        if (Time.time - _lastCaptureTick < 5.0f) return;
-        _lastCaptureTick = Time.time;
-        ServiceLocator.CapturePoints?.Tick();
+        // When a robot is auto-assigned a player (e.g. tank connects after players join),
+        // update that player's alliance to match the robot's team.
+        if (!string.IsNullOrEmpty(robot.AssignedPlayer) && robot.PreferredAlliance >= 0)
+            ServiceLocator.Players?.SetAllianceByName(robot.AssignedPlayer, robot.PreferredAlliance);
+
+        BroadcastPlayerList();
+        BroadcastRobotList();
     }
+    void OnRobotRemoved(string _)    { BroadcastPlayerList(); BroadcastRobotList(); }
 
     void OnCapturePointCaptured(int pointIndex, int allianceIndex, string pointName)
     {

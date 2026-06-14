@@ -654,6 +654,25 @@
       from { transform: scale(1.5); opacity: 0.5; }
       to   { transform: scale(1);   opacity: 1; }
     }
+
+    /* ── Force landscape during countdown + gameplay only ── */
+    @media (orientation: portrait) {
+      body.game-active {
+        position: fixed;
+        overflow: hidden;
+        width: 100vh;
+        height: 100vw;
+        top: calc((100vh - 100vw) / 2);
+        left: calc((100vw - 100vh) / 2);
+        transform: rotate(90deg);
+        transform-origin: center;
+      }
+      /* vw/vh are swapped in portrait; correct controls to match rotated landscape */
+      body.game-active #joystick-base  { left: 5vh; bottom: max(10vw, calc(env(safe-area-inset-bottom) + 20px)); }
+      body.game-active #turret-buttons { right: 5vh; bottom: max(10vw, calc(env(safe-area-inset-bottom) + 20px)); }
+      body.game-active #fire-btn       { bottom: max(10vw, calc(env(safe-area-inset-bottom) + 20px)); }
+      body.game-active #countdown-number { font-size: 40vmax; }
+    }
   </style>
 </head>
 <body>
@@ -1017,8 +1036,9 @@ function showScreen(id) {
   dbg('showScreen: ' + id);
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  // Landscape lock only applies during gameplay
-  // Reposition debug panel so it never blocks gameplay controls
+  const inGame = id === 'screen-playing' || id === 'screen-gameover';
+  document.body.classList.toggle('game-active', inGame);
+  if (!inGame) { try { screen.orientation.unlock(); } catch (_) {} }
   positionDbgPanel(id);
 }
 
@@ -1356,6 +1376,8 @@ function toggleFullscreen() {
 function showCountdown(total) {
   // Only show to players who are in the lobby (i.e. assigned a tank and waiting)
   if (!document.getElementById('screen-lobby').classList.contains('active')) return;
+  document.body.classList.add('game-active');
+  try { screen.orientation.lock('landscape').catch(() => {}); } catch (_) {}
   const numEl = document.getElementById('countdown-number');
   numEl.textContent = total;
   numEl.style.animation = 'none';
@@ -1421,6 +1443,7 @@ function onYouAreDead() {
   const countEl   = document.getElementById('dead-countdown');
   const subtitleEl = document.getElementById('dead-subtitle');
 
+  haptic([150, 80, 250, 80, 400]); // big escalating death rumble
   overlay.classList.remove('walkmode');
   overlay.classList.add('active');
   titleEl.textContent    = 'YOU ARE DEAD';
@@ -1510,6 +1533,7 @@ function dirToHitEffect(dir) {
 }
 
 function showHitEffect(dir, shooter) {
+  haptic([60, 40, 60]); // small double-tap rumble
   const effectEl = document.getElementById(dirToHitEffect(dir));
   effectEl.classList.remove('flash');
   void effectEl.offsetWidth; // force reflow to restart animation
@@ -1676,6 +1700,7 @@ function onFire() {
   if (now < fireCooldownUntil) return;
 
   fireCooldownUntil = now + FIRE_COOLDOWN_MS;
+  haptic([15, 10, 25, 10, 60]); // rising smooth pulse
   if (connection) connection.invoke('Fire').catch(() => {});
 
   startFireCooldownUI();
@@ -1723,6 +1748,16 @@ function startFireCooldownUI() {
 }
 
 // ════════════════════════════════════════════════════════
+// Haptics (Android Chrome; silently ignored elsewhere)
+// ════════════════════════════════════════════════════════
+function haptic(pattern) {
+  try {
+    const ok = navigator.vibrate && navigator.vibrate(pattern);
+    dbg('haptic ' + JSON.stringify(pattern) + ' → ' + ok);
+  } catch (e) { dbg('haptic err: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════
 // Utilities
 // ════════════════════════════════════════════════════════
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -1751,7 +1786,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v22</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v24</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

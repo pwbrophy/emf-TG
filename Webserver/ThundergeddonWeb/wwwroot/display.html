@@ -45,13 +45,20 @@
     font-size: 0.85em; font-weight: 700; }
   #tp-label-0 { color: var(--blue); }
   #tp-label-1 { color: var(--red); text-align: right; }
-  #teambar-track { position: relative; height: 24px; background: #111; border-radius: 12px; overflow: hidden; }
+  #teambar-track { position: relative; height: 48px; background: #111; border-radius: 24px; }
   #teambar-fill-0 { position: absolute; left: 0; top: 0; height: 100%; background: var(--blue);
-    transition: width 0.4s ease; }
+    border-radius: 24px 0 0 24px; transition: width 0.4s ease; }
   #teambar-fill-1 { position: absolute; right: 0; top: 0; height: 100%; background: var(--red);
-    transition: width 0.4s ease; }
+    border-radius: 0 24px 24px 0; transition: width 0.4s ease; }
   #teambar-centre { position: absolute; left: 50%; top: 0; width: 3px; height: 100%;
     background: #fff; transform: translateX(-50%); z-index: 1; }
+  /* Victory bar flash — one-shot, triggered by JS on each score tick */
+  @keyframes bar-flash {
+    0%        { filter: brightness(1); box-shadow: none; }
+    10%       { filter: brightness(4); box-shadow: 0 0 22px 8px rgba(255,255,255,0.7); }
+    35%, 100% { filter: brightness(1); box-shadow: none; }
+  }
+  .bar-flash-once { animation: bar-flash 0.5s linear forwards; }
 
   /* Event log */
   #eventlog { background: var(--panel); border-radius: 8px; padding: 10px 16px; flex-shrink: 0;
@@ -91,6 +98,63 @@
     border: 3px solid #555; transition: background 0.4s, border-color 0.4s; }
   .cp-circle.owner-0 { background: var(--blue); border-color: var(--blue); }
   .cp-circle.owner-1 { background: var(--red);  border-color: var(--red); }
+  @keyframes cp-flash {
+    0%        { filter: brightness(1); box-shadow: none; }
+    10%       { filter: brightness(3); box-shadow: 0 0 16px 6px rgba(255,255,255,0.6); }
+    35%, 100% { filter: brightness(1); box-shadow: none; }
+  }
+  .cp-flash { animation: cp-flash 0.5s linear forwards; }
+
+  /* Kill burn — fire effect on victory bar fill when kill points awarded */
+  @keyframes bar-burn {
+    0%        { filter: brightness(1); box-shadow: none; }
+    10%       { filter: brightness(3); box-shadow: 0 0 32px 14px rgba(255,30,0,0.95); }
+    35%       { filter: brightness(3.5); box-shadow: 0 0 36px 16px rgba(255,130,0,0.8); }
+    60%       { filter: brightness(5); box-shadow: 0 0 44px 20px rgba(255,255,255,0.7); }
+    85%       { filter: brightness(2); box-shadow: 0 0 20px 8px rgba(255,80,0,0.4); }
+    100%      { filter: brightness(1); box-shadow: none; }
+  }
+  .bar-burn { animation: bar-burn 2s ease-out forwards; }
+
+  /* Kill HP row — red-to-orange burn on the killed robot's row */
+  @keyframes hp-row-burn {
+    0%   { background: rgba(255,20,0,0.35);  box-shadow: inset 0 0 0 2px rgba(255,20,0,0.95); }
+    20%  { background: rgba(255,70,0,0.5);   box-shadow: inset 0 0 0 3px rgba(255,80,0,1); }
+    50%  { background: rgba(255,30,0,0.3);   box-shadow: inset 0 0 0 2px rgba(255,40,0,0.7); }
+    75%  { background: rgba(255,100,0,0.15); box-shadow: inset 0 0 0 1px rgba(255,100,0,0.35); }
+    100% { background: transparent; box-shadow: none; }
+  }
+  .hp-row-burn { animation: hp-row-burn 2s ease-out forwards; border-radius: 4px; }
+
+  /* Kill screen pulse — full-viewport red flash */
+  @keyframes kill-screen-pulse {
+    0%   { opacity: 0; }
+    6%   { opacity: 0.55; }
+    20%  { opacity: 0.18; }
+    45%  { opacity: 0.32; }
+    70%  { opacity: 0.08; }
+    100% { opacity: 0; }
+  }
+  #kill-overlay { position: fixed; inset: 0; background: rgb(180,0,0);
+    pointer-events: none; z-index: 55; opacity: 0; }
+  #kill-overlay.kill-screen-pulse { animation: kill-screen-pulse 2s ease-out forwards; }
+
+  /* Ground shake — applied to body so everything rocks */
+  @keyframes ground-shake {
+    0%         { transform: translateY(0); }
+    8%         { transform: translateY(-10px); }
+    18%        { transform: translateY(8px); }
+    28%        { transform: translateY(-12px); }
+    38%        { transform: translateY(9px); }
+    48%        { transform: translateY(-6px); }
+    58%        { transform: translateY(4px); }
+    68%        { transform: translateY(-3px); }
+    80%        { transform: translateY(2px); }
+    90%        { transform: translateY(-1px); }
+    100%       { transform: translateY(0); }
+  }
+  body.ground-shake { animation: ground-shake 0.9s ease-out forwards; }
+
   .cp-label { font-size: 0.75em; font-weight: 700; text-transform: uppercase;
     letter-spacing: 1px; color: var(--dim); }
 
@@ -154,11 +218,11 @@
     font-size: 0.8em; font-weight: 700; }
   #fpv-tp-label-0 { color: var(--blue); }
   #fpv-tp-label-1 { color: var(--red); }
-  #fpv-tp-track { position: relative; height: 20px; background: #111; border-radius: 10px; overflow: hidden; }
+  #fpv-tp-track { position: relative; height: 40px; background: #111; border-radius: 20px; }
   #fpv-tp-fill-0 { position: absolute; left: 0; top: 0; height: 100%; background: var(--blue);
-    transition: width 0.4s ease; }
+    border-radius: 20px 0 0 20px; transition: width 0.4s ease; }
   #fpv-tp-fill-1 { position: absolute; right: 0; top: 0; height: 100%; background: var(--red);
-    transition: width 0.4s ease; }
+    border-radius: 0 20px 20px 0; transition: width 0.4s ease; }
   #fpv-tp-centre { position: absolute; left: 50%; top: 0; width: 3px; height: 100%;
     background: #fff; transform: translateX(-50%); z-index: 1; }
 
@@ -283,6 +347,8 @@
   <div id="paused-title">&#9646;&#9646; PAUSED</div>
   <div id="paused-sub">Game paused by operator</div>
 </div>
+
+<div id="kill-overlay"></div>
 
 <div id="status-banner">Connecting&hellip;</div>
 
@@ -487,10 +553,110 @@ function applySpectateUpdate(data) {
   renderFpv();
 }
 
+// ── Victory bar flash (event-driven, synced to Unity score ticks) ─────────
+const _flashTimers = [[], []];
+
+function triggerBarFlashes(teamIndex, count) {
+  _flashTimers[teamIndex].forEach(id => clearTimeout(id));
+  _flashTimers[teamIndex] = [];
+  const interval = 3000 / count;
+  for (let i = 0; i < count; i++) {
+    const id = setTimeout(() => _doBarFlash(teamIndex), i * interval);
+    _flashTimers[teamIndex].push(id);
+  }
+}
+
+function _doBarFlash(teamIndex) {
+  const fillIds = teamIndex === 0
+    ? ['teambar-fill-0', 'fpv-tp-fill-0']
+    : ['teambar-fill-1', 'fpv-tp-fill-1'];
+  for (const id of fillIds) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.classList.remove('bar-flash-once');
+    void el.offsetWidth;
+    el.classList.add('bar-flash-once');
+  }
+}
+
+// ── Kill burn (bar fire + HP row burn when a tank is destroyed) ───────────────
+let _killBurnCallsign  = '';
+let _killBurnExpiry    = 0;   // ms timestamp; 0 = inactive
+let _killBarResetTimer = null;
+
+conn.on('KillEvent', data => {
+  triggerKillBurn(
+    (data && data.teamIndex != null) ? data.teamIndex : -1,
+    (data && data.targetCallsign)    ? data.targetCallsign : ''
+  );
+});
+
+function triggerKillBurn(teamIndex, targetCallsign) {
+  _killBurnCallsign = targetCallsign;
+  _killBurnExpiry   = Date.now() + 1900;  // HP row highlights for ~2 s (two 1 Hz renders)
+
+  // Full-screen red pulse
+  const overlay = document.getElementById('kill-overlay');
+  if (overlay) {
+    overlay.classList.remove('kill-screen-pulse');
+    void overlay.offsetWidth;
+    overlay.classList.add('kill-screen-pulse');
+  }
+
+  // Ground shake — everything rocks for 0.9 s
+  document.body.classList.remove('ground-shake');
+  void document.body.offsetWidth;
+  document.body.classList.add('ground-shake');
+  setTimeout(() => document.body.classList.remove('ground-shake'), 950);
+
+  if (teamIndex < 0) return;
+
+  const fillIds = teamIndex === 0
+    ? ['teambar-fill-0', 'fpv-tp-fill-0']
+    : ['teambar-fill-1', 'fpv-tp-fill-1'];
+
+  // Slow bar slide to 2 s and play fire animation
+  for (const id of fillIds) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.style.transition = 'width 2s ease';
+    el.classList.remove('bar-burn');
+    void el.offsetWidth;
+    el.classList.add('bar-burn');
+  }
+
+  // Restore fast transition once bar has finished sliding
+  if (_killBarResetTimer) clearTimeout(_killBarResetTimer);
+  _killBarResetTimer = setTimeout(() => {
+    _killBarResetTimer = null;
+    for (const id of fillIds) {
+      const el = document.getElementById(id);
+      if (el) el.style.transition = '';
+    }
+  }, 2100);
+}
+
+// ── Capture point flash (round-robin per team, synced to score ticks) ────────
+const _cpFlashCounter = [0, 0];
+
+function triggerCpFlash(teamIndex) {
+  const cps = state.capturePoints || [];
+  const owned = cps.map((cp, i) => ({ owner: cp.owner, i })).filter(cp => cp.owner === teamIndex);
+  if (owned.length === 0) return;
+  const cpIndex = owned[_cpFlashCounter[teamIndex] % owned.length].i;
+  _cpFlashCounter[teamIndex]++;
+  const el = document.getElementById('cp-' + cpIndex);
+  if (!el) return;
+  el.classList.remove('cp-flash');
+  void el.offsetWidth;
+  el.classList.add('cp-flash');
+}
+
 // ── Apply state update ────────────────────────────────────────────────────
 function applyDisplayUpdate(data) {
   const wasPlaying = (state.phase === 'playing');
   const prevTimerVal = _prevTimer;
+  const oldTp = (state.teamPoints || [0, 0]).slice();
   state = Object.assign(state, data);
   const nowPlaying = (state.phase === 'playing');
 
@@ -502,6 +668,7 @@ function applyDisplayUpdate(data) {
     // Reset milestone flags so the new game gets fresh announcements
     Object.keys(_milestoneFired).forEach(k => delete _milestoneFired[k]);
     _spokenCountdownSecs.clear();
+    _cpFlashCounter[0] = _cpFlashCounter[1] = 0;
     speak('To battle, show no mercy!');
   }
 
@@ -513,6 +680,16 @@ function applyDisplayUpdate(data) {
   if (fpvState.active && data.robots) {
     const r = data.robots.find(x => x.player === fpvState.playerName);
     if (r) { fpvState.hp = r.hp; fpvState.maxHp = r.maxHp || 100; }
+  }
+
+  // Trigger bar + CP flashes when tick points arrive (gained 1–3 = tick, >3 = kill bonus → skip)
+  const newTp = state.teamPoints || [0, 0];
+  for (let i = 0; i < 2; i++) {
+    const gained = (newTp[i] || 0) - (oldTp[i] || 0);
+    if (gained >= 1 && gained <= 3) {
+      triggerBarFlashes(i, gained);
+      triggerCpFlash(i);
+    }
   }
 
   render();
@@ -538,8 +715,8 @@ function renderFpv() {
   // Team points bar (mirrored inside FPV overlay)
   const tp  = state.teamPoints || [0, 0];
   const max = state.maxTeamPoints || 300;
-  const w0  = Math.min(50, (tp[0] / max) * 100);
-  const w1  = Math.min(50, (tp[1] / max) * 100);
+  const w0  = Math.min(50, (tp[0] / max) * 50);
+  const w1  = Math.min(50, (tp[1] / max) * 50);
   document.getElementById('fpv-tp-fill-0').style.width = w0 + '%';
   document.getElementById('fpv-tp-fill-1').style.width = w1 + '%';
   const an = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
@@ -603,9 +780,9 @@ function renderTeamBar() {
   const max = state.maxTeamPoints || 300;
   const total = tp[0] + tp[1];
 
-  // Each side fills inward from its edge, based on its share of points
-  const w0 = Math.min(50, (tp[0] / max) * 100);
-  const w1 = Math.min(50, (tp[1] / max) * 100);
+  // Each side fills inward from its edge; full points = reaches centre (50%)
+  const w0 = Math.min(50, (tp[0] / max) * 50);
+  const w1 = Math.min(50, (tp[1] / max) * 50);
 
   document.getElementById('teambar-fill-0').style.width = w0 + '%';
   document.getElementById('teambar-fill-1').style.width = w1 + '%';
@@ -644,8 +821,9 @@ function renderAlliances() {
 
     byAlliance[a].forEach(r => {
       const pct = Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+      const isBurning = (r.callsign === _killBurnCallsign && Date.now() < _killBurnExpiry);
       const row = document.createElement('div');
-      row.className = 'robot-row' + (r.dead ? ' dead' : '');
+      row.className = 'robot-row' + (r.dead ? ' dead' : '') + (isBurning ? ' hp-row-burn' : '');
       row.innerHTML =
         `<span class="robot-callsign">${escHtml(r.callsign || '')}</span>` +
         `<span class="robot-player">${escHtml(r.player || '—')}</span>` +
@@ -663,7 +841,9 @@ function renderCapturePoints() {
     const circle = document.getElementById('cp-' + i);
     if (!circle) continue;
     const owner = pts[i] ? pts[i].owner : -1;
-    circle.className = 'cp-circle' + (owner >= 0 ? ` owner-${owner}` : '');
+    // Use classList so cp-flash is never clobbered
+    circle.classList.remove('owner-0', 'owner-1');
+    if (owner >= 0) circle.classList.add('owner-' + owner);
   }
 }
 

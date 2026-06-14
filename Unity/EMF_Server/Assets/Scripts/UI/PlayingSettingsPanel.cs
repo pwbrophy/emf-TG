@@ -16,12 +16,6 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField ptsPerKillField;
     [SerializeField] private TMP_InputField slowTurretSpeedField;
 
-    [Header("Tank Physics fields")]
-    [SerializeField] private TMP_InputField driveAccelField;
-    [SerializeField] private TMP_InputField driveDecelField;
-    [SerializeField] private TMP_InputField turretAccelField;
-    [SerializeField] private TMP_InputField turretDecelField;
-
     [Header("Audio")]
     [SerializeField] private Toggle buzzerToggle;
 
@@ -50,10 +44,6 @@ public class PlayingSettingsPanel : MonoBehaviour
         Set(maxTeamPtsField,       _settings.MaxTeamPoints.ToString());
         Set(ptsPerKillField,       _settings.TeamPointsPerKill.ToString());
         Set(slowTurretSpeedField,  _settings.SlowTurretSpeed.ToString("F2"));
-        Set(driveAccelField,  _settings.DriveAcceleration.ToString("F2"));
-        Set(driveDecelField,  _settings.DriveDeceleration.ToString("F2"));
-        Set(turretAccelField, _settings.TurretAcceleration.ToString("F2"));
-        Set(turretDecelField, _settings.TurretDeceleration.ToString("F2"));
         if (buzzerToggle != null) buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
     }
 
@@ -72,10 +62,6 @@ public class PlayingSettingsPanel : MonoBehaviour
         Reg(maxTeamPtsField, OnMaxTeamPtsChanged);
         Reg(ptsPerKillField,      OnPtsPerKillChanged);
         Reg(slowTurretSpeedField, OnSlowTurretSpeedChanged);
-        Reg(driveAccelField,  OnDriveAccelChanged);
-        Reg(driveDecelField,  OnDriveDecelChanged);
-        Reg(turretAccelField, OnTurretAccelChanged);
-        Reg(turretDecelField, OnTurretDecelChanged);
         if (buzzerToggle != null) buzzerToggle.onValueChanged.AddListener(OnBuzzerChanged);
     }
 
@@ -89,10 +75,6 @@ public class PlayingSettingsPanel : MonoBehaviour
         Unreg(maxTeamPtsField, OnMaxTeamPtsChanged);
         Unreg(ptsPerKillField,      OnPtsPerKillChanged);
         Unreg(slowTurretSpeedField, OnSlowTurretSpeedChanged);
-        Unreg(driveAccelField,  OnDriveAccelChanged);
-        Unreg(driveDecelField,  OnDriveDecelChanged);
-        Unreg(turretAccelField, OnTurretAccelChanged);
-        Unreg(turretDecelField, OnTurretDecelChanged);
         if (buzzerToggle != null) buzzerToggle.onValueChanged.RemoveListener(OnBuzzerChanged);
     }
 
@@ -157,50 +139,6 @@ public class PlayingSettingsPanel : MonoBehaviour
             _settings.SlowTurretSpeed = n;
             Save();
             ServiceLocator.PlayerServer?.BroadcastTurretSettings();
-        }
-    }
-
-    private void OnDriveAccelChanged(string v)
-    {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n >= 0f)
-        {
-            _settings.DriveAcceleration = n;
-            Save();
-            ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings);
-        }
-    }
-
-    private void OnDriveDecelChanged(string v)
-    {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n >= 0f)
-        {
-            _settings.DriveDeceleration = n;
-            Save();
-            ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings);
-        }
-    }
-
-    private void OnTurretAccelChanged(string v)
-    {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n >= 0f)
-        {
-            _settings.TurretAcceleration = n;
-            Save();
-            ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings);
-        }
-    }
-
-    private void OnTurretDecelChanged(string v)
-    {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n >= 0f)
-        {
-            _settings.TurretDeceleration = n;
-            Save();
-            ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings);
         }
     }
 

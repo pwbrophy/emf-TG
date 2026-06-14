@@ -32,14 +32,20 @@ public sealed class GameService
         int maxHp    = settings != null ? settings.MaxHp : 100;
 
         var dir      = ServiceLocator.RobotDirectory;
-        var robotsNow = dir != null ? dir.GetAll() : Array.Empty<RobotInfo>();
+        var allRobots = dir != null ? dir.GetAll() : Array.Empty<RobotInfo>();
+
+        // Only include robots that have a player assigned — unassigned robots stay inactive
+        var assignedRobots = new List<RobotInfo>();
+        foreach (var r in allRobots)
+            if (!string.IsNullOrEmpty(r.AssignedPlayer))
+                assignedRobots.Add(r);
 
         var gs = new GameState
         {
             Alliances = 2,
             Players   = 2,
             Clients   = 2,
-            Robots    = new List<RobotInfo>(robotsNow)
+            Robots    = assignedRobots
         };
 
         // Seed HP for every robot in the match

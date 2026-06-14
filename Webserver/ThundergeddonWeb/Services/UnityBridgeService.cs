@@ -226,6 +226,16 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "kill_event":
+                {
+                    int    teamIndex       = GetInt(doc.RootElement, "teamIndex", -1);
+                    string? targetCallsign = GetString(doc.RootElement, "targetCallsign");
+                    int    points          = GetInt(doc.RootElement, "points");
+                    await _hub.Clients.All.SendAsync("KillEvent",
+                        new { teamIndex, targetCallsign = targetCallsign ?? "", points });
+                    break;
+                }
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;
