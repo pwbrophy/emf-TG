@@ -29,6 +29,17 @@ enum class StatusPattern : uint8_t {
     InGameSolid,    // solid on   — game in progress
 };
 
+// Boot-progress phase shown on the WS2812B strip.
+// Phases are ordered so uint8_t comparison works (>= tricks avoided; see _drawBootStatus).
+enum class BootPhase : uint8_t {
+    HwInit,           // 0,1 = 5% dim red;            2–5 = off
+    HwDone,           // 0,1 = solid red;              2–5 = off
+    WifiConnecting,   // 0,1 = solid red;   2,3 = flashing green;     4,5 = off
+    WifiDone,         // 0,1 = solid red;   2,3 = solid green;         4,5 = off
+    ServerConnecting, // 0,1 = solid red;   2,3 = solid green;  4,5 = flashing blue
+    ServerDone,       // all clear; low-power white dot bouncing 0↔5
+};
+
 class LedController
 {
 public:
@@ -44,7 +55,7 @@ public:
 
         pinMode(LED_STATUS_PIN, OUTPUT);
         _setStatusPin(false); // off at boot
-        _drawHpBar(); // show initial full blue bar immediately
+        _drawBootStatus();    // show initial dim-red on LEDs 0,1
     }
 
     // Must be called every loop tick to advance timed effects and blink patterns.
@@ -53,6 +64,31 @@ public:
         _updateEffect(now);
         _updatePulse(now);
         _updateStatus(now);
+        _updateBootAnim(now);
+    }
+
+    // Advance the boot-progress overlay.  Call at key points in setup():
+    //   HwDone           — after all hardware is initialised
+    //   WifiConnecting   — just before connectWifi()
+    //   WifiDone         — just after connectWifi() returns
+    //   ServerConnecting — when entering the discovery/connect loop
+    //   ServerDone       — when the WebSocket connection opens
+    void setBootPhase(BootPhase p)
+    {
+        _bootPhase    = p;
+        _bootFlashOn  = true;
+        _bootNextFlash = 0; // force immediate draw on next update
+        _bouncePos    = 0;
+        _bounceDir    = 1;
+        _bounceNext   = 0;
+        if (_effect == Effect::None) {
+            if (p == BootPhase::ServerDone) {
+                _strip.clear();
+                _strip.show();
+            } else {
+                _drawBootStatus();
+            }
+        }
     }
 
     // ---- HP bar ----
@@ -68,7 +104,38 @@ public:
         _nextPulseToggle = millis() + 500;
         if (_hp > 0 && (_effect == Effect::DeadBlink || _effect == Effect::DeathExplosion))
             _effect = Effect::None;
+        if (_effect == Effect::None && !_playerColorActive) _drawHpBar();
+    }
+
+    // ---- Player identification colour ----
+
+    // Pulse all 6 LEDs in the given colour while in the lobby / countdown.
+    // Call clearPlayerColor() when the game starts (game_start_fanfare command).
+    void setPlayerColor(uint8_t r, uint8_t g, uint8_t b)
+    {
+        _pcR = r; _pcG = g; _pcB = b;
+        _playerColorActive = true;
+        _countdownLeds     = -1;
+        if (_effect == Effect::None) _drawPlayerBar();
+    }
+
+    void clearPlayerColor()
+    {
+        _playerColorActive = false;
+        _countdownLeds     = -1;
         if (_effect == Effect::None) _drawHpBar();
+    }
+
+    // Countdown bar: show count/total LEDs solid in player colour.
+    // Call each countdown_tick. Ignored if no player colour is active.
+    void setCountdownTick(int count, int total)
+    {
+        if (!_playerColorActive) return;
+        if (total <= 0) total = 1;
+        _countdownLeds = (int)roundf((float)count * (float)LED_STRIP_COUNT / (float)total);
+        if (_countdownLeds > LED_STRIP_COUNT) _countdownLeds = LED_STRIP_COUNT;
+        if (_countdownLeds < 0)               _countdownLeds = 0;
+        if (_effect == Effect::None) _drawPlayerBar();
     }
 
     // ---- Timed flash effects ----
@@ -175,7 +242,7 @@ private:
             uint32_t elapsed = now - _seqStart;
             if (elapsed >= 200) {
                 _effect = Effect::None;
-                _drawHpBar();
+                _restoreBackground();
                 return;
             }
             int ledsOff = (int)(elapsed * LED_STRIP_COUNT / 200);
@@ -190,7 +257,7 @@ private:
             uint32_t elapsed = now - _seqStart;
             if (elapsed >= 1200) {
                 _effect = Effect::None;
-                _drawHpBar();
+                _restoreBackground();
                 return;
             }
             if (elapsed < 750) {
@@ -219,7 +286,7 @@ private:
             uint32_t elapsed = now - _seqStart;
             if (elapsed >= 650) {
                 _effect = Effect::None;
-                _drawHpBar();
+                _restoreBackground();
                 return;
             }
             if (elapsed < 450) {
@@ -303,14 +370,14 @@ private:
         // Fire / Hit timed effects: wait for expiry then restore HP bar.
         if ((int32_t)(now - _effectEnd) >= 0) {
             _effect = Effect::None;
-            _drawHpBar();
+            _restoreBackground();
         }
     }
 
     // Drive the 0.5 s warning pulse when HP is in the last LED's territory.
     void _updatePulse(uint32_t now)
     {
-        if (_effect != Effect::None || _hp <= 0) return; // suppress during any effect
+        if (_effect != Effect::None || _hp <= 0 || _playerColorActive) return;
         float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
         if (ledsF > 1.0f) return; // only pulse at last LED
 
@@ -392,6 +459,96 @@ private:
         _strip.show();
     }
 
+    // Draw all LEDs in player's solid colour (or countdown bar).
+    void _drawPlayerBar()
+    {
+        _strip.clear();
+        int leds = (_countdownLeds < 0) ? LED_STRIP_COUNT : _countdownLeds;
+        for (int i = 0; i < leds; i++)
+            _strip.setPixelColor(i, _strip.Color(
+                (uint8_t)((uint32_t)_pcR * 200 / 255),
+                (uint8_t)((uint32_t)_pcG * 200 / 255),
+                (uint8_t)((uint32_t)_pcB * 200 / 255)));
+        _strip.show();
+    }
+
+    // Called when a timed effect expires to restore whatever was showing before it.
+    void _restoreBackground()
+    {
+        if (_playerColorActive)
+            _drawPlayerBar();
+        else
+            _drawHpBar();
+    }
+
+    // ---- Boot-progress overlay ----
+
+    // Render a static snapshot of the current boot phase.
+    // Called immediately on phase change and on each flash toggle.
+    void _drawBootStatus()
+    {
+        static constexpr uint8_t DIM5 = 13;  // ~5% of 255
+
+        _strip.clear();
+
+        // LEDs 0,1 — power / hardware status
+        _strip.setPixelColor(0, _strip.Color(DIM5, 0, 0));
+        _strip.setPixelColor(1, _strip.Color(DIM5, 0, 0));
+
+        // LEDs 2,3 — Wi-Fi status (only from WifiConnecting onwards)
+        if (_bootPhase == BootPhase::WifiConnecting ||
+            _bootPhase == BootPhase::WifiDone       ||
+            _bootPhase == BootPhase::ServerConnecting) {
+            bool gOn = (_bootPhase != BootPhase::WifiConnecting) || _bootFlashOn;
+            if (gOn) {
+                _strip.setPixelColor(2, _strip.Color(0, DIM5, 0));
+                _strip.setPixelColor(3, _strip.Color(0, DIM5, 0));
+            }
+        }
+
+        // LEDs 4,5 — server / WebSocket status (only from ServerConnecting onwards)
+        if (_bootPhase == BootPhase::ServerConnecting) {
+            if (_bootFlashOn) {
+                _strip.setPixelColor(4, _strip.Color(0, 0, DIM5));
+                _strip.setPixelColor(5, _strip.Color(0, 0, DIM5));
+            }
+        }
+
+        _strip.show();
+    }
+
+    // Called every update() tick to handle flash timing and the post-boot bounce.
+    void _updateBootAnim(uint32_t now)
+    {
+        if (_effect != Effect::None) return;
+
+        if (_bootPhase == BootPhase::WifiConnecting ||
+            _bootPhase == BootPhase::ServerConnecting) {
+            if ((int32_t)(now - _bootNextFlash) >= 0) {
+                _bootFlashOn   = !_bootFlashOn;
+                _bootNextFlash = now + 300;
+                _drawBootStatus();
+            }
+            return;
+        }
+
+        // Player colour is drawn statically by setPlayerColor/setCountdownTick — don't overwrite with bounce.
+        if (_playerColorActive) return;
+
+        if (_bootPhase == BootPhase::ServerDone && _hp == 0) {
+            if ((int32_t)(now - _bounceNext) >= 0) {
+                static const uint32_t BD[LED_STRIP_COUNT] = {200, 110, 55, 55, 110, 200};
+                _bounceNext = now + BD[_bouncePos];
+                _strip.clear();
+                _strip.setPixelColor(_bouncePos, _strip.Color(13, 13, 13)); // ~5% white
+                _strip.show();
+                _bouncePos += _bounceDir;
+                if (_bouncePos >= LED_STRIP_COUNT) { _bouncePos = LED_STRIP_COUNT - 2; _bounceDir = -1; }
+                if (_bouncePos < 0)                { _bouncePos = 1;                   _bounceDir =  1; }
+            }
+        }
+    }
+
     void _fillStrip(uint8_t r, uint8_t g, uint8_t b)
     {
         for (int i = 0; i < LED_STRIP_COUNT; i++) {
@@ -423,4 +580,21 @@ private:
     StatusPattern     _statusPattern     = StatusPattern::SearchingFast;
     uint32_t          _statusNextToggle  = 0;
     bool              _statusLedOn       = false;
+
+    // Boot-progress overlay
+    BootPhase         _bootPhase         = BootPhase::HwInit;
+    bool              _bootFlashOn       = true;
+    uint32_t          _bootNextFlash     = 0;
+
+    // ServerDone idle bounce
+    int               _bouncePos         = 0;
+    int               _bounceDir         = 1;
+    uint32_t          _bounceNext        = 0;
+
+    // Player identification colour (lobby phase)
+    bool              _playerColorActive = false;
+    uint8_t           _pcR               = 0;
+    uint8_t           _pcG               = 0;
+    uint8_t           _pcB               = 0;
+    int               _countdownLeds     = -1; // -1 = full bar; 0..6 = countdown bar
 };

@@ -69,6 +69,24 @@ public class PlayerWebSocketServer : MonoBehaviour
     private bool[] _teamPoints50Fired = { false, false };
     private bool[] _teamPoints90Fired = { false, false };
 
+    // ── Player identification colours ─────────────────────────────────────────────
+    private static readonly (string Name, byte R, byte G, byte B)[] PlayerColors =
+    {
+        ("RED",    255,   0,   0),
+        ("GREEN",    0, 200,   0),
+        ("BLUE",     0,   0, 255),
+        ("YELLOW", 255, 200,   0),
+        ("CYAN",     0, 220, 255),
+        ("PINK",   255,   0, 180),
+        ("ORANGE", 255,  70,   0),
+        ("PURPLE", 150,   0, 255),
+        ("LIME",    80, 255,   0),
+        ("WHITE",  255, 255, 255),
+    };
+    private readonly Dictionary<string, int>    _robotColorIndex = new Dictionary<string, int>();
+    private readonly Dictionary<string, string> _robotPrevPlayer = new Dictionary<string, string>();
+    private int _nextColorIndex = 0;
+
     // ── Events (consumed by UI components) ───────────────────────────────────────
 
     /// Fired when a phone sends drive/turret input.
@@ -675,6 +693,14 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastPhase(phase);
         if (phase == GamePhase.Playing)
         {
+            // Clear player colour pulses on all robots — game_start_fanfare also does this
+            // on the firmware side, but belt-and-suspenders for any missed fanfare.
+            var dir = ServiceLocator.RobotDirectory;
+            if (dir != null)
+                foreach (var r in dir.GetAll())
+                    ServiceLocator.RobotServer?.SendClearPlayerColor(r.RobotId);
+            _robotPrevPlayer.Clear(); // allow re-assignment of colours next lobby
+
             SendGameStartedToAll();
             ActivateAllRobots();
             _gameStartTime = Time.time;
@@ -1124,8 +1150,42 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (!string.IsNullOrEmpty(robot.AssignedPlayer) && robot.PreferredAlliance >= 0)
             ServiceLocator.Players?.SetAllianceByName(robot.AssignedPlayer, robot.PreferredAlliance);
 
+        // Player colour identification: detect assignment changes and send colour to robot + phone.
+        string robotId   = robot.RobotId;
+        string newPlayer = robot.AssignedPlayer ?? "";
+        _robotPrevPlayer.TryGetValue(robotId, out string prevPlayer);
+
+        if (newPlayer != (prevPlayer ?? ""))
+        {
+            _robotPrevPlayer[robotId] = newPlayer;
+            if (!string.IsNullOrEmpty(newPlayer))
+            {
+                if (!_robotColorIndex.ContainsKey(robotId))
+                    _robotColorIndex[robotId] = _nextColorIndex++ % PlayerColors.Length;
+                int idx = _robotColorIndex[robotId];
+                var (colorName, r, g, b) = PlayerColors[idx];
+                ServiceLocator.RobotServer?.SendPlayerColor(robotId, r, g, b);
+                string connId = FindConnForPlayer(newPlayer);
+                if (!string.IsNullOrEmpty(connId))
+                    BroadcastRaw("{\"cmd\":\"tank_color\",\"connectionId\":\"" +
+                                 EscapeJson(connId) + "\",\"colorName\":\"" +
+                                 EscapeJson(colorName) + "\"}");
+            }
+            else
+            {
+                ServiceLocator.RobotServer?.SendClearPlayerColor(robotId);
+            }
+        }
+
         BroadcastPlayerList();
         BroadcastRobotList();
+    }
+
+    string FindConnForPlayer(string playerName)
+    {
+        foreach (var kvp in _connToPlayer)
+            if (kvp.Value == playerName) return kvp.Key;
+        return null;
     }
     void OnRobotRemoved(string _)    { BroadcastPlayerList(); BroadcastRobotList(); }
 

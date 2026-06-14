@@ -692,6 +692,23 @@ public class RobotWebSocketServer : MonoBehaviour
         return SendJsonToRobot(robotId, "{\"cmd\":\"game_start_fanfare\"}");
     }
 
+    public bool SendPlayerColor(string robotId, byte r, byte g, byte b)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"set_player_color\",\"r\":{r},\"g\":{g},\"b\":{b}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok ? $"[WS->Robot] set_player_color r={r} g={g} b={b} -> {robotId}" : $"[WS->Robot] FAILED set_player_color -> {robotId}");
+        return ok;
+    }
+
+    public bool SendClearPlayerColor(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"clear_player_color\"}");
+        Debug.Log(ok ? $"[WS->Robot] clear_player_color -> {robotId}" : $"[WS->Robot] FAILED clear_player_color -> {robotId}");
+        return ok;
+    }
+
     // ===== Internals =====
 
     private WebSocketSharp.Server.WebSocketSessionManager ServiceSessions()

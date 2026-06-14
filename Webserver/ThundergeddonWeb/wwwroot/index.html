@@ -650,6 +650,16 @@
       text-transform: uppercase;
       font-weight: 600;
     }
+    #tank-color-label, #countdown-color-label {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      margin-top: 10px;
+      padding: 6px 18px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.08);
+    }
+    #tank-color-label:empty, #countdown-color-label:empty { display: none; }
     @keyframes countpulse {
       from { transform: scale(1.5); opacity: 0.5; }
       to   { transform: scale(1);   opacity: 1; }
@@ -681,6 +691,7 @@
 <div id="countdown-overlay">
   <div id="countdown-number">5</div>
   <div id="countdown-label">Get ready!</div>
+  <div id="countdown-color-label"></div>
 </div>
 
 <!-- ── Connection lost overlay ────────────────────────────────────── -->
@@ -717,6 +728,7 @@
       <div class="waiting-anim"></div>
       <h2>LOBBY</h2>
       <p>Waiting for the game to start…</p>
+      <div id="tank-color-label"></div>
     </div>
   </div>
 
@@ -841,6 +853,7 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 let myName      = '';
 let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
 let myRobotId   = '';
+let myTankColor = ''; // colour name assigned to this player's tank (e.g. "RED")
 let robotList   = [];
 let _playerList = [];
 let connection  = null;
@@ -1092,6 +1105,8 @@ function returnToJoin(message) {
   clearHitOverlay();
   myAlliance  = -1;
   myRobotId   = '';
+  myTankColor = '';
+  updateTankColorLabel();
   _playerList = [];
   robotList   = [];
   setJoinWaiting();
@@ -1118,6 +1133,7 @@ function buildConnection() {
 
   conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); onLobbyUpdate(players); });
   conn.on('RobotListUpdate', robots  => { dbg('SignalR: RobotListUpdate ' + robots.length + ' robots'); robotList = robots || []; renderLobby(); });
+  conn.on('TankColor',       color   => { dbg('SignalR: TankColor ' + color); myTankColor = color || ''; updateTankColorLabel(); });
   conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); hideCountdown(); onGameStarted(data); });
   conn.on('CountdownStarted', total  => { dbg('SignalR: CountdownStarted total=' + total); showCountdown(total); });
   conn.on('CountdownTick',   (count, total) => { dbg('SignalR: CountdownTick ' + count); updateCountdown(count); });
@@ -1272,11 +1288,30 @@ function onLobbyUpdate(players) {
   renderLobby();
 }
 
+const TANK_COLOR_CSS = {
+  RED: '#ff4040', GREEN: '#00c800', BLUE: '#4488ff', YELLOW: '#ffc800',
+  CYAN: '#00dcff', PINK: '#ff00b4', ORANGE: '#ff4600', PURPLE: '#9600ff',
+  LIME: '#50ff00', WHITE: '#ffffff',
+};
+
+function updateTankColorLabel() {
+  const text = myTankColor ? `Your tank is glowing ${myTankColor}!` : '';
+  const color = TANK_COLOR_CSS[myTankColor] || '#fff';
+  for (const id of ['tank-color-label', 'countdown-color-label']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.textContent = text;
+    el.style.color = color;
+    el.style.textShadow = myTankColor ? `0 0 12px ${color}88` : 'none';
+  }
+}
+
 function renderLobby() {
   // Toggle lobby header based on squad assignment
   const inSquad = !!myRobotId;
   document.getElementById('lobby-pick-squad-msg').style.display = inSquad ? 'none' : '';
   document.getElementById('lobby-waiting-msg').style.display    = inSquad ? ''     : 'none';
+  updateTankColorLabel();
 
   // Players without a robot yet
   const unassigned = _playerList.filter(p => {

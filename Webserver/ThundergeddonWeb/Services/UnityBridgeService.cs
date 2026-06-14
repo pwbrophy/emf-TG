@@ -236,6 +236,15 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "tank_color":
+                {
+                    string? connId    = GetString(doc.RootElement, "connectionId");
+                    string? colorName = GetString(doc.RootElement, "colorName");
+                    if (!string.IsNullOrEmpty(connId) && !string.IsNullOrEmpty(colorName))
+                        await _hub.Clients.Client(connId).SendAsync("TankColor", colorName);
+                    break;
+                }
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;

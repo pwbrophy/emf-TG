@@ -637,10 +637,12 @@ static void connectWifi()
                     return;
                 }
                 if (s == WL_NO_SSID_AVAIL || s == WL_CONNECT_FAILED) break;
+                leds.update(millis());
                 delay(100);
             }
             Serial.printf("[WIFI] %s not available\n", WIFI_NETWORKS[i].ssid);
             WiFi.disconnect(true);
+            leds.update(millis());
             delay(100);
         }
     }
@@ -731,6 +733,7 @@ static void onWsClose()
     mjpeg.setEnabled(false);
     if (cam.isStarted()) cam.stop();
     leds.setStatus(StatusPattern::SearchingFast);
+    leds.setBootPhase(BootPhase::ServerConnecting);
     g_wsUrl.clear();
     startDiscovery();
     Serial.println("[WS] closed → rediscover");
@@ -962,8 +965,7 @@ static void handleWsText(const String& s)
         int count = doc["count"] | 1;
         int total = doc["total"] | 5;
 
-        // LED bar dims one step per second: show count/total fraction
-        leds.setHp(count, total);
+        leds.setCountdownTick(count, total);
 
         // All bloops the same low pitch; last tick (count=1) jumps to a higher "beeep"
         uint32_t baseFreq   = (count == 1) ? 350u : 110u;
@@ -973,7 +975,23 @@ static void handleWsText(const String& s)
         return;
     }
 
+    if (strcmp(cmd, "set_player_color") == 0) {
+        uint8_t r = (uint8_t)(int)(doc["r"] | 0);
+        uint8_t g = (uint8_t)(int)(doc["g"] | 0);
+        uint8_t b = (uint8_t)(int)(doc["b"] | 0);
+        leds.setPlayerColor(r, g, b);
+        Serial.printf("[LED] set_player_color r=%d g=%d b=%d\n", r, g, b);
+        return;
+    }
+
+    if (strcmp(cmd, "clear_player_color") == 0) {
+        leds.clearPlayerColor();
+        Serial.println("[LED] clear_player_color");
+        return;
+    }
+
     if (strcmp(cmd, "game_start_fanfare") == 0) {
+        leds.clearPlayerColor();
         // Restore full HP display (game starts at full HP)
         leds.setHp(100, 100);
         startBuzzerFanfareEffect();
@@ -1013,6 +1031,7 @@ static void connectWebSocket()
                            ",\"inv_turret\":"    + String(g_inv_turret) + "}";
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
+            leds.setBootPhase(BootPhase::ServerDone);
             Serial.println("[WS] opened");
 
         } else if (e == WebsocketsEvent::ConnectionClosed) {
@@ -1123,8 +1142,13 @@ void setup()
             Serial.printf("[ID] Loaded name: %s\n", g_robotName.c_str());
     }
 
-    // Wi-Fi: blocking until connected
+    // Hardware init complete — solid red on LEDs 0,1
+    leds.setBootPhase(BootPhase::HwDone);
+
+    // Wi-Fi: blocking until connected — flashing green on LEDs 2,3
+    leds.setBootPhase(BootPhase::WifiConnecting);
     connectWifi();
+    leds.setBootPhase(BootPhase::WifiDone);
 
     // MJPEG server binds port 81 now; streaming gate (_enabled) stays false
     // until the server sends stream_on
@@ -1155,6 +1179,8 @@ void setup()
         otaEndCb
     );
 
+    // Entering server discovery — flashing blue on LEDs 4,5
+    leds.setBootPhase(BootPhase::ServerConnecting);
     startDiscovery();
 }
 
