@@ -116,7 +116,7 @@ public:
         _pcR = r; _pcG = g; _pcB = b;
         _playerColorActive = true;
         _countdownLeds     = -1;
-        if (_effect == Effect::None) _drawPlayerBar();
+        _pcNextPulse       = 0; // start pulse immediately on next tick
     }
 
     void clearPlayerColor()
@@ -475,10 +475,12 @@ private:
     // Called when a timed effect expires to restore whatever was showing before it.
     void _restoreBackground()
     {
-        if (_playerColorActive)
-            _drawPlayerBar();
-        else
+        if (_playerColorActive) {
+            if (_countdownLeds >= 0) _drawPlayerBar(); // static countdown bar
+            // pulse mode: _updateBootAnim picks up within 50ms
+        } else {
             _drawHpBar();
+        }
     }
 
     // ---- Boot-progress overlay ----
@@ -532,8 +534,26 @@ private:
             return;
         }
 
-        // Player colour is drawn statically by setPlayerColor/setCountdownTick — don't overwrite with bounce.
-        if (_playerColorActive) return;
+        if (_playerColorActive) {
+            if (_countdownLeds < 0) {
+                // Sine-wave pulse 0 → 50% → 0, ~2s period, updated at 20 Hz.
+                if ((int32_t)(now - _pcNextPulse) >= 0) {
+                    _pcNextPulse = now + 50;
+                    float phase  = (float)(now % 2000u) / 2000.0f * 6.28318530f; // 0..2π
+                    float bright = (1.0f - cosf(phase)) * 0.5f;                   // 0..1
+                    uint8_t b    = (uint8_t)(bright * 128.0f);                    // 0..128
+                    _strip.clear();
+                    for (int i = 0; i < LED_STRIP_COUNT; i++)
+                        _strip.setPixelColor(i, _strip.Color(
+                            (uint8_t)((uint32_t)_pcR * b / 255),
+                            (uint8_t)((uint32_t)_pcG * b / 255),
+                            (uint8_t)((uint32_t)_pcB * b / 255)));
+                    _strip.show();
+                }
+            }
+            // Countdown bar is static (drawn by setCountdownTick) — no periodic update needed.
+            return;
+        }
 
         if (_bootPhase == BootPhase::ServerDone && _hp == 0) {
             if ((int32_t)(now - _bounceNext) >= 0) {
@@ -597,4 +617,5 @@ private:
     uint8_t           _pcG               = 0;
     uint8_t           _pcB               = 0;
     int               _countdownLeds     = -1; // -1 = full bar; 0..6 = countdown bar
+    uint32_t          _pcNextPulse       = 0;
 };
