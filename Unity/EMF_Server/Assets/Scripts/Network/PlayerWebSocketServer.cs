@@ -1689,9 +1689,10 @@ public class PlayerWebSocketServer : MonoBehaviour
                 if (!first) sb.Append(",");
                 first = false;
 
-                string callsign  = r.Callsign ?? r.RobotId;
+                string callsign   = r.Callsign ?? r.RobotId;
                 string playerName = r.AssignedPlayer ?? "";
-                int    alliance  = -1;
+                string gunnerName = r.GunnerPlayer   ?? "";
+                int    alliance   = -1;
                 if (players != null)
                     foreach (var p in players)
                         if (p.Name == playerName) { alliance = p.AllianceIndex; break; }
@@ -1699,8 +1700,9 @@ public class PlayerWebSocketServer : MonoBehaviour
                 int hp = gs.RobotHp.TryGetValue(r.RobotId, out int v) ? v : maxHp;
                 bool dead = gs.DeadRobots.Contains(r.RobotId);
 
-                sb.Append("{\"callsign\":\""); sb.Append(EscapeJson(callsign)); sb.Append("\"");
-                sb.Append(",\"player\":\"");   sb.Append(EscapeJson(playerName)); sb.Append("\"");
+                sb.Append("{\"callsign\":\"");     sb.Append(EscapeJson(callsign));   sb.Append("\"");
+                sb.Append(",\"player\":\"");        sb.Append(EscapeJson(playerName)); sb.Append("\"");
+                sb.Append(",\"gunnerPlayer\":\"");  sb.Append(EscapeJson(gunnerName)); sb.Append("\"");
                 sb.Append(",\"alliance\":"); sb.Append(alliance);
                 sb.Append(",\"hp\":"); sb.Append(hp);
                 sb.Append(",\"maxHp\":"); sb.Append(maxHp);

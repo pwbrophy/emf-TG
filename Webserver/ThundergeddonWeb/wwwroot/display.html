@@ -81,7 +81,7 @@
   .alliance-title.a1 { color: var(--red); }
   .robot-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
   .robot-callsign { font-size: 0.85em; color: var(--dim); width: 90px; flex-shrink: 0; }
-  .robot-player { font-size: 0.9em; font-weight: 600; width: 80px; flex-shrink: 0; }
+  .robot-player { font-size: 0.9em; font-weight: 600; width: 140px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hp-bar-wrap { flex: 1; height: 14px; background: #111; border-radius: 7px; overflow: hidden; }
   .hp-bar { height: 100%; border-radius: 7px; transition: width 0.3s ease; }
   .hp-bar.a0 { background: var(--blue); }
@@ -761,7 +761,9 @@ function renderLobbyOverlay() {
   (state.robots || []).forEach(r => {
     const div = document.createElement('div');
     div.className = 'lobby-player-name';
-    div.textContent = r.player || r.callsign || '?';
+    div.textContent = r.gunnerPlayer
+      ? (r.player || '?') + ' & ' + r.gunnerPlayer
+      : (r.player || r.callsign || '?');
     (r.alliance === 0 ? t0 : t1).appendChild(div);
   });
 }
@@ -826,7 +828,7 @@ function renderAlliances() {
       row.className = 'robot-row' + (r.dead ? ' dead' : '') + (isBurning ? ' hp-row-burn' : '');
       row.innerHTML =
         `<span class="robot-callsign">${escHtml(r.callsign || '')}</span>` +
-        `<span class="robot-player">${escHtml(r.player || '—')}</span>` +
+        `<span class="robot-player">${escHtml(r.gunnerPlayer ? (r.player || '—') + ' & ' + r.gunnerPlayer : (r.player || '—'))}</span>` +
         `<div class="hp-bar-wrap"><div class="hp-bar a${a}" style="width:${pct}%"></div></div>` +
         `<span class="hp-num">${r.dead ? 'DEAD' : r.hp}</span>`;
       block.appendChild(row);
