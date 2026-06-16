@@ -318,6 +318,14 @@ public class RobotWebSocketServer : MonoBehaviour
                 // with the robot's current IP so the video URL is refreshed).
                 ServiceLocator.PlayerServer?.NotifyRobotRejoined(id);
             }
+            else if (_flow?.Phase == GamePhase.Lobby)
+            {
+                // Robot may have been left in a death animation from the previous game.
+                // Sending set_hp with full health clears any DeadBlink / DeathExplosion
+                // effect on the firmware so the player colour pulse works at game start.
+                if (gs != null)
+                    SendSetHp(id, gs.MaxHp, gs.MaxHp);
+            }
 
             return;
         }

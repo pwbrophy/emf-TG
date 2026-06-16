@@ -511,22 +511,188 @@
     }
 
     /* ═══════════════════════════════════════════════════
-       SCREEN 5 — GAME OVER
+       GAME OVER OVERLAY — multi-phase animated sequence
     ═══════════════════════════════════════════════════ */
-    #screen-gameover {
-      background: rgba(0,0,0,0.85);
+    #go-overlay {
       display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      pointer-events: none;
+    }
+    #go-overlay.active { display: block; }
+
+    /* Phase 1: GAME OVER text (transparent bg — video shows through) */
+    #go-p1 {
+      position: absolute;
+      inset: 0;
+      z-index: 2;   /* stay above the blackout overlay */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    #go-p1.visible { opacity: 1; }
+
+    #go-title {
+      font-size: clamp(2.6rem, 14vmin, 7rem);
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 0.12em;
+      text-align: center;
+      animation: go-pulse 0.9s ease-in-out infinite alternate;
+    }
+    @keyframes go-pulse {
+      from { text-shadow: 0 0 10px rgba(255,255,255,0.7), 0 0 30px rgba(255,80,0,0.5), 0 0 60px rgba(255,0,0,0.2); }
+      to   { text-shadow: 0 0 30px rgba(255,255,255,1),   0 0 80px rgba(255,80,0,0.9), 0 0 150px rgba(255,0,0,0.4); }
+    }
+
+    /* Black fade overlay — sits between video (z0) and GAME OVER text (z2) */
+    #go-blackout {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background: #000;
+      opacity: 0;
+      transition: opacity 2s ease;
+    }
+    #go-blackout.fading { opacity: 1; }
+
+    /* Phase 2: Victory or defeat result — z-index 3 keeps it above the blackout (z1) and p1 (z2) */
+    #go-p2 {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      background: #000;
+      display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      z-index: 60;
+      opacity: 0;
+      transition: opacity 1.2s ease;
       text-align: center;
       padding: 24px;
     }
-    #screen-gameover.active { display: flex; }
-    #screen-gameover h2 { font-size: 2.2rem; font-weight: 900; margin-bottom: 8px; color: var(--accent2); }
-    #screen-gameover p  { color: var(--muted); margin-bottom: 32px; }
-    #play-again-btn { max-width: 240px; }
+    #go-p2.visible { opacity: 1; pointer-events: all; }
+
+    #go-fireworks {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #go-skull {
+      position: relative;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity 1.4s ease 0.6s;
+      margin-bottom: 12px;
+    }
+    #go-skull.visible { opacity: 1; }
+
+    #go-result-msg {
+      position: relative;
+      z-index: 1;
+      font-size: clamp(1.8rem, 8vw, 3.4rem);
+      font-weight: 900;
+      letter-spacing: 0.03em;
+      color: #fff;
+      text-align: center;
+      opacity: 0;
+      transition: opacity 0.9s ease 0.3s;
+      margin-bottom: 8px;
+      text-shadow: 0 0 40px currentColor;
+    }
+    #go-result-msg.visible { opacity: 1; }
+
+    #go-proceed-btn {
+      position: relative;
+      z-index: 1;
+      margin-top: 32px;
+      padding: 14px 44px;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.45);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease 2s, background 0.12s;
+    }
+    #go-proceed-btn.visible { opacity: 1; pointer-events: all; }
+    #go-proceed-btn:active { background: rgba(255,255,255,0.28); }
+
+    /* Phase 3: Stats */
+    #go-p3 {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+      text-align: center;
+      padding: 32px 24px;
+      overflow-y: auto;
+    }
+    #go-p3.visible { opacity: 1; pointer-events: all; }
+
+    #go-p3 h2 {
+      font-size: 1.5rem;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      margin-bottom: 28px;
+    }
+
+    .go-stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      width: 100%;
+      max-width: 320px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+      gap: 16px;
+    }
+    .go-stat-row:last-of-type { border-bottom: none; }
+    .go-stat-label { color: var(--muted); font-size: 0.95rem; text-align: left; }
+    .go-stat-value { font-weight: 700; font-size: 1.2rem; color: var(--text); flex-shrink: 0; }
+
+    .go-nemesis { color: var(--accent) !important; }
+
+    .go-btn-row {
+      margin-top: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 300px;
+    }
+    .go-btn-row button {
+      width: 100%;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .go-btn-row button:active { opacity: 0.8; }
+    .go-btn-primary  { background: var(--accent); color: #fff; border: none; }
+    .go-btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 
     /* ── Connection lost overlay ── */
     #reconnect-overlay {
@@ -854,11 +1020,55 @@
   <p id="dead-subtitle"></p>
 </div>
 
-<!-- ── Screen 5: Game over ─────────────────────────────────────────── -->
-<div id="screen-gameover" class="screen">
-  <h2 id="winner-text">GAME OVER</h2>
-  <p id="reason-text"></p>
-  <button class="primary" id="play-again-btn" onclick="playAgain()">PLAY AGAIN</button>
+<!-- ── Game over overlay (multi-phase, not part of .screen system) ──────── -->
+<div id="go-overlay">
+
+  <!-- Phase 1: pulsing GAME OVER text over video -->
+  <div id="go-p1">
+    <div id="go-title">GAME OVER</div>
+  </div>
+
+  <!-- Animated black fade -->
+  <div id="go-blackout"></div>
+
+  <!-- Phase 2: victory or defeat result -->
+  <div id="go-p2">
+    <canvas id="go-fireworks"></canvas>
+
+    <!-- skull shown for losers -->
+    <div id="go-skull">
+      <svg width="120" height="130" viewBox="0 0 120 130" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="54" rx="47" ry="44" fill="white"/>
+        <ellipse cx="38" cy="52" rx="14" ry="15" fill="#000"/>
+        <ellipse cx="82" cy="52" rx="14" ry="15" fill="#000"/>
+        <path d="M60 70 L53 83 L67 83 Z" fill="#000"/>
+        <rect x="22" y="90" width="76" height="22" rx="6" fill="white"/>
+        <rect x="42" y="90" width="4" height="22" fill="#000"/>
+        <rect x="58" y="90" width="4" height="22" fill="#000"/>
+        <rect x="74" y="90" width="4" height="22" fill="#000"/>
+        <path d="M24 65 L33 73" stroke="rgba(180,180,180,0.5)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M96 65 L87 73" stroke="rgba(180,180,180,0.5)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div id="go-result-msg"></div>
+    <button id="go-proceed-btn" onclick="goToStats()">PROCEED</button>
+  </div>
+
+  <!-- Phase 3: stats -->
+  <div id="go-p3">
+    <h2>Match Stats</h2>
+    <div class="go-stat-row"><span class="go-stat-label">Your kills</span><span class="go-stat-value" id="stat-kills">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Your deaths</span><span class="go-stat-value" id="stat-deaths">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Inflicted damage</span><span class="go-stat-value" id="stat-damage">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Victory points gained</span><span class="go-stat-value" id="stat-vp">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Your nemesis</span><span class="go-stat-value go-nemesis" id="stat-nemesis">&#8212;</span></div>
+    <div class="go-btn-row">
+      <button class="go-btn-primary" onclick="playAgain()">PLAY AGAIN</button>
+      <button class="go-btn-secondary" onclick="stayInTouch()">STAY IN TOUCH</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1075,7 +1285,7 @@ function showScreen(id) {
   dbg('showScreen: ' + id);
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  const inGame = id === 'screen-playing' || id === 'screen-gameover';
+  const inGame = id === 'screen-playing';
   document.body.classList.toggle('game-active', inGame);
   if (!inGame) { try { screen.orientation.unlock(); } catch (_) {} }
   positionDbgPanel(id);
@@ -1135,14 +1345,21 @@ function returnToJoin(message) {
   myRole      = '';
   partnerName = '';
   updateTankColorLabel();
+  // Restore HUD elements that onGameOver hides
+  document.getElementById('hp-bar-wrap').style.display = '';
+  document.getElementById('timer-label').style.display = '';
+  document.getElementById('robot-label').style.display = '';
+  document.getElementById('controls').style.display    = '';
   // Restore controls that may have been hidden by role gating
   document.getElementById('joystick-base').style.display  = '';
   document.getElementById('fire-btn').style.display       = '';
   document.getElementById('turret-buttons').style.display = '';
   const roleEl    = document.getElementById('role-label');
   const partnerEl = document.getElementById('partner-label');
-  if (roleEl)    roleEl.textContent    = '';
-  if (partnerEl) partnerEl.textContent = '';
+  if (roleEl)    { roleEl.style.display    = ''; roleEl.textContent    = ''; }
+  if (partnerEl) { partnerEl.style.display = ''; partnerEl.textContent = ''; }
+  // Reset game over overlay
+  resetGoOverlay();
   _playerList = [];
   robotList   = [];
   setJoinWaiting();
@@ -1189,6 +1406,16 @@ function buildConnection() {
   conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
   conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
   conn.on('GameOver',     data     => { dbg('SignalR: GameOver'); onGameOver(data); });
+  conn.on('PlayerStats',  data     => {
+    dbg('SignalR: PlayerStats kills=' + data.kills + ' deaths=' + data.deaths);
+    _pendingStats = {
+      kills:         data.kills         ?? null,
+      deaths:        data.deaths        ?? null,
+      damage:        data.damage        ?? null,
+      victoryPoints: data.victoryPoints ?? null,
+      nemesis:       data.nemesis       || null,
+    };
+  });
   conn.on('RfidTag',      uid      => onRfidTag(uid));
   conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; pauseFireCooldown(); document.getElementById('game-paused-overlay').classList.add('active'); });
   conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; resumeFireCooldown(); document.getElementById('game-paused-overlay').classList.remove('active'); });
@@ -1540,6 +1767,7 @@ function hideCountdown() {
 
 function onGameStarted(data) {
   dbg('onGameStarted: callsign=' + data.callsign + ' videoUrl=' + data.videoUrl + ' role=' + data.role);
+  resetFireCooldown();
   maxHp           = data.maxHp           || 100;
   currentHp       = data.hp              || maxHp;
   if (data.slowTurretSpeed) slowTurretSpeed = data.slowTurretSpeed;
@@ -1638,24 +1866,379 @@ function onYouAreAlive() {
   document.getElementById('dead-subtitle').textContent  = '';
 }
 
-function onGameOver(data) {
-  const teamName = data.winnerTeam || '';
-  const reason   = data.reason || '';
+// ── Squad fireworks colour palettes ─────────────────────────────────────────
+const SQUAD_FW_COLORS = {
+  0: ['#FF8C00','#FFD700','#FFC300','#FF6000','#FFAA00','#FFE566'], // desert: orange/gold/yellow
+  1: ['#00D400','#50FF00','#FFFFFF','#ADFF2F','#00FF88','#CCFF33'], // jungle: green/lime/white
+};
 
-  let msg = 'Game over.';
-  if (teamName) {
-    msg = teamName + ' wins! (' +
-      (reason === 'points' ? 'by victory points' :
-       reason === 'time'   ? 'on time' : reason) + ')';
+let _goFireworksRaf = null;
+let _goParticles    = [];
+let _pendingStats   = null;
+
+function onGameOver(data) {
+  // Only run the cinematic sequence for players actively in game.
+  // Everyone else (join/lobby screen) just gets returned to the join screen.
+  if (!document.getElementById('screen-playing').classList.contains('active')) {
+    dbg('onGameOver: not in game — returning to join');
+    returnToJoin('Game over! Waiting for the next game.');
+    return;
   }
 
-  document.getElementById('stream').src = '';
+  const winnerTeam     = data.winnerTeam || '';
+  const winnerAlliance = winnerTeam === 'Desert Squad' ? 0
+                       : winnerTeam === 'Jungle Squad'  ? 1 : -1;
+  const playerWon      = myAlliance >= 0 && myAlliance === winnerAlliance;
+  const fwColors       = SQUAD_FW_COLORS[winnerAlliance] || SQUAD_FW_COLORS[0];
+
+  dbg('onGameOver: winner=' + winnerTeam + ' myAlliance=' + myAlliance + ' won=' + playerWon);
+
+  // Save stats data for phase 3
+  _pendingStats = {
+    kills:         data.kills         ?? null,
+    deaths:        data.deaths        ?? null,
+    damage:        data.damage        ?? null,
+    victoryPoints: data.victoryPoints ?? null,
+    nemesis:       data.nemesis       ?? null,
+  };
+
+  // Stop game loop + fire cooldown
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  returnToJoin(msg);
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+  clearInterval(fireCooldownTimer);
+  fireCooldownPauseLeft = 0;
+  hideCountdown();
+
+  // Hide gameplay HUD + controls (keep video visible for phase 1)
+  document.getElementById('hp-bar-wrap').style.display   = 'none';
+  document.getElementById('timer-label').style.display   = 'none';
+  document.getElementById('robot-label').style.display   = 'none';
+  const roleEl    = document.getElementById('role-label');
+  const partnerEl = document.getElementById('partner-label');
+  if (roleEl)    roleEl.style.display    = 'none';
+  if (partnerEl) partnerEl.style.display = 'none';
+  document.getElementById('controls').style.display      = 'none';
+  document.getElementById('fire-toast').classList.remove('visible');
+  document.getElementById('game-paused-overlay').classList.remove('active');
+  document.getElementById('screen-dead').classList.remove('active', 'walkmode');
+  clearHitOverlay();
+
+  // Grab overlay elements
+  const overlay    = document.getElementById('go-overlay');
+  const p1         = document.getElementById('go-p1');
+  const blackout   = document.getElementById('go-blackout');
+  const p2         = document.getElementById('go-p2');
+  const p3         = document.getElementById('go-p3');
+  const resultMsg  = document.getElementById('go-result-msg');
+  const skull      = document.getElementById('go-skull');
+  const proceedBtn = document.getElementById('go-proceed-btn');
+  const fwCanvas   = document.getElementById('go-fireworks');
+
+  // Reset all phases
+  p1.classList.remove('visible');
+  p2.classList.remove('visible');
+  p3.classList.remove('visible');
+  resultMsg.classList.remove('visible');
+  skull.classList.remove('visible');
+  proceedBtn.classList.remove('visible');
+  blackout.classList.remove('fading');
+  blackout.style.transition = 'none';
+  blackout.offsetHeight; // flush
+  blackout.style.transition = '';
+  fwCanvas.style.display = 'none';
+  stopGoFireworks();
+
+  overlay.classList.add('active');
+
+  // Phase 1: fade in GAME OVER text (screen-playing stays active — video visible)
+  requestAnimationFrame(() => p1.classList.add('visible'));
+
+  // After 2 s: start black fade (video continues playing behind it, GAME OVER stays visible)
+  setTimeout(() => {
+    blackout.classList.add('fading');
+
+    // After 2 s (fade complete): stop video, hold GAME OVER on black for 2 more seconds
+    setTimeout(() => {
+      document.getElementById('stream').src = '';
+      stopVideoWs();
+      // p1 stays visible — GAME OVER text on pure black background
+
+      setTimeout(() => {
+        p1.classList.remove('visible');
+        // Unlock orientation for result / stats screens
+        document.body.classList.remove('game-active');
+        try { screen.orientation.unlock(); } catch (_) {}
+
+        // Configure result
+        if (playerWon) {
+          resultMsg.textContent = 'You are victorious!';
+          resultMsg.style.color = winnerAlliance === 0 ? '#FFD700' : '#50FF00';
+          skull.style.display   = 'none';
+          fwCanvas.style.display = '';
+          startGoFireworks(fwColors, fwCanvas);
+        } else {
+          resultMsg.textContent = 'You are defeated!';
+          resultMsg.style.color = '#fff';
+          skull.style.display   = '';
+        }
+
+        p2.classList.add('visible');
+        requestAnimationFrame(() => {
+          resultMsg.classList.add('visible');
+          if (!playerWon) skull.classList.add('visible');
+        });
+
+        // Proceed button fades in after 2 s (via CSS transition-delay)
+        proceedBtn.classList.add('visible');
+
+      }, 2000); // 2 s hold on black with GAME OVER text
+
+    }, 2000); // 2 s blackout transition
+  }, 2000); // 2 s GAME OVER on video
+}
+
+function goToStats() {
+  const p2 = document.getElementById('go-p2');
+  const p3 = document.getElementById('go-p3');
+  stopGoFireworks();
+  p2.classList.remove('visible');
+  setTimeout(() => {
+    const fmtNum  = v => (v !== null && v !== undefined) ? String(v) : '0';
+    const fmtName = v => (v !== null && v !== undefined) ? String(v) : '—';
+    document.getElementById('stat-kills').textContent   = fmtNum(_pendingStats?.kills);
+    document.getElementById('stat-deaths').textContent  = fmtNum(_pendingStats?.deaths);
+    document.getElementById('stat-damage').textContent  = fmtNum(_pendingStats?.damage);
+    document.getElementById('stat-vp').textContent      = fmtNum(_pendingStats?.victoryPoints);
+    document.getElementById('stat-nemesis').textContent = fmtName(_pendingStats?.nemesis);
+    p3.classList.add('visible');
+  }, 700);
+}
+
+function stayInTouch() {
+  // Placeholder — will link to a stay-in-touch page when ready
+  window.open('about:blank', '_blank');
+}
+
+function resetGoOverlay() {
+  stopGoFireworks();
+  const overlay = document.getElementById('go-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('active');
+  ['go-p1','go-p2','go-p3','go-result-msg','go-skull','go-proceed-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('visible');
+  });
+  const blackout = document.getElementById('go-blackout');
+  if (blackout) {
+    blackout.style.transition = 'none';
+    blackout.classList.remove('fading');
+    blackout.offsetHeight;
+    blackout.style.transition = '';
+  }
+  _pendingStats = null;
 }
 
 function playAgain() {
+  resetGoOverlay();
   returnToJoin('');
+}
+
+// ── Fireworks engine ─────────────────────────────────────────────────────────
+// Rockets travel at full speed. Sparks drift at 1/4 speed so they hang
+// in the air longer and glitter dramatically before cutting out.
+const FW_SPARK_SCALE = 0.25; // physics time-scale for sparks
+const FW_GRAVITY_SPARK = 180; // px/s² downward for sparks (at 1x scale)
+
+function startGoFireworks(colors, canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  _goParticles  = [];
+
+  let lastT      = 0;
+  let nextRocket = 0;
+
+  function launchRocket() {
+    // Pick the explosion apex first so it's always visible, then derive the launch point.
+    const apexX = canvas.width  * (0.12 + Math.random() * 0.76);
+    const apexY = canvas.height * (0.04 + Math.random() * 0.24);
+    const T     = 1.4 + Math.random() * 1.0;   // 1.4–2.4 s travel time (half speed)
+    const h     = canvas.height - apexY;
+    const vy0   = -2 * h / T;
+    const grav  = 2 * h / (T * T);
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    // ±30° off vertical: vx = ±|vy0|×tan(30°)
+    const vx      = (Math.random() * 2 - 1) * Math.abs(vy0) * 0.5774;
+    // Launch x is derived from apex so the explosion stays on-screen
+    const launchX = Math.max(0, Math.min(canvas.width, apexX - vx * T));
+    _goParticles.push({
+      type:'rocket', x:launchX, y:canvas.height,
+      vx, vy:vy0, grav,
+      trail:[], color,
+    });
+  }
+
+  function explodeRocket(rx, ry) {
+    // Single-frame additive flash at the explosion point
+    _goParticles.push({ type:'flash', x:rx, y:ry });
+
+    const count = 27 + Math.floor(Math.random() * 16); // +25% vs previous
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed   = 180 + Math.random() * 570; // 50% faster than before
+      // At 0.25x physics, sparks live ~4× longer in real time; keep real duration ~1-1.7 s
+      const maxLife = 0.24 + Math.random() * 0.20;
+      const size    = 2.2 + Math.random() * 3.8;
+      const color   = colors[Math.floor(Math.random() * colors.length)];
+      _goParticles.push({
+        type:'spark', x:rx, y:ry,
+        vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
+        life:maxLife, maxLife, color, size,
+        freq:  10 + Math.random() * 22,   // glitter flicker Hz (real time)
+        phase: Math.random() * Math.PI * 2,
+        age:   0,
+      });
+    }
+  }
+
+  function frame(t) {
+    const dt = Math.min((t - lastT) / 1000, 0.05);
+    lastT = t;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (t >= nextRocket) {
+      launchRocket();
+      nextRocket = t + 533 + Math.random() * 667; // 25% fewer rockets
+    }
+
+    const alive = [];
+
+    for (const p of _goParticles) {
+      if (p.type === 'rocket') {
+        // Rockets run at full speed
+        p.trail.push({x:p.x, y:p.y});
+        if (p.trail.length > 10) p.trail.shift();
+        p.vy += p.grav * dt;
+        p.x  += p.vx  * dt;
+        p.y  += p.vy  * dt;
+
+        if (p.vy >= 0) {
+          explodeRocket(p.x, p.y);
+          // don't push — rocket consumed
+        } else {
+          for (let i = 0; i < p.trail.length; i++) {
+            ctx.globalAlpha = (i / p.trail.length) * 0.8;
+            ctx.fillStyle   = p.color;
+            ctx.beginPath();
+            ctx.arc(p.trail[i].x, p.trail[i].y, 1.6, 0, Math.PI*2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          ctx.fillStyle   = '#fff';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2.8, 0, Math.PI*2);
+          ctx.fill();
+          alive.push(p);
+        }
+
+      } else if (p.type === 'flash') {
+        // Single-frame additive flash at the explosion origin — not pushed to alive
+        const flashR = Math.min(canvas.width, canvas.height) * 0.25;
+        const flashG = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, flashR);
+        flashG.addColorStop(0, 'rgba(255,255,255,0.75)');
+        flashG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1;
+        ctx.fillStyle   = flashG;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, flashR, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+      } else {
+        // Sparks at 1/4-speed physics, full-speed glitter
+        const sdt = dt * FW_SPARK_SCALE;
+        p.age  += dt;        // age in real time so glitter frequency is correct
+        const drag = 1 - 0.08 * sdt * 60;
+        p.vx *= drag;
+        p.vy *= drag;          // symmetric drag keeps explosion circular
+        p.vy += FW_GRAVITY_SPARK * sdt;
+        p.x    += p.vx * sdt;
+        p.y    += p.vy * sdt;
+        p.life -= sdt;
+
+        if (p.life > 0) {
+          const frac    = p.life / p.maxLife;
+          // Fast flicker in real time
+          const flicker = 0.5 + 0.5 * Math.sin(p.age * p.freq * Math.PI * 2 + p.phase);
+          // Glitter-out: hold bright for most of life, quick fade only in last 20%
+          const endFade = frac < 0.20 ? (frac / 0.20) : 1.0;
+          const alpha   = flicker * endFade;
+
+          // All spark layers use additive blending so overlapping sparks get brighter
+          ctx.globalCompositeOperation = 'lighter';
+
+          // Outer glow — radial gradient halo
+          ctx.globalAlpha = alpha * 0.6;
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
+          glowGrad.addColorStop(0, p.color);
+          glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI*2);
+          ctx.fill();
+
+          // Main body — radial gradient disk
+          ctx.globalAlpha = alpha;
+          const bodyGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+          bodyGrad.addColorStop(0, p.color);
+          bodyGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = bodyGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+          ctx.fill();
+
+          // White core — visible when flicker is bright
+          if (flicker > 0.45) {
+            const coreFrac = (flicker - 0.45) / 0.55;
+            ctx.globalAlpha = alpha * coreFrac;
+            ctx.fillStyle   = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI*2);
+            ctx.fill();
+          }
+
+          // Cross sparkle at peak brightness
+          if (flicker > 0.80) {
+            const peakFrac = (flicker - 0.80) / 0.20;
+            const len = p.size * 3.5 * Math.max(0.3, frac);
+            ctx.globalAlpha = alpha * peakFrac * 0.95;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth   = 0.9;
+            ctx.beginPath();
+            ctx.moveTo(p.x - len, p.y); ctx.lineTo(p.x + len, p.y);
+            ctx.moveTo(p.x, p.y - len); ctx.lineTo(p.x, p.y + len);
+            ctx.stroke();
+          }
+
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1;
+          alive.push(p);
+        }
+      }
+    }
+
+    _goParticles    = alive;
+    _goFireworksRaf = requestAnimationFrame(frame);
+  }
+
+  _goFireworksRaf = requestAnimationFrame(t0 => { lastT = t0; _goFireworksRaf = requestAnimationFrame(frame); });
+}
+
+function stopGoFireworks() {
+  if (_goFireworksRaf) { cancelAnimationFrame(_goFireworksRaf); _goFireworksRaf = null; }
+  _goParticles = [];
 }
 
 // ── RFID toast ───────────────────────────────────────────────────────────────
@@ -1879,6 +2462,20 @@ function resumeFireCooldown() {
   }
 }
 
+function resetFireCooldown() {
+  clearInterval(fireCooldownTimer);
+  fireCooldownTimer     = null;
+  fireCooldownUntil     = 0;
+  fireCooldownPauseLeft = 0;
+  const btn     = document.getElementById('fire-btn');
+  const wordEl  = document.getElementById('fire-word');
+  const countEl = document.getElementById('fire-countdown');
+  btn.classList.remove('cooldown');
+  wordEl.classList.remove('hidden');
+  countEl.classList.remove('active');
+  countEl.textContent = '';
+}
+
 function startFireCooldownUI() {
   const btn      = document.getElementById('fire-btn');
   const wordEl   = document.getElementById('fire-word');
@@ -1942,7 +2539,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v24</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v25</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

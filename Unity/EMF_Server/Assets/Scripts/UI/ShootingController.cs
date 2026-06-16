@@ -31,6 +31,13 @@ public class ShootingController : MonoBehaviour
         {
             flow.OnPhaseChanged   += OnPhaseChanged;
             flow.OnPausedChanged  += OnPausedChanged;
+            // PlayingPanel activates during OnPhaseChanged(Playing), so our subscription
+            // lands after the event fires — manually apply the Playing-phase reset here.
+            if (flow.Phase == GamePhase.Playing)
+            {
+                _nextFireTime.Clear();
+                _paused = false;
+            }
         }
     }
 

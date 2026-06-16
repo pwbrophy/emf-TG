@@ -21,6 +21,9 @@ public sealed class GameService
     // targetId, shooterId, rawDetMask (8-bit sensor bits), cardinalDir ("N"|"E"|"S"|"W")
     public event Action<string, string, byte, string> OnRobotHitDirection;
 
+    // shooterRobotId, targetRobotId, damageAmount — fired for every hit that lands
+    public event Action<string, string, int> OnDamageDealt;
+
     // shooterId (null if operator/direct damage), targetId — fired when HP reaches zero
     public event Action<string, string> OnRobotKilled;
 
@@ -102,6 +105,7 @@ public sealed class GameService
             State.TotalDamageDealt[shooterAlliance] += damage;
         }
 
+        OnDamageDealt?.Invoke(shooterId, targetId, damage);
         OnHpChanged?.Invoke(targetId, newHp);
         OnRobotHitDirection?.Invoke(targetId, shooterId, rawMask, cardinalDir);
 

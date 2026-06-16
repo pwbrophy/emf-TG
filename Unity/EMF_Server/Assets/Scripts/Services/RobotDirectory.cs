@@ -100,16 +100,14 @@ public class RobotDirectory : IRobotDirectory
                 PreferredAlliance = savedRecord != null ? savedRecord.preferredAlliance : -1
             };
 
-            string preferredForPick = hasSavedPreferredPlayer ? savedRecord.preferredPlayer : null;
-            string assigned = PickAssignedPlayer(preferredForPick);
-
-            if (!string.IsNullOrWhiteSpace(assigned))
+            if (hasSavedPreferredPlayer)
             {
-                r.AssignedPlayer = assigned;
-                if (hasSavedPreferredPlayer)
-                    Debug.Log("[RobotDirectory] Loaded preferred player '" + assigned + "' for robot " + robotId);
-                else
-                    Debug.Log("[RobotDirectory] Assigned default player '" + assigned + "' to new robot " + robotId);
+                string assigned = PickAssignedPlayer(savedRecord.preferredPlayer);
+                if (!string.IsNullOrWhiteSpace(assigned))
+                {
+                    r.AssignedPlayer = assigned;
+                    Debug.Log("[RobotDirectory] Restored preferred player '" + assigned + "' for robot " + robotId);
+                }
             }
 
             Debug.Log("[RobotDirectory] Robot added: " + robotId +
@@ -153,16 +151,14 @@ public class RobotDirectory : IRobotDirectory
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(r.AssignedPlayer))
+            if (string.IsNullOrWhiteSpace(r.AssignedPlayer) && hasSavedPreferredPlayer)
             {
-                string preferredForPick = hasSavedPreferredPlayer ? savedRecord.preferredPlayer : null;
-                string assigned = PickAssignedPlayer(preferredForPick);
-
+                string assigned = PickAssignedPlayer(savedRecord.preferredPlayer);
                 if (!string.IsNullOrWhiteSpace(assigned))
                 {
                     r.AssignedPlayer = assigned;
                     changed = true;
-                    Debug.Log("[RobotDirectory] Auto-assigned player '" + assigned + "' to existing robot " + robotId);
+                    Debug.Log("[RobotDirectory] Restored preferred player '" + assigned + "' for robot " + robotId);
                 }
             }
 

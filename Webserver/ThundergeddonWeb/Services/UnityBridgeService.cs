@@ -397,6 +397,24 @@ public class UnityBridgeService : BackgroundService
         string reason     = GetString(root, "reason")     ?? "";
 
         await _hub.Clients.All.SendAsync("GameOver", new { winnerTeam, reason });
+
+        // Route per-player stats to each player's SignalR connection
+        if (root.TryGetProperty("playerStats", out var statsEl))
+        {
+            foreach (var stat in statsEl.EnumerateArray())
+            {
+                string? connId = GetString(stat, "connectionId");
+                if (string.IsNullOrEmpty(connId)) continue;
+                int    kills         = GetInt(stat,    "kills");
+                int    deaths        = GetInt(stat,    "deaths");
+                int    damage        = GetInt(stat,    "damage");
+                int    victoryPoints = GetInt(stat,    "victoryPoints");
+                string nemesis       = GetString(stat, "nemesis") ?? "";
+                await _hub.Clients.Client(connId).SendAsync("PlayerStats",
+                    new { kills, deaths, damage, victoryPoints, nemesis });
+            }
+        }
+
         _logger.LogInformation("[Bridge] GameOver: {team} ({reason})", winnerTeam, reason);
     }
 

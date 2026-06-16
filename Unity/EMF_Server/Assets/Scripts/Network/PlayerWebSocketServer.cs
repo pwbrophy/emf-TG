@@ -65,6 +65,14 @@ public class PlayerWebSocketServer : MonoBehaviour
     private readonly Dictionary<string, int> _playerKillTotal    = new Dictionary<string, int>();
     private readonly Dictionary<string, int> _playerCaptureScore = new Dictionary<string, int>();
     private readonly HashSet<string> _lowHpWarned = new HashSet<string>();
+
+    // ── Per-player end-of-game stats ──────────────────────────────────────────────
+    private readonly Dictionary<string, int> _statKills  = new Dictionary<string, int>();
+    private readonly Dictionary<string, int> _statDeaths = new Dictionary<string, int>();
+    private readonly Dictionary<string, int> _statDamage = new Dictionary<string, int>();
+    // target player name → (source player name → cumulative damage dealt to that target)
+    private readonly Dictionary<string, Dictionary<string, int>> _statDamageFrom =
+        new Dictionary<string, Dictionary<string, int>>();
     private int[]  _prevTeamPoints   = { 0, 0 };
     private bool[] _teamPoints50Fired = { false, false };
     private bool[] _teamPoints90Fired = { false, false };
@@ -132,6 +140,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Game.OnGameWon            += OnGameWon;
             ServiceLocator.Game.OnRobotHitDirection  += OnHitDirection;
             ServiceLocator.Game.OnRobotKilled        += OnRobotKilled;
+            ServiceLocator.Game.OnDamageDealt        += OnDamageDealt;
         }
 
         // RFID tag scans
@@ -172,6 +181,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             ServiceLocator.Game.OnGameWon           -= OnGameWon;
             ServiceLocator.Game.OnRobotHitDirection -= OnHitDirection;
             ServiceLocator.Game.OnRobotKilled       -= OnRobotKilled;
+            ServiceLocator.Game.OnDamageDealt       -= OnDamageDealt;
         }
 
         if (ServiceLocator.RobotServer != null)
@@ -889,6 +899,10 @@ public class PlayerWebSocketServer : MonoBehaviour
             _playerKillTotal.Clear();
             _playerCaptureScore.Clear();
             _lowHpWarned.Clear();
+            _statKills.Clear();
+            _statDeaths.Clear();
+            _statDamage.Clear();
+            _statDamageFrom.Clear();
             System.Array.Clear(_prevTeamPoints,    0, _prevTeamPoints.Length);
             System.Array.Clear(_teamPoints50Fired, 0, _teamPoints50Fired.Length);
             System.Array.Clear(_teamPoints90Fired, 0, _teamPoints90Fired.Length);
@@ -1008,6 +1022,16 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnRobotDied(string robotId)
     {
+        // Track deaths for every crew member on this robot
+        var dDir = ServiceLocator.RobotDirectory;
+        if (dDir != null && dDir.TryGet(robotId, out var dInfo))
+        {
+            if (!string.IsNullOrEmpty(dInfo.AssignedPlayer))
+                _statDeaths[dInfo.AssignedPlayer] = _statDeaths.GetValueOrDefault(dInfo.AssignedPlayer) + 1;
+            if (!string.IsNullOrEmpty(dInfo.GunnerPlayer))
+                _statDeaths[dInfo.GunnerPlayer] = _statDeaths.GetValueOrDefault(dInfo.GunnerPlayer) + 1;
+        }
+
         // Record when the robot died so Update() can transition it to dead walk after 5 s
         _deathTimes[robotId] = Time.time;
 
@@ -1082,6 +1106,19 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         BroadcastDisplayEvent(text);
 
+        // Track individual kill stat — credit goes to gunner (they fire), or driver if solo
+        if (!string.IsNullOrEmpty(shooterId))
+        {
+            var kDir = ServiceLocator.RobotDirectory;
+            if (kDir != null && kDir.TryGet(shooterId, out var kInfo))
+            {
+                string credit = !string.IsNullOrEmpty(kInfo.GunnerPlayer)
+                    ? kInfo.GunnerPlayer : kInfo.AssignedPlayer ?? "";
+                if (!string.IsNullOrEmpty(credit))
+                    _statKills[credit] = _statKills.GetValueOrDefault(credit) + 1;
+            }
+        }
+
         // Signal display page to play kill burn animation on bar + HP row
         int killerAlliance = string.IsNullOrEmpty(shooterId) ? -1 : GetRobotAllianceIndex(shooterId);
         string tCallsign   = "";
@@ -1093,6 +1130,45 @@ public class PlayerWebSocketServer : MonoBehaviour
             ",\"teamIndex\":" + killerAlliance +
             ",\"targetCallsign\":\"" + EscapeJson(tCallsign) + "\"" +
             ",\"points\":" + killPts + "}");
+    }
+
+    void OnDamageDealt(string shooterRobotId, string targetRobotId, int damage)
+    {
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir == null) return;
+
+        // Shooter credit: gunner fires shots; fall back to driver in solo mode
+        string shooterName = "";
+        if (!string.IsNullOrEmpty(shooterRobotId) && dir.TryGet(shooterRobotId, out var sInfo))
+            shooterName = !string.IsNullOrEmpty(sInfo.GunnerPlayer)
+                ? sInfo.GunnerPlayer : sInfo.AssignedPlayer ?? "";
+
+        // Target: the assigned driver (for nemesis lookup — someone has to own the hull)
+        string targetName = "";
+        if (!string.IsNullOrEmpty(targetRobotId) && dir.TryGet(targetRobotId, out var tInfo))
+            targetName = tInfo.AssignedPlayer ?? "";
+
+        if (string.IsNullOrEmpty(shooterName)) return;
+
+        _statDamage[shooterName] = _statDamage.GetValueOrDefault(shooterName) + damage;
+
+        if (!string.IsNullOrEmpty(targetName))
+        {
+            if (!_statDamageFrom.ContainsKey(targetName))
+                _statDamageFrom[targetName] = new Dictionary<string, int>();
+            var from = _statDamageFrom[targetName];
+            from[shooterName] = from.GetValueOrDefault(shooterName) + damage;
+        }
+    }
+
+    string GetNemesisFor(string playerName)
+    {
+        if (!_statDamageFrom.TryGetValue(playerName, out var from) || from.Count == 0) return "";
+        string nemesis = null;
+        int maxDmg = 0;
+        foreach (var kv in from)
+            if (kv.Value > maxDmg) { maxDmg = kv.Value; nemesis = kv.Key; }
+        return nemesis ?? "";
     }
 
     /// <summary>
@@ -1236,12 +1312,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (!string.IsNullOrEmpty(bestPlayer))
             announcement += $" {bestPlayer} was the best player!";
         BroadcastDisplayEvent(announcement);
-
-        string json = "{\"cmd\":\"game_over\",\"winnerTeam\":\"" +
-                      EscapeJson(teamName) + "\",\"reason\":\"" +
-                      EscapeJson(reason) + "\"}";
-        BroadcastRaw(json);
-        Debug.Log("[PlayerWS] Sent game_over: " + teamName + " (" + reason + ")");
+        // game_over with stats is sent by SendGameOver() when phase transitions to Ended
     }
 
     void OnRfidTag(string robotId, string uid)
@@ -1560,17 +1631,49 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void SendGameOver()
     {
-        var state = ServiceLocator.Game?.State;
+        var state    = ServiceLocator.Game?.State;
+        var players  = ServiceLocator.Players;
         string teamName = (state != null && state.WinnerAllianceIndex >= 0)
-            ? AllianceName(state.WinnerAllianceIndex)
-            : "";
-        string reason = state?.EndReason ?? "manual";
+            ? AllianceName(state.WinnerAllianceIndex) : "";
+        string reason   = state?.EndReason ?? "manual";
 
-        string json = "{\"cmd\":\"game_over\",\"winnerTeam\":\"" +
-                      EscapeJson(teamName) + "\",\"reason\":\"" +
-                      EscapeJson(reason) + "\"}";
-        BroadcastRaw(json);
-        Debug.Log("[PlayerWS] Sent game_over reason=" + reason);
+        var sb = new StringBuilder();
+        sb.Append("{\"cmd\":\"game_over\"");
+        sb.Append(",\"winnerTeam\":\""); sb.Append(EscapeJson(teamName)); sb.Append("\"");
+        sb.Append(",\"reason\":\"");     sb.Append(EscapeJson(reason));   sb.Append("\"");
+        sb.Append(",\"playerStats\":[");
+        bool first = true;
+        foreach (var kvp in _connToPlayer)
+        {
+            string connId     = kvp.Key;
+            string playerName = kvp.Value;
+            if (PlayerToRobotAny(playerName) == null) continue; // skip lobby-only connections
+
+            int kills         = _statKills.GetValueOrDefault(playerName, 0);
+            int deaths        = _statDeaths.GetValueOrDefault(playerName, 0);
+            int damage        = _statDamage.GetValueOrDefault(playerName, 0);
+            string nemesis    = GetNemesisFor(playerName);
+
+            // Victory points = the team's final tug-of-war score
+            int victoryPoints = 0;
+            if (players != null && state?.TeamPoints != null)
+                foreach (var p in players.GetAll())
+                    if (p.Name == playerName && p.AllianceIndex >= 0 && p.AllianceIndex < state.TeamPoints.Length)
+                    { victoryPoints = state.TeamPoints[p.AllianceIndex]; break; }
+
+            if (!first) sb.Append(",");
+            first = false;
+            sb.Append("{\"connectionId\":\""); sb.Append(EscapeJson(connId));    sb.Append("\"");
+            sb.Append(",\"kills\":");          sb.Append(kills);
+            sb.Append(",\"deaths\":");         sb.Append(deaths);
+            sb.Append(",\"damage\":");         sb.Append(damage);
+            sb.Append(",\"victoryPoints\":"); sb.Append(victoryPoints);
+            sb.Append(",\"nemesis\":\"");      sb.Append(EscapeJson(nemesis));   sb.Append("\"");
+            sb.Append("}");
+        }
+        sb.Append("]}");
+        BroadcastRaw(sb.ToString());
+        Debug.Log("[PlayerWS] Sent game_over: " + teamName + " (" + reason + ")");
     }
 
     // ── Player list broadcast ─────────────────────────────────────────────────────

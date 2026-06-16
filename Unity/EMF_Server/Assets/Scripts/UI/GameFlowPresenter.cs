@@ -16,6 +16,7 @@ public class GameFlowPresenter : MonoBehaviour
     [SerializeField] private Button startGameButton;
     [SerializeField] private Button backToMenuButton;
     [SerializeField] private Button endGameButton;
+    [SerializeField] private Button lobbyBackButton;
 
     private GameFlow _flow;
 
@@ -23,9 +24,40 @@ public class GameFlowPresenter : MonoBehaviour
     private GameObject      _confirmOverlay;
     private TextMeshProUGUI _confirmMsgText;
 
+    // Lobby CanvasGroup — dimmed and non-interactable during countdown
+    private CanvasGroup _lobbyGroup;
+
     void Start()
     {
         BuildConfirmDialog();
+
+        if (lobbyPanel != null)
+        {
+            _lobbyGroup = lobbyPanel.GetComponent<CanvasGroup>();
+            if (_lobbyGroup == null)
+                _lobbyGroup = lobbyPanel.AddComponent<CanvasGroup>();
+        }
+
+        StyleLobbyBackButton();
+    }
+
+    void StyleLobbyBackButton()
+    {
+        if (lobbyBackButton == null) return;
+
+        var img = lobbyBackButton.GetComponent<Image>();
+        if (img != null)
+            img.color = new Color(0.22f, 0.22f, 0.28f, 1f);
+
+        var cb = lobbyBackButton.colors;
+        cb.normalColor      = new Color(0.22f, 0.22f, 0.28f, 1f);
+        cb.highlightedColor = new Color(0.32f, 0.32f, 0.40f, 1f);
+        cb.pressedColor     = new Color(0.15f, 0.15f, 0.20f, 1f);
+        cb.selectedColor    = new Color(0.22f, 0.22f, 0.28f, 1f);
+        lobbyBackButton.colors = cb;
+
+        var txt = lobbyBackButton.GetComponentInChildren<UnityEngine.UI.Text>();
+        if (txt != null) txt.color = Color.white;
     }
 
     void OnEnable()
@@ -39,8 +71,9 @@ public class GameFlowPresenter : MonoBehaviour
 
         if (toLobbyButton)    toLobbyButton.onClick.AddListener(() => _flow?.GoToLobby());
         if (startGameButton)  startGameButton.onClick.AddListener(OnStartGameClicked);
-        if (backToMenuButton) backToMenuButton.onClick.AddListener(() => _flow?.GoToLobby());
+        if (backToMenuButton) backToMenuButton.onClick.AddListener(() => _flow?.BackToMenu());
         if (endGameButton)    endGameButton.onClick.AddListener(() => _flow?.EndGame());
+        if (lobbyBackButton)  lobbyBackButton.onClick.AddListener(() => _flow?.BackToMenu());
 
         _flow.OnPhaseChanged += HandlePhaseChanged;
 
@@ -55,6 +88,7 @@ public class GameFlowPresenter : MonoBehaviour
         if (startGameButton)  startGameButton.onClick.RemoveAllListeners();
         if (backToMenuButton) backToMenuButton.onClick.RemoveAllListeners();
         if (endGameButton)    endGameButton.onClick.RemoveAllListeners();
+        if (lobbyBackButton)  lobbyBackButton.onClick.RemoveAllListeners();
     }
 
     void HandlePhaseChanged(GamePhase p)
@@ -66,8 +100,20 @@ public class GameFlowPresenter : MonoBehaviour
 
         if (startGameButton) startGameButton.interactable = _flow.CanStartGame();
 
+        // Restore lobby interactability whenever we re-enter the Lobby phase
+        if (p == GamePhase.Lobby)
+            SetLobbyInteractable(true);
+
         // Hide the confirm dialog whenever the phase changes (e.g. game already ended)
         if (_confirmOverlay != null) _confirmOverlay.SetActive(false);
+    }
+
+    void SetLobbyInteractable(bool on)
+    {
+        if (_lobbyGroup == null) return;
+        _lobbyGroup.interactable   = on;
+        _lobbyGroup.blocksRaycasts = on;
+        _lobbyGroup.alpha          = on ? 1f : 0.4f;
     }
 
     // ── Start-game flow ──────────────────────────────────────────────────────────
@@ -94,6 +140,7 @@ public class GameFlowPresenter : MonoBehaviour
 
         if (unassigned.Count == 0)
         {
+            SetLobbyInteractable(false);
             ServiceLocator.Countdown?.TriggerStart(false);
             return;
         }
@@ -117,6 +164,7 @@ public class GameFlowPresenter : MonoBehaviour
     void StartGameWithKick()
     {
         if (_confirmOverlay != null) _confirmOverlay.SetActive(false);
+        SetLobbyInteractable(false);
         ServiceLocator.Countdown?.TriggerStart(true);
     }
 
