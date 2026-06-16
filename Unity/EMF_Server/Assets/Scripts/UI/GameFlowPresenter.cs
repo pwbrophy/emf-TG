@@ -27,9 +27,15 @@ public class GameFlowPresenter : MonoBehaviour
     // Lobby CanvasGroup — dimmed and non-interactable during countdown
     private CanvasGroup _lobbyGroup;
 
+    // "Starting game in X..." overlay
+    private GameObject      _startingOverlay;
+    private TextMeshProUGUI _startingText;
+    private CountdownController _countdown;
+
     void Start()
     {
         BuildConfirmDialog();
+        BuildStartingOverlay();
 
         if (lobbyPanel != null)
         {
@@ -39,6 +45,22 @@ public class GameFlowPresenter : MonoBehaviour
         }
 
         StyleLobbyBackButton();
+
+        _countdown = ServiceLocator.Countdown;
+        if (_countdown != null)
+        {
+            _countdown.OnCountdownTick += OnCountdownTick;
+            _countdown.OnCountdownDone += OnCountdownDone;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (_countdown != null)
+        {
+            _countdown.OnCountdownTick -= OnCountdownTick;
+            _countdown.OnCountdownDone -= OnCountdownDone;
+        }
     }
 
     void StyleLobbyBackButton()
@@ -102,10 +124,25 @@ public class GameFlowPresenter : MonoBehaviour
 
         // Restore lobby interactability whenever we re-enter the Lobby phase
         if (p == GamePhase.Lobby)
+        {
             SetLobbyInteractable(true);
+            if (_startingOverlay != null) _startingOverlay.SetActive(false);
+        }
 
         // Hide the confirm dialog whenever the phase changes (e.g. game already ended)
         if (_confirmOverlay != null) _confirmOverlay.SetActive(false);
+    }
+
+    void OnCountdownTick(int current, int total)
+    {
+        if (_startingOverlay != null) _startingOverlay.SetActive(true);
+        if (_startingText != null)
+            _startingText.text = "Starting game in " + current + "...";
+    }
+
+    void OnCountdownDone()
+    {
+        if (_startingOverlay != null) _startingOverlay.SetActive(false);
     }
 
     void SetLobbyInteractable(bool on)
@@ -243,6 +280,50 @@ public class GameFlowPresenter : MonoBehaviour
         var continueBtn = CreateDialogButton(btnRow.transform, font, "Continue",
                                              new Color(0.12f, 0.40f, 0.12f));
         continueBtn.onClick.AddListener(StartGameWithKick);
+    }
+
+    void BuildStartingOverlay()
+    {
+        if (_startingOverlay != null) return;
+
+        var canvas = GetComponentInParent<Canvas>();
+        if (canvas == null) return;
+
+        var font = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+
+        // Full-screen semi-transparent backdrop
+        _startingOverlay = new GameObject("StartingGameOverlay");
+        var ovRT = _startingOverlay.AddComponent<RectTransform>();
+        _startingOverlay.transform.SetParent(canvas.transform, false);
+        ovRT.anchorMin = Vector2.zero;
+        ovRT.anchorMax = Vector2.one;
+        ovRT.offsetMin = ovRT.offsetMax = Vector2.zero;
+        var ovImg = _startingOverlay.AddComponent<Image>();
+        ovImg.color = new Color(0f, 0f, 0f, 0.72f);
+        _startingOverlay.SetActive(false);
+
+        // Centred card
+        var card   = new GameObject("Card");
+        var cardRT = card.AddComponent<RectTransform>();
+        card.transform.SetParent(_startingOverlay.transform, false);
+        cardRT.anchorMin = cardRT.anchorMax = cardRT.pivot = new Vector2(0.5f, 0.5f);
+        cardRT.sizeDelta = new Vector2(340, 100);
+        card.AddComponent<Image>().color = new Color(0.11f, 0.11f, 0.18f, 1f);
+
+        var txtGo = new GameObject("Label");
+        var txtRT = txtGo.AddComponent<RectTransform>();
+        txtGo.transform.SetParent(card.transform, false);
+        txtRT.anchorMin = Vector2.zero;
+        txtRT.anchorMax = Vector2.one;
+        txtRT.offsetMin = txtRT.offsetMax = Vector2.zero;
+
+        _startingText = txtGo.AddComponent<TextMeshProUGUI>();
+        if (font != null) _startingText.font = font;
+        _startingText.fontSize  = 24;
+        _startingText.fontStyle = FontStyles.Bold;
+        _startingText.color     = Color.white;
+        _startingText.alignment = TextAlignmentOptions.Center;
+        _startingText.text      = "Starting game...";
     }
 
     static Button CreateDialogButton(Transform parent, TMP_FontAsset font,

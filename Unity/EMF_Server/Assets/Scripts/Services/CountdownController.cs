@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 
@@ -8,6 +9,9 @@ using UnityEngine;
 /// </summary>
 public class CountdownController : MonoBehaviour
 {
+    public event Action<int, int> OnCountdownTick;  // (current, total)
+    public event Action           OnCountdownDone;
+
     private Coroutine _current;
 
     private void Awake()
@@ -51,6 +55,8 @@ public class CountdownController : MonoBehaviour
         // Tick from total down to 1
         for (int count = total; count >= 1; count--)
         {
+            OnCountdownTick?.Invoke(count, total);
+
             // Robots: rising-pitch beep + LED bar shows remaining count
             if (robotServer != null && dir != null)
                 foreach (var robot in dir.GetAll())
@@ -67,6 +73,7 @@ public class CountdownController : MonoBehaviour
             foreach (var robot in dir.GetAll())
                 robotServer.SendGameStartFanfare(robot.RobotId);
 
+        OnCountdownDone?.Invoke();
         ServiceLocator.GameFlow?.StartGame();
 
         // Redirect any remaining connected players who have no robot (covers non-kick path)
