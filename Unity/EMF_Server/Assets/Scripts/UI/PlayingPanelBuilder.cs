@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v10";
+    const string BUILT_SENTINEL = "__ppb_v11";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -306,7 +306,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_killPoints  = MakeSettingsRow(gameSettingsContent,    "Kill Pts",    "Team points awarded per robot destroyed.");
         var f_cooldown    = MakeSettingsRow(gameSettingsContent,    "Cooldown s",  "Minimum seconds between shots.");
         var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",  "Enable / disable buzzer sound effects.");
-        var f_slowTurret  = MakeSettingsToggle(gameSettingsContent, "Slow Turret", "Cap all phone turret input to SlowTurretSpeed.");
+        var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret", "Turret speed fraction 0–1 (e.g. 0.4 = 40% speed).");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -361,7 +361,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "killPointsField",  f_killPoints);
         Wire(psp, "cooldownField",    f_cooldown);
         Wire(psp, "buzzerToggle",     f_buzzer);
-        Wire(psp, "slowTurretToggle", f_slowTurret);
+        Wire(psp, "slowTurretField",  f_slowTurret);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)

@@ -5,7 +5,7 @@ using UnityEngine.UI;
 /// <summary>
 /// Lobby settings panel — builds its own rows at Awake.
 /// Shows lobby-only settings (duration, victory points, countdown) plus
-/// all live settings (damage, multipliers, cooldown, buzzer, slow turret).
+/// all live settings (damage, multipliers, cooldown, buzzer, slow turret speed).
 /// </summary>
 public class GameSettingsPanel : MonoBehaviour
 {
@@ -21,7 +21,7 @@ public class GameSettingsPanel : MonoBehaviour
     private TMP_InputField _killPointsField;
     private TMP_InputField _cooldownField;
     private Toggle         _buzzerToggle;
-    private Toggle         _slowTurretToggle;
+    private TMP_InputField _slowTurretField;
 
     private GameSettings _settings;
     private TMP_FontAsset _font;
@@ -47,14 +47,15 @@ public class GameSettingsPanel : MonoBehaviour
     void BuildRows()
     {
         // DestroyImmediate so the VLG never sees stale scene children alongside new rows.
-        // Destroy() is deferred in Play mode and would pollute the first layout pass.
         for (int i = transform.childCount - 1; i >= 0; i--)
             DestroyImmediate(transform.GetChild(i).gameObject);
 
         var vlg = GetComponent<VerticalLayoutGroup>();
         if (vlg == null) vlg = gameObject.AddComponent<VerticalLayoutGroup>();
-        vlg.childControlHeight   = true;
-        vlg.childControlWidth    = true;
+        // childControlHeight = false: VLG uses each child's existing sizeDelta.y (set explicitly
+        // below) instead of trying to recalculate heights, which can fight inner HLG constraints.
+        vlg.childControlHeight     = false;
+        vlg.childControlWidth      = true;
         vlg.childForceExpandHeight = false;
         vlg.childForceExpandWidth  = true;
         vlg.spacing  = 3f;
@@ -68,13 +69,13 @@ public class GameSettingsPanel : MonoBehaviour
         _countdownField     = AddInputRow("Countdown (s):");
 
         AddSectionLabel("── Live settings ──");
-        _damageField        = AddInputRow("Damage/Hit:");
-        _sideMultField      = AddInputRow("Side Multi:");
-        _rearMultField      = AddInputRow("Rear Multi:");
-        _killPointsField    = AddInputRow("Kill Points:");
-        _cooldownField      = AddInputRow("Cooldown (s):");
-        _buzzerToggle       = AddToggleRow("Buzzer SFX");
-        _slowTurretToggle   = AddToggleRow("Slow Turret");
+        _damageField      = AddInputRow("Damage/Hit:");
+        _sideMultField    = AddInputRow("Side Multi:");
+        _rearMultField    = AddInputRow("Rear Multi:");
+        _killPointsField  = AddInputRow("Kill Points:");
+        _cooldownField    = AddInputRow("Cooldown (s):");
+        _buzzerToggle     = AddToggleRow("Buzzer SFX");
+        _slowTurretField  = AddInputRow("Slow Turret:");
     }
 
     // ── Populate from GameSettings ───────────────────────────────────────────
@@ -90,7 +91,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_killPointsField)    _killPointsField.SetTextWithoutNotify(_settings.TeamPointsPerKill.ToString());
         if (_cooldownField)      _cooldownField.SetTextWithoutNotify(_settings.FireCooldownSeconds.ToString("F1"));
         if (_buzzerToggle)       _buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
-        if (_slowTurretToggle)   _slowTurretToggle.SetIsOnWithoutNotify(_settings.SlowTurretEnabled);
+        if (_slowTurretField)    _slowTurretField.SetTextWithoutNotify(_settings.SlowTurretSpeed.ToString("F2"));
     }
 
     // ── Subscriptions ────────────────────────────────────────────────────────
@@ -106,7 +107,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_killPointsField)    _killPointsField.onValueChanged.AddListener(OnKillPoints);
         if (_cooldownField)      _cooldownField.onValueChanged.AddListener(OnCooldown);
         if (_buzzerToggle)       _buzzerToggle.onValueChanged.AddListener(OnBuzzer);
-        if (_slowTurretToggle)   _slowTurretToggle.onValueChanged.AddListener(OnSlowTurret);
+        if (_slowTurretField)    _slowTurretField.onValueChanged.AddListener(OnSlowTurret);
     }
 
     void Unsubscribe()
@@ -120,7 +121,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_killPointsField)    _killPointsField.onValueChanged.RemoveListener(OnKillPoints);
         if (_cooldownField)      _cooldownField.onValueChanged.RemoveListener(OnCooldown);
         if (_buzzerToggle)       _buzzerToggle.onValueChanged.RemoveListener(OnBuzzer);
-        if (_slowTurretToggle)   _slowTurretToggle.onValueChanged.RemoveListener(OnSlowTurret);
+        if (_slowTurretField)    _slowTurretField.onValueChanged.RemoveListener(OnSlowTurret);
     }
 
     // ── Handlers ─────────────────────────────────────────────────────────────
@@ -134,7 +135,7 @@ public class GameSettingsPanel : MonoBehaviour
     void OnKillPoints(string v)    { if (_settings != null && int.TryParse(v, out int n) && n >= 0) { _settings.TeamPointsPerKill = n; _settings.SaveToDisk(); } }
     void OnCooldown(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.FireCooldownSeconds = n; _settings.SaveToDisk(); } }
     void OnBuzzer(bool on)         { if (_settings != null) { _settings.BuzzerEnabled = on; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastBuzzerToAll(on); } }
-    void OnSlowTurret(bool on)     { if (_settings != null) { _settings.SlowTurretEnabled = on; _settings.SaveToDisk(); } }
+    void OnSlowTurret(string v)    { if (_settings != null && float.TryParse(v, out float n) && n > 0f && n <= 1f) { _settings.SlowTurretSpeed = n; _settings.SaveToDisk(); } }
 
     // ── Row builders ─────────────────────────────────────────────────────────
 
@@ -144,11 +145,11 @@ public class GameSettingsPanel : MonoBehaviour
         var rt = go.AddComponent<RectTransform>();
         go.transform.SetParent(transform, false);
         rt.sizeDelta = new Vector2(0, 28f);
-        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 28f;
+        go.AddComponent<LayoutElement>().preferredHeight = 28f;
         var tmp = go.AddComponent<TextMeshProUGUI>();
         if (_font) tmp.font = _font;
         tmp.text = text; tmp.fontSize = 14; tmp.fontStyle = FontStyles.Bold;
-        tmp.color = new Color(0.9f, 0.75f, 0.2f); // gold
+        tmp.color = new Color(0.9f, 0.75f, 0.2f);
         tmp.alignment = TextAlignmentOptions.Left;
     }
 
@@ -158,7 +159,7 @@ public class GameSettingsPanel : MonoBehaviour
         var rt = go.AddComponent<RectTransform>();
         go.transform.SetParent(transform, false);
         rt.sizeDelta = new Vector2(0, 18f);
-        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 18f;
+        go.AddComponent<LayoutElement>().preferredHeight = 18f;
         var tmp = go.AddComponent<TextMeshProUGUI>();
         if (_font) tmp.font = _font;
         tmp.text = text; tmp.fontSize = 10;
@@ -172,13 +173,12 @@ public class GameSettingsPanel : MonoBehaviour
         var rowRT = row.AddComponent<RectTransform>();
         row.transform.SetParent(transform, false);
         rowRT.sizeDelta = new Vector2(0, 26f);
-        var rowLE = row.AddComponent<LayoutElement>(); rowLE.preferredHeight = 26f;
+        row.AddComponent<LayoutElement>().preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
         hlg.childControlHeight = true; hlg.childControlWidth = true;
         hlg.childForceExpandHeight = true; hlg.childForceExpandWidth = false;
         hlg.spacing = 4f;
 
-        // Label
         var lgo = new GameObject("Lbl");
         var lLE = lgo.AddComponent<LayoutElement>(); lLE.preferredWidth = 95f; lLE.flexibleWidth = 0;
         lgo.transform.SetParent(row.transform, false);
@@ -187,7 +187,6 @@ public class GameSettingsPanel : MonoBehaviour
         ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
         ltmp.alignment = TextAlignmentOptions.Right;
 
-        // InputField
         var igo = new GameObject("Field");
         var iLE = igo.AddComponent<LayoutElement>(); iLE.preferredWidth = 70f; iLE.flexibleWidth = 1;
         igo.transform.SetParent(row.transform, false);
@@ -197,7 +196,7 @@ public class GameSettingsPanel : MonoBehaviour
 
         var tgo = new GameObject("Text");
         tgo.transform.SetParent(igo.transform, false);
-        var trt = tgo.GetComponent<RectTransform>() ?? tgo.AddComponent<RectTransform>();
+        var trt = tgo.AddComponent<RectTransform>();
         trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
         trt.offsetMin = new Vector2(4, 2); trt.offsetMax = new Vector2(-4, -2);
         var ttmp = tgo.AddComponent<TextMeshProUGUI>();
@@ -215,7 +214,7 @@ public class GameSettingsPanel : MonoBehaviour
         var rowRT = row.AddComponent<RectTransform>();
         row.transform.SetParent(transform, false);
         rowRT.sizeDelta = new Vector2(0, 26f);
-        var rowLE = row.AddComponent<LayoutElement>(); rowLE.preferredHeight = 26f;
+        row.AddComponent<LayoutElement>().preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
         hlg.childControlHeight = true; hlg.childControlWidth = false;
         hlg.childForceExpandHeight = true;
