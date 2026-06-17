@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v9";
+    const string BUILT_SENTINEL = "__ppb_v10";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -300,15 +300,13 @@ public class PlayingPanelBuilder : MonoBehaviour
         gameSettingsScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
         gameSettingsScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
 
-        var f_maxHp    = MakeSettingsRow(gameSettingsContent, "Max HP",      "Starting HP for every robot.");
-        var f_damage   = MakeSettingsRow(gameSettingsContent, "Dmg/Hit",     "Base damage per IR hit (rear hits multiply).");
-        var f_rearMult = MakeSettingsRow(gameSettingsContent, "Rear Mult",   "Damage multiplier for S/SE/SW hits.");
-        var f_duration = MakeSettingsRow(gameSettingsContent, "Duration s",  "Match length in seconds.");
-        var f_maxPl    = MakeSettingsRow(gameSettingsContent, "Max Players", "Max slots on public display page.");
-        var f_teamPts  = MakeSettingsRow(gameSettingsContent, "Team Pts",    "Points needed for instant tug-of-war win.");
-        var f_ptsKill  = MakeSettingsRow(gameSettingsContent, "Pts/Kill",    "Team points awarded per robot destroyed.");
-        var f_slowTur  = MakeSettingsRow(gameSettingsContent, "Slow Turret", "Speed for slow turret buttons on phone (0.1–0.9).");
-        var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",   "Enable / disable buzzer sound effects on all robots.");
+        var f_damage      = MakeSettingsRow(gameSettingsContent,    "Dmg/Hit",     "Base damage per IR hit.");
+        var f_sideMult    = MakeSettingsRow(gameSettingsContent,    "Side Mult",   "Damage multiplier for E/W hits.");
+        var f_rearMult    = MakeSettingsRow(gameSettingsContent,    "Rear Mult",   "Damage multiplier for S hits (rear).");
+        var f_killPoints  = MakeSettingsRow(gameSettingsContent,    "Kill Pts",    "Team points awarded per robot destroyed.");
+        var f_cooldown    = MakeSettingsRow(gameSettingsContent,    "Cooldown s",  "Minimum seconds between shots.");
+        var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",  "Enable / disable buzzer sound effects.");
+        var f_slowTurret  = MakeSettingsToggle(gameSettingsContent, "Slow Turret", "Cap all phone turret input to SlowTurretSpeed.");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -357,15 +355,13 @@ public class PlayingPanelBuilder : MonoBehaviour
         });
 
         var psp = GetOrAdd<PlayingSettingsPanel>(pp);
-        Wire(psp, "maxHpField",      f_maxHp);
-        Wire(psp, "damageField",     f_damage);
-        Wire(psp, "rearMultField",   f_rearMult);
-        Wire(psp, "durationField",   f_duration);
-        Wire(psp, "maxPlayersField", f_maxPl);
-        Wire(psp, "maxTeamPtsField", f_teamPts);
-        Wire(psp, "ptsPerKillField",       f_ptsKill);
-        Wire(psp, "slowTurretSpeedField",  f_slowTur);
+        Wire(psp, "damageField",      f_damage);
+        Wire(psp, "sideMultField",    f_sideMult);
+        Wire(psp, "rearMultField",    f_rearMult);
+        Wire(psp, "killPointsField",  f_killPoints);
+        Wire(psp, "cooldownField",    f_cooldown);
         Wire(psp, "buzzerToggle",     f_buzzer);
+        Wire(psp, "slowTurretToggle", f_slowTurret);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)

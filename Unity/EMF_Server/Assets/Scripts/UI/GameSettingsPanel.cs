@@ -52,7 +52,7 @@ public class GameSettingsPanel : MonoBehaviour
 
         var vlg = GetComponent<VerticalLayoutGroup>();
         if (vlg == null) vlg = gameObject.AddComponent<VerticalLayoutGroup>();
-        vlg.childControlHeight   = false;
+        vlg.childControlHeight   = true;
         vlg.childControlWidth    = true;
         vlg.childForceExpandHeight = false;
         vlg.childForceExpandWidth  = true;
