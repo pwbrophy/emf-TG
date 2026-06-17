@@ -1640,6 +1640,15 @@ public class PlayerWebSocketServer : MonoBehaviour
             ? AllianceName(state.WinnerAllianceIndex) : "";
         string reason   = state?.EndReason ?? "manual";
 
+        // Operator pressed End Game with no natural winner — skip the game-over screen and
+        // send everyone straight back to the name-entry screen.
+        if (reason == "manual")
+        {
+            BroadcastRaw("{\"cmd\":\"return_to_join\"}");
+            Debug.Log("[PlayerWS] Sent return_to_join (operator end game)");
+            return;
+        }
+
         var sb = new StringBuilder();
         sb.Append("{\"cmd\":\"game_over\"");
         sb.Append(",\"winnerTeam\":\""); sb.Append(EscapeJson(teamName)); sb.Append("\"");

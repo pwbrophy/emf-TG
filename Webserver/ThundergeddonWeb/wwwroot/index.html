@@ -1406,6 +1406,7 @@ function buildConnection() {
   conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
   conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
   conn.on('GameOver',     data     => { dbg('SignalR: GameOver'); onGameOver(data); });
+  conn.on('ReturnToJoin', ()       => { dbg('SignalR: ReturnToJoin'); returnToJoin('Game ended by operator.'); });
   conn.on('PlayerStats',  data     => {
     dbg('SignalR: PlayerStats kills=' + data.kills + ' deaths=' + data.deaths);
     _pendingStats = {

@@ -154,6 +154,11 @@ public class UnityBridgeService : BackgroundService
                     await HandleGameOver(doc.RootElement);
                     break;
 
+                case "return_to_join":
+                    await _hub.Clients.All.SendAsync("ReturnToJoin");
+                    _logger.LogInformation("[Bridge] ReturnToJoin broadcast");
+                    break;
+
                 case "rfid_tag":
                     await HandleRfidTag(doc.RootElement);
                     break;
