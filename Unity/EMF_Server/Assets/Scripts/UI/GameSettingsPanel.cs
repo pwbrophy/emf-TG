@@ -3,122 +3,239 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// Lets the operator adjust match parameters in the Lobby before starting.
-/// All fields write directly to ServiceLocator.GameSettings.
+/// Lobby settings panel — builds its own rows at Awake.
+/// Shows lobby-only settings (duration, victory points, countdown) plus
+/// all live settings (damage, multipliers, cooldown, buzzer, slow turret).
 /// </summary>
 public class GameSettingsPanel : MonoBehaviour
 {
-    [Header("Fields")]
-    [SerializeField] private TMP_InputField maxHpField;
-    [SerializeField] private TMP_InputField damageField;
-    [SerializeField] private TMP_InputField durationField;
-    [SerializeField] private TMP_InputField maxTeamPointsField;
-    [SerializeField] private TMP_InputField killPointsField;
-    [SerializeField] private TMP_InputField countdownField;
+    // Lobby-only fields
+    private TMP_InputField _maxTeamPointsField;
+    private TMP_InputField _durationField;
+    private TMP_InputField _countdownField;
 
-    [Header("Audio")]
-    [SerializeField] private Toggle buzzerToggle;
+    // Live settings (also shown on PlayingSettingsPanel)
+    private TMP_InputField _damageField;
+    private TMP_InputField _sideMultField;
+    private TMP_InputField _rearMultField;
+    private TMP_InputField _killPointsField;
+    private TMP_InputField _cooldownField;
+    private Toggle         _buzzerToggle;
+    private Toggle         _slowTurretToggle;
 
     private GameSettings _settings;
+    private TMP_FontAsset _font;
+
+    private void Awake()
+    {
+        _font = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+        BuildRows();
+    }
 
     private void OnEnable()
     {
         _settings = ServiceLocator.GameSettings;
         if (_settings == null) return;
-
-        if (maxHpField)         maxHpField.SetTextWithoutNotify(_settings.MaxHp.ToString());
-        if (damageField)        damageField.SetTextWithoutNotify(_settings.DamagePerHit.ToString());
-        if (durationField)      durationField.SetTextWithoutNotify(_settings.MatchDurationSeconds.ToString("F0"));
-        if (maxTeamPointsField) maxTeamPointsField.SetTextWithoutNotify(_settings.MaxTeamPoints.ToString());
-        if (killPointsField)    killPointsField.SetTextWithoutNotify(_settings.TeamPointsPerKill.ToString());
-        if (countdownField)     countdownField.SetTextWithoutNotify(_settings.CountdownDuration.ToString());
-
-        if (maxHpField)         maxHpField.onValueChanged.AddListener(OnMaxHpChanged);
-        if (damageField)        damageField.onValueChanged.AddListener(OnDamageChanged);
-        if (durationField)      durationField.onValueChanged.AddListener(OnDurationChanged);
-        if (maxTeamPointsField) maxTeamPointsField.onValueChanged.AddListener(OnMaxTeamPointsChanged);
-        if (killPointsField)    killPointsField.onValueChanged.AddListener(OnKillPointsChanged);
-        if (countdownField)     countdownField.onValueChanged.AddListener(OnCountdownChanged);
-        if (buzzerToggle)       buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
-        if (buzzerToggle)       buzzerToggle.onValueChanged.AddListener(OnBuzzerChanged);
+        Populate();
+        Subscribe();
     }
 
-    private void OnDisable()
+    private void OnDisable() => Unsubscribe();
+
+    // ── Build ────────────────────────────────────────────────────────────────
+
+    void BuildRows()
     {
-        if (maxHpField)         maxHpField.onValueChanged.RemoveListener(OnMaxHpChanged);
-        if (damageField)        damageField.onValueChanged.RemoveListener(OnDamageChanged);
-        if (durationField)      durationField.onValueChanged.RemoveListener(OnDurationChanged);
-        if (maxTeamPointsField) maxTeamPointsField.onValueChanged.RemoveListener(OnMaxTeamPointsChanged);
-        if (killPointsField)    killPointsField.onValueChanged.RemoveListener(OnKillPointsChanged);
-        if (countdownField)     countdownField.onValueChanged.RemoveListener(OnCountdownChanged);
-        if (buzzerToggle)       buzzerToggle.onValueChanged.RemoveListener(OnBuzzerChanged);
+        // Clear any leftover scene children
+        for (int i = transform.childCount - 1; i >= 0; i--)
+            Destroy(transform.GetChild(i).gameObject);
+
+        var vlg = GetComponent<VerticalLayoutGroup>();
+        if (vlg == null) vlg = gameObject.AddComponent<VerticalLayoutGroup>();
+        vlg.childControlHeight   = false;
+        vlg.childControlWidth    = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childForceExpandWidth  = true;
+        vlg.spacing  = 3f;
+        vlg.padding  = new RectOffset(6, 6, 4, 4);
+
+        AddHeader("Game Settings");
+
+        AddSectionLabel("── Lobby only ──");
+        _maxTeamPointsField = AddInputRow("Victory Points:");
+        _durationField      = AddInputRow("Duration (min):");
+        _countdownField     = AddInputRow("Countdown (s):");
+
+        AddSectionLabel("── Live settings ──");
+        _damageField        = AddInputRow("Damage/Hit:");
+        _sideMultField      = AddInputRow("Side Multi:");
+        _rearMultField      = AddInputRow("Rear Multi:");
+        _killPointsField    = AddInputRow("Kill Points:");
+        _cooldownField      = AddInputRow("Cooldown (s):");
+        _buzzerToggle       = AddToggleRow("Buzzer SFX");
+        _slowTurretToggle   = AddToggleRow("Slow Turret");
     }
 
-    private void OnMaxHpChanged(string v)
+    // ── Populate from GameSettings ───────────────────────────────────────────
+
+    void Populate()
     {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n > 0)
-        {
-            _settings.MaxHp = n;
-            _settings.SaveToDisk();
-        }
+        if (_maxTeamPointsField) _maxTeamPointsField.SetTextWithoutNotify(_settings.MaxTeamPoints.ToString());
+        if (_durationField)      _durationField.SetTextWithoutNotify((_settings.MatchDurationSeconds / 60f).ToString("F0"));
+        if (_countdownField)     _countdownField.SetTextWithoutNotify(_settings.CountdownDuration.ToString());
+        if (_damageField)        _damageField.SetTextWithoutNotify(_settings.DamagePerHit.ToString());
+        if (_sideMultField)      _sideMultField.SetTextWithoutNotify(_settings.SideMultiplier.ToString("F1"));
+        if (_rearMultField)      _rearMultField.SetTextWithoutNotify(_settings.RearMultiplier.ToString("F1"));
+        if (_killPointsField)    _killPointsField.SetTextWithoutNotify(_settings.TeamPointsPerKill.ToString());
+        if (_cooldownField)      _cooldownField.SetTextWithoutNotify(_settings.FireCooldownSeconds.ToString("F1"));
+        if (_buzzerToggle)       _buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
+        if (_slowTurretToggle)   _slowTurretToggle.SetIsOnWithoutNotify(_settings.SlowTurretEnabled);
     }
 
-    private void OnDamageChanged(string v)
+    // ── Subscriptions ────────────────────────────────────────────────────────
+
+    void Subscribe()
     {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n > 0)
-        {
-            _settings.DamagePerHit = n;
-            _settings.SaveToDisk();
-        }
+        if (_maxTeamPointsField) _maxTeamPointsField.onValueChanged.AddListener(OnMaxTeamPoints);
+        if (_durationField)      _durationField.onValueChanged.AddListener(OnDuration);
+        if (_countdownField)     _countdownField.onValueChanged.AddListener(OnCountdown);
+        if (_damageField)        _damageField.onValueChanged.AddListener(OnDamage);
+        if (_sideMultField)      _sideMultField.onValueChanged.AddListener(OnSideMult);
+        if (_rearMultField)      _rearMultField.onValueChanged.AddListener(OnRearMult);
+        if (_killPointsField)    _killPointsField.onValueChanged.AddListener(OnKillPoints);
+        if (_cooldownField)      _cooldownField.onValueChanged.AddListener(OnCooldown);
+        if (_buzzerToggle)       _buzzerToggle.onValueChanged.AddListener(OnBuzzer);
+        if (_slowTurretToggle)   _slowTurretToggle.onValueChanged.AddListener(OnSlowTurret);
     }
 
-    private void OnDurationChanged(string v)
+    void Unsubscribe()
     {
-        if (_settings == null) return;
-        if (float.TryParse(v, out float n) && n > 0)
-        {
-            _settings.MatchDurationSeconds = n;
-            _settings.SaveToDisk();
-        }
+        if (_maxTeamPointsField) _maxTeamPointsField.onValueChanged.RemoveListener(OnMaxTeamPoints);
+        if (_durationField)      _durationField.onValueChanged.RemoveListener(OnDuration);
+        if (_countdownField)     _countdownField.onValueChanged.RemoveListener(OnCountdown);
+        if (_damageField)        _damageField.onValueChanged.RemoveListener(OnDamage);
+        if (_sideMultField)      _sideMultField.onValueChanged.RemoveListener(OnSideMult);
+        if (_rearMultField)      _rearMultField.onValueChanged.RemoveListener(OnRearMult);
+        if (_killPointsField)    _killPointsField.onValueChanged.RemoveListener(OnKillPoints);
+        if (_cooldownField)      _cooldownField.onValueChanged.RemoveListener(OnCooldown);
+        if (_buzzerToggle)       _buzzerToggle.onValueChanged.RemoveListener(OnBuzzer);
+        if (_slowTurretToggle)   _slowTurretToggle.onValueChanged.RemoveListener(OnSlowTurret);
     }
 
-    private void OnMaxTeamPointsChanged(string v)
+    // ── Handlers ─────────────────────────────────────────────────────────────
+
+    void OnMaxTeamPoints(string v) { if (_settings != null && int.TryParse(v, out int n) && n > 0) { _settings.MaxTeamPoints = n; _settings.SaveToDisk(); } }
+    void OnDuration(string v)      { if (_settings != null && float.TryParse(v, out float n) && n > 0) { _settings.MatchDurationSeconds = n * 60f; _settings.SaveToDisk(); } }
+    void OnCountdown(string v)     { if (_settings != null && int.TryParse(v, out int n) && n >= 1 && n <= 60) { _settings.CountdownDuration = n; _settings.SaveToDisk(); } }
+    void OnDamage(string v)        { if (_settings != null && int.TryParse(v, out int n) && n > 0) { _settings.DamagePerHit = n; _settings.SaveToDisk(); } }
+    void OnSideMult(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.SideMultiplier = n; _settings.SaveToDisk(); } }
+    void OnRearMult(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.RearMultiplier = n; _settings.SaveToDisk(); } }
+    void OnKillPoints(string v)    { if (_settings != null && int.TryParse(v, out int n) && n >= 0) { _settings.TeamPointsPerKill = n; _settings.SaveToDisk(); } }
+    void OnCooldown(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.FireCooldownSeconds = n; _settings.SaveToDisk(); } }
+    void OnBuzzer(bool on)         { if (_settings != null) { _settings.BuzzerEnabled = on; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastBuzzerToAll(on); } }
+    void OnSlowTurret(bool on)     { if (_settings != null) { _settings.SlowTurretEnabled = on; _settings.SaveToDisk(); } }
+
+    // ── Row builders ─────────────────────────────────────────────────────────
+
+    void AddHeader(string text)
     {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n > 0)
-        {
-            _settings.MaxTeamPoints = n;
-            _settings.SaveToDisk();
-        }
+        var go = new GameObject("Header");
+        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 28f;
+        go.transform.SetParent(transform, false);
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        if (_font) tmp.font = _font;
+        tmp.text = text; tmp.fontSize = 14; tmp.fontStyle = FontStyles.Bold;
+        tmp.color = new Color(0.9f, 0.75f, 0.2f); // gold
+        tmp.alignment = TextAlignmentOptions.Left;
     }
 
-    private void OnKillPointsChanged(string v)
+    void AddSectionLabel(string text)
     {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n >= 0)
-        {
-            _settings.TeamPointsPerKill = n;
-            _settings.SaveToDisk();
-        }
+        var go = new GameObject("Section");
+        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 18f;
+        go.transform.SetParent(transform, false);
+        var tmp = go.AddComponent<TextMeshProUGUI>();
+        if (_font) tmp.font = _font;
+        tmp.text = text; tmp.fontSize = 10;
+        tmp.color = new Color(0.5f, 0.5f, 0.5f);
+        tmp.alignment = TextAlignmentOptions.Left;
     }
 
-    private void OnCountdownChanged(string v)
+    TMP_InputField AddInputRow(string label)
     {
-        if (_settings == null) return;
-        if (int.TryParse(v, out int n) && n >= 1 && n <= 60)
-        {
-            _settings.CountdownDuration = n;
-            _settings.SaveToDisk();
-        }
+        var row = new GameObject(label.Replace(":", "") + "Row");
+        var rowLE = row.AddComponent<LayoutElement>(); rowLE.preferredHeight = 26f;
+        var hlg = row.AddComponent<HorizontalLayoutGroup>();
+        hlg.childControlHeight = true; hlg.childControlWidth = true;
+        hlg.childForceExpandHeight = true; hlg.childForceExpandWidth = false;
+        hlg.spacing = 4f;
+        row.transform.SetParent(transform, false);
+
+        // Label
+        var lgo = new GameObject("Lbl");
+        var lLE = lgo.AddComponent<LayoutElement>(); lLE.preferredWidth = 95f; lLE.flexibleWidth = 0;
+        lgo.transform.SetParent(row.transform, false);
+        var ltmp = lgo.AddComponent<TextMeshProUGUI>();
+        if (_font) ltmp.font = _font;
+        ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
+        ltmp.alignment = TextAlignmentOptions.Right;
+
+        // InputField
+        var igo = new GameObject("Field");
+        var iLE = igo.AddComponent<LayoutElement>(); iLE.preferredWidth = 70f; iLE.flexibleWidth = 1;
+        igo.transform.SetParent(row.transform, false);
+        igo.AddComponent<Image>().color = new Color(0.15f, 0.15f, 0.2f);
+        var field = igo.AddComponent<TMP_InputField>();
+        field.contentType = TMP_InputField.ContentType.DecimalNumber;
+
+        var tgo = new GameObject("Text");
+        tgo.transform.SetParent(igo.transform, false);
+        var trt = tgo.GetComponent<RectTransform>() ?? tgo.AddComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(4, 2); trt.offsetMax = new Vector2(-4, -2);
+        var ttmp = tgo.AddComponent<TextMeshProUGUI>();
+        if (_font) ttmp.font = _font;
+        ttmp.fontSize = 12; ttmp.color = Color.white;
+        ttmp.alignment = TextAlignmentOptions.Left;
+        field.textComponent = ttmp;
+
+        return field;
     }
 
-    private void OnBuzzerChanged(bool enabled)
+    Toggle AddToggleRow(string label)
     {
-        if (_settings == null) return;
-        _settings.BuzzerEnabled = enabled;
-        _settings.SaveToDisk();
-        ServiceLocator.RobotServer?.BroadcastBuzzerToAll(enabled);
+        var row = new GameObject(label + "Row");
+        var rowLE = row.AddComponent<LayoutElement>(); rowLE.preferredHeight = 26f;
+        var hlg = row.AddComponent<HorizontalLayoutGroup>();
+        hlg.childControlHeight = true; hlg.childControlWidth = false;
+        hlg.childForceExpandHeight = true;
+        hlg.spacing = 6f; hlg.padding = new RectOffset(8, 0, 0, 0);
+        row.transform.SetParent(transform, false);
+
+        var tgo = new GameObject("Toggle");
+        var trt = tgo.AddComponent<RectTransform>();
+        trt.sizeDelta = new Vector2(20, 20);
+        tgo.transform.SetParent(row.transform, false);
+        tgo.AddComponent<Image>().color = new Color(0.2f, 0.2f, 0.3f);
+        var tog = tgo.AddComponent<Toggle>();
+
+        var check = new GameObject("Check");
+        var crt = check.AddComponent<RectTransform>();
+        check.transform.SetParent(tgo.transform, false);
+        crt.anchorMin = new Vector2(0.1f, 0.1f); crt.anchorMax = new Vector2(0.9f, 0.9f);
+        crt.offsetMin = crt.offsetMax = Vector2.zero;
+        var cimg = check.AddComponent<Image>();
+        cimg.color = new Color(0.2f, 0.8f, 0.3f);
+        tog.graphic = cimg;
+        tog.targetGraphic = tgo.GetComponent<Image>();
+
+        var lgo = new GameObject("Lbl");
+        lgo.transform.SetParent(row.transform, false);
+        var ltmp = lgo.AddComponent<TextMeshProUGUI>();
+        if (_font) ltmp.font = _font;
+        ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
+        ltmp.alignment = TextAlignmentOptions.Left;
+
+        return tog;
     }
 }

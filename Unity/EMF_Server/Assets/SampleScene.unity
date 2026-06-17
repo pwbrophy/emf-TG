@@ -4659,6 +4659,7 @@ MonoBehaviour:
   MaxHp: 100
   DamagePerHit: 25
   RearMultiplier: 3
+  SideMultiplier: 1.5
   MatchDurationSeconds: 180
   MaxPlayers: 6
   MaxTeamPoints: 300
@@ -4680,6 +4681,7 @@ MonoBehaviour:
   - 01DA2C5D
   CountdownDuration: 5
   SlowTurretSpeed: 0.4
+  SlowTurretEnabled: 0
   DriveAcceleration: 0
   DriveDeceleration: 0
   TurretAcceleration: 0
@@ -12251,13 +12253,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e8b8344298bb77647a921ba763926467, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameSettingsPanel
-  maxHpField: {fileID: 1881586643}
-  damageField: {fileID: 905573390}
-  durationField: {fileID: 951638495}
-  maxTeamPointsField: {fileID: 1664297874}
-  killPointsField: {fileID: 2142182670}
-  countdownField: {fileID: 792896566}
-  buzzerToggle: {fileID: 931241875}
 --- !u!114 &914777991
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14188,6 +14183,7 @@ RectTransform:
   - {fileID: 1554892155}
   - {fileID: 297594582}
   - {fileID: 407766948}
+  - {fileID: 1458605083}
   m_Father: {fileID: 1522999465}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -14404,15 +14400,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 94db7dcdabb0277428a92aed125a9fe6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayingSettingsPanel
-  maxHpField: {fileID: 1989912244}
-  damageField: {fileID: 459941154}
-  rearMultField: {fileID: 345652373}
-  durationField: {fileID: 958419316}
-  maxPlayersField: {fileID: 1795298354}
-  maxTeamPtsField: {fileID: 2043394947}
-  ptsPerKillField: {fileID: 1698741963}
-  slowTurretSpeedField: {fileID: 383748099}
-  buzzerToggle: {fileID: 634231505}
 --- !u!114 &965649155
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -19335,6 +19322,94 @@ CanvasRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1441515005}
+  m_CullTransparentMesh: 1
+--- !u!1 &1458605082
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1458605083}
+  - component: {fileID: 1458605086}
+  - component: {fileID: 1458605085}
+  - component: {fileID: 1458605084}
+  m_Layer: 0
+  m_Name: LiveSettingsPanel
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1458605083
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1458605082}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 965649135}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0.3, y: 0.55}
+  m_AnchoredPosition: {x: 0, y: 0}
+  m_SizeDelta: {x: 0, y: 0}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1458605084
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1458605082}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 94db7dcdabb0277428a92aed125a9fe6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayingSettingsPanel
+--- !u!114 &1458605085
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1458605082}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
+  m_Material: {fileID: 0}
+  m_Color: {r: 0.07, g: 0.07, b: 0.11, a: 0.92}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 0}
+  m_Type: 0
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
+--- !u!222 &1458605086
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1458605082}
   m_CullTransparentMesh: 1
 --- !u!1 &1461494490
 GameObject:

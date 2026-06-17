@@ -16,8 +16,11 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Base damage dealt per successful IR hit. Multiplied by RearMultiplier for rear-sector hits (S/SE/SW).")]
     public int DamagePerHit = 10;
 
-    [Tooltip("Rear-sector damage multiplier (hit from S / SE / SW). Default 3x rewards flanking.")]
+    [Tooltip("Rear-sector damage multiplier (hit from S). Default 3x rewards flanking.")]
     public float RearMultiplier = 3f;
+
+    [Tooltip("Side-hit damage multiplier (E or W). Default 1.5x.")]
+    public float SideMultiplier = 1.5f;
 
     [Tooltip("Match duration in seconds.")]
     public float MatchDurationSeconds = 600f;
@@ -62,6 +65,9 @@ public class GameSettings : MonoBehaviour
     [Header("Phone Controls")]
     [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]
     public float SlowTurretSpeed = 0.4f;
+
+    [Tooltip("When true, all phone turret input is capped to SlowTurretSpeed.")]
+    public bool SlowTurretEnabled = false;
 
     [Header("Tank Physics")]
     [Tooltip("Seconds to ramp from stopped to full drive speed. 0 = instant response.")]
@@ -115,6 +121,7 @@ public class GameSettings : MonoBehaviour
                 maxHp                    = MaxHp,
                 damagePerHit             = DamagePerHit,
                 rearMultiplier           = RearMultiplier,
+                sideMultiplier           = SideMultiplier,
                 matchDurationSeconds     = MatchDurationSeconds,
                 maxPlayers               = MaxPlayers,
                 maxTeamPoints            = MaxTeamPoints,
@@ -131,6 +138,7 @@ public class GameSettings : MonoBehaviour
                 handshakeWindowTimeoutMs = HandshakeWindowTimeoutMs,
                 buzzerEnabled            = BuzzerEnabled ? 1 : 0,
                 twoPlayerModeEnabled     = TwoPlayerModeEnabled ? 1 : 0,
+                slowTurretEnabled        = SlowTurretEnabled ? 1 : 0,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -151,6 +159,7 @@ public class GameSettings : MonoBehaviour
             if (data.maxHp                    > 0) MaxHp                    = data.maxHp;
             if (data.damagePerHit             > 0) DamagePerHit             = data.damagePerHit;
             if (data.rearMultiplier           > 0) RearMultiplier           = data.rearMultiplier;
+            if (data.sideMultiplier           > 0) SideMultiplier           = data.sideMultiplier;
             if (data.matchDurationSeconds     > 0) MatchDurationSeconds     = data.matchDurationSeconds;
             if (data.maxPlayers               > 0) MaxPlayers               = data.maxPlayers;
             if (data.maxTeamPoints            > 0) MaxTeamPoints            = data.maxTeamPoints;
@@ -170,6 +179,7 @@ public class GameSettings : MonoBehaviour
             if (data.buzzerEnabled >= 0) BuzzerEnabled = data.buzzerEnabled != 0;
             // twoPlayerModeEnabled: -1 = not yet written → keep default false
             if (data.twoPlayerModeEnabled >= 0) TwoPlayerModeEnabled = data.twoPlayerModeEnabled != 0;
+            if (data.slowTurretEnabled    >= 0) SlowTurretEnabled    = data.slowTurretEnabled    != 0;
 
             Debug.Log("[GameSettings] Loaded from " + SavePath);
         }
@@ -199,7 +209,9 @@ public class GameSettings : MonoBehaviour
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;
         public int   handshakeWindowTimeoutMs;
+        public float sideMultiplier;
         public int   buzzerEnabled = -1;         // -1 = not set (old save); 0 = off; 1 = on
-        public int   twoPlayerModeEnabled = -1;  // -1 = not set (old save); 0 = off; 1 = on
+        public int   twoPlayerModeEnabled = -1;
+        public int   slowTurretEnabled = -1;
     }
 }

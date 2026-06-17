@@ -89,8 +89,11 @@ public sealed class GameService
         var settings      = ServiceLocator.GameSettings;
         int baseDamage    = settings != null ? settings.DamagePerHit    : 25;
         float rearMult    = settings != null ? settings.RearMultiplier   : 3f;
+        float sideMult    = settings != null ? settings.SideMultiplier   : 1.5f;
 
-        float multiplier  = IsRearHit(cardinalDir) ? rearMult : 1f;
+        float multiplier  = IsRearHit(cardinalDir) ? rearMult
+                          : IsSideHit(cardinalDir) ? sideMult
+                          : 1f;
         int damage        = Mathf.RoundToInt(baseDamage * multiplier);
 
         int newHp = Mathf.Max(0, State.RobotHp[targetId] - damage);
@@ -257,6 +260,7 @@ public sealed class GameService
     // ── private helpers ────────────────────────────────────────────────
 
     private static bool IsRearHit(string dir) => dir == "S";
+    private static bool IsSideHit(string dir) => dir == "E" || dir == "W";
 
     private void CheckWinCondition(PlayersService players, IRobotDirectory dir)
     {

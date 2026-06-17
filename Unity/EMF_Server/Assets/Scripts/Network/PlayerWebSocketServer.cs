@@ -832,6 +832,9 @@ public class PlayerWebSocketServer : MonoBehaviour
         var state = ServiceLocator.Game?.State;
         if (state != null && state.DeadRobots.Contains(robotId)) return;
 
+        var gs = ServiceLocator.GameSettings;
+        if (gs != null && gs.SlowTurretEnabled)
+            speed = Mathf.Clamp(speed, -gs.SlowTurretSpeed, gs.SlowTurretSpeed);
         ServiceLocator.RobotServer?.SendTurret(robotId, speed);
         _lastTurretByConn[connId] = speed;
 
