@@ -48,8 +48,8 @@ public class TeamPointsBarUI : MonoBehaviour
         int pts0 = state?.TeamPoints != null && state.TeamPoints.Length > 0 ? state.TeamPoints[0] : 0;
         int pts1 = state?.TeamPoints != null && state.TeamPoints.Length > 1 ? state.TeamPoints[1] : 0;
 
-        float w0 = Mathf.Min(0.5f, (float)pts0 / maxPts);
-        float w1 = Mathf.Min(0.5f, (float)pts1 / maxPts);
+        float w0 = Mathf.Min(0.5f, (float)pts0 / maxPts * 0.5f);
+        float w1 = Mathf.Min(0.5f, (float)pts1 / maxPts * 0.5f);
 
         if (fill0 != null)
         {
