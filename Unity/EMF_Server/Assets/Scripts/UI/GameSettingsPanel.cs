@@ -46,9 +46,10 @@ public class GameSettingsPanel : MonoBehaviour
 
     void BuildRows()
     {
-        // Clear any leftover scene children
+        // DestroyImmediate so the VLG never sees stale scene children alongside new rows.
+        // Destroy() is deferred in Play mode and would pollute the first layout pass.
         for (int i = transform.childCount - 1; i >= 0; i--)
-            Destroy(transform.GetChild(i).gameObject);
+            DestroyImmediate(transform.GetChild(i).gameObject);
 
         var vlg = GetComponent<VerticalLayoutGroup>();
         if (vlg == null) vlg = gameObject.AddComponent<VerticalLayoutGroup>();
@@ -140,8 +141,10 @@ public class GameSettingsPanel : MonoBehaviour
     void AddHeader(string text)
     {
         var go = new GameObject("Header");
-        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 28f;
+        var rt = go.AddComponent<RectTransform>();
         go.transform.SetParent(transform, false);
+        rt.sizeDelta = new Vector2(0, 28f);
+        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 28f;
         var tmp = go.AddComponent<TextMeshProUGUI>();
         if (_font) tmp.font = _font;
         tmp.text = text; tmp.fontSize = 14; tmp.fontStyle = FontStyles.Bold;
@@ -152,8 +155,10 @@ public class GameSettingsPanel : MonoBehaviour
     void AddSectionLabel(string text)
     {
         var go = new GameObject("Section");
-        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 18f;
+        var rt = go.AddComponent<RectTransform>();
         go.transform.SetParent(transform, false);
+        rt.sizeDelta = new Vector2(0, 18f);
+        var le = go.AddComponent<LayoutElement>(); le.preferredHeight = 18f;
         var tmp = go.AddComponent<TextMeshProUGUI>();
         if (_font) tmp.font = _font;
         tmp.text = text; tmp.fontSize = 10;
@@ -164,12 +169,14 @@ public class GameSettingsPanel : MonoBehaviour
     TMP_InputField AddInputRow(string label)
     {
         var row = new GameObject(label.Replace(":", "") + "Row");
+        var rowRT = row.AddComponent<RectTransform>();
+        row.transform.SetParent(transform, false);
+        rowRT.sizeDelta = new Vector2(0, 26f);
         var rowLE = row.AddComponent<LayoutElement>(); rowLE.preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
         hlg.childControlHeight = true; hlg.childControlWidth = true;
         hlg.childForceExpandHeight = true; hlg.childForceExpandWidth = false;
         hlg.spacing = 4f;
-        row.transform.SetParent(transform, false);
 
         // Label
         var lgo = new GameObject("Lbl");
@@ -205,12 +212,14 @@ public class GameSettingsPanel : MonoBehaviour
     Toggle AddToggleRow(string label)
     {
         var row = new GameObject(label + "Row");
+        var rowRT = row.AddComponent<RectTransform>();
+        row.transform.SetParent(transform, false);
+        rowRT.sizeDelta = new Vector2(0, 26f);
         var rowLE = row.AddComponent<LayoutElement>(); rowLE.preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
         hlg.childControlHeight = true; hlg.childControlWidth = false;
         hlg.childForceExpandHeight = true;
         hlg.spacing = 6f; hlg.padding = new RectOffset(8, 0, 0, 0);
-        row.transform.SetParent(transform, false);
 
         var tgo = new GameObject("Toggle");
         var trt = tgo.AddComponent<RectTransform>();
