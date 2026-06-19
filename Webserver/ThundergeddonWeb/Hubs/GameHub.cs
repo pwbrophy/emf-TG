@@ -151,6 +151,11 @@ public class GameHub : Hub
                    : _bridge.CurrentPhase == "playing" ? "GameInProgress"
                    : "ServerNotReady";
         await Clients.Caller.SendAsync(evt);
+
+        // Replay last display state so the display page can resume mid-game on refresh
+        if (_bridge.LastDisplayUpdate != null)
+            await Clients.Caller.SendAsync("DisplayUpdate", _bridge.LastDisplayUpdate);
+
         await base.OnConnectedAsync();
     }
 

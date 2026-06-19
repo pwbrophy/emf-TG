@@ -25,12 +25,16 @@ public class UnityBridgeService : BackgroundService
     private bool   _connectedToUnity = false;
     private bool   _joinAllowed      = false;
     private string _currentPhase     = "mainmenu";
+    private string? _lastDisplayUpdate = null;
 
     /// <summary>True while the WebSocket connection to Unity's PlayerWebSocketServer is open.</summary>
     public bool IsConnectedToUnity => _connectedToUnity;
 
     /// <summary>Last game phase received from Unity (e.g. "lobby", "playing", "ended").</summary>
     public string CurrentPhase => _currentPhase;
+
+    /// <summary>Last display_update JSON received from Unity, or null if none yet received.</summary>
+    public string? LastDisplayUpdate => _lastDisplayUpdate;
 
     /// <summary>
     /// True when Unity is reachable AND in Lobby (accepting new players).
@@ -159,11 +163,12 @@ public class UnityBridgeService : BackgroundService
                     _logger.LogInformation("[Bridge] ReturnToJoin broadcast");
                     break;
 
-                case "rfid_tag":
-                    await HandleRfidTag(doc.RootElement);
+                case "rfid_notification":
+                    await HandleRfidNotification(doc.RootElement);
                     break;
 
                 case "display_update":
+                    _lastDisplayUpdate = json;
                     await _hub.Clients.All.SendAsync("DisplayUpdate", json);
                     break;
 
@@ -368,14 +373,15 @@ public class UnityBridgeService : BackgroundService
         _logger.LogInformation("[Bridge] YouAreAlive → conn {c}", connId);
     }
 
-    private async Task HandleRfidTag(JsonElement root)
+    private async Task HandleRfidNotification(JsonElement root)
     {
         string? connId = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        string uid = GetString(root, "uid") ?? "";
-        await _hub.Clients.Client(connId).SendAsync("RfidTag", uid);
-        _logger.LogInformation("[Bridge] RfidTag uid={uid} → conn {c}", uid, connId);
+        string text = GetString(root, "text") ?? "";
+        // Reuse the existing RfidTag SignalR event so cached browser clients also receive it.
+        await _hub.Clients.Client(connId).SendAsync("RfidTag", text);
+        _logger.LogInformation("[Bridge] RfidTag (notification) text={text} → conn {c}", text, connId);
     }
 
     private async Task HandleFireResult(JsonElement root)
@@ -410,13 +416,15 @@ public class UnityBridgeService : BackgroundService
             {
                 string? connId = GetString(stat, "connectionId");
                 if (string.IsNullOrEmpty(connId)) continue;
-                int    kills         = GetInt(stat,    "kills");
-                int    deaths        = GetInt(stat,    "deaths");
-                int    damage        = GetInt(stat,    "damage");
-                int    victoryPoints = GetInt(stat,    "victoryPoints");
-                string nemesis       = GetString(stat, "nemesis") ?? "";
+                int    kills          = GetInt(stat,    "kills");
+                int    deaths         = GetInt(stat,    "deaths");
+                int    damage         = GetInt(stat,    "damage");
+                int    victoryPoints  = GetInt(stat,    "victoryPoints");
+                int    vpFromCaptures = GetInt(stat,    "vpFromCaptures");
+                int    vpFromKills    = GetInt(stat,    "vpFromKills");
+                string nemesis        = GetString(stat, "nemesis") ?? "";
                 await _hub.Clients.Client(connId).SendAsync("PlayerStats",
-                    new { kills, deaths, damage, victoryPoints, nemesis });
+                    new { kills, deaths, damage, victoryPoints, vpFromCaptures, vpFromKills, nemesis });
             }
         }
 

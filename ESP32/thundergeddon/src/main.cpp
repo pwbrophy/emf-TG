@@ -886,6 +886,16 @@ static void handleWsText(const String& s)
         return;
     }
 
+    if (strcmp(cmd, "invuln_start") == 0) {
+        leds.startInvuln();
+        return;
+    }
+
+    if (strcmp(cmd, "invuln_end") == 0) {
+        leds.stopInvuln();
+        return;
+    }
+
     if (strcmp(cmd, "set_hp") == 0) {
         leds.setHp(doc["hp"] | 0, doc["max"] | 100);
         return;
@@ -996,6 +1006,12 @@ static void handleWsText(const String& s)
         leds.setHp(100, 100);
         startBuzzerFanfareEffect();
         Serial.println("[COUNTDOWN] game_start_fanfare");
+        return;
+    }
+
+    if (strcmp(cmd, "reset_idle") == 0) {
+        leds.resetToIdle();
+        Serial.println("[LED] reset_idle — bounce mode");
         return;
     }
 

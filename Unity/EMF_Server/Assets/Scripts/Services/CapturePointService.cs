@@ -8,6 +8,8 @@ public sealed class CapturePointService
     // (pointIndex, allianceIndex, pointName)
     public event Action<int, int, string> OnPointCaptured;
     public event Action OnTeamPointsChanged;
+    // (playerName, fractional VP share) — fired each time a capture-CP tick awards points
+    public event Action<string, float> OnCaptureVpAwarded;
 
     // Per-team accumulator: seconds elapsed toward the next point award.
     // Reset on game start; runs in Update() via Tick(dt).
@@ -19,7 +21,8 @@ public sealed class CapturePointService
     {
         var gs = ServiceLocator.Game?.State;
         if (gs == null) return;
-        gs.CapturePointOwners  = new int[] { -1, -1, -1 };
+        gs.CapturePointOwners  = new int[]    { -1, -1, -1 };
+        gs.CapturePointCaptors = new string[] { "", "", "" };
         gs.TeamPoints          = new int[] { 0, 0 };
         _teamAccum[0] = _teamAccum[1] = 0f;
     }
@@ -54,6 +57,18 @@ public sealed class CapturePointService
             {
                 _teamAccum[team] -= interval;
                 gs.TeamPoints[team]++;
+
+                // Attribute this VP equally among the CPs that contributed to it.
+                if (OnCaptureVpAwarded != null && gs.CapturePointCaptors != null)
+                {
+                    float share = 1f / cpCount[team];
+                    for (int ci = 0; ci < gs.CapturePointOwners.Length; ci++)
+                        if (gs.CapturePointOwners[ci] == team
+                            && ci < gs.CapturePointCaptors.Length
+                            && !string.IsNullOrEmpty(gs.CapturePointCaptors[ci]))
+                            OnCaptureVpAwarded.Invoke(gs.CapturePointCaptors[ci], share);
+                }
+
                 OnTeamPointsChanged?.Invoke();
 
                 if (gs.TeamPoints[team] >= settings.MaxTeamPoints)
@@ -90,6 +105,16 @@ public sealed class CapturePointService
         if (gs.CapturePointOwners[pointIndex] == alliance) return false; // already owned
 
         gs.CapturePointOwners[pointIndex] = alliance;
+
+        // Record which player captured this CP so VP ticks can be attributed to them.
+        if (gs.CapturePointCaptors != null && pointIndex < gs.CapturePointCaptors.Length)
+        {
+            string captor = "";
+            if (dir.TryGet(robotId, out var capInfo) && !string.IsNullOrEmpty(capInfo.AssignedPlayer))
+                captor = capInfo.AssignedPlayer;
+            gs.CapturePointCaptors[pointIndex] = captor;
+        }
+
         Debug.Log($"[CapturePoints] {PointNames[pointIndex]} captured by alliance {alliance} (robot {robotId})");
         OnPointCaptured?.Invoke(pointIndex, alliance, PointNames[pointIndex]);
         return true;
@@ -105,6 +130,8 @@ public sealed class CapturePointService
         if (gs == null) return;
         if (pointIndex < 0 || pointIndex >= gs.CapturePointOwners.Length) return;
         gs.CapturePointOwners[pointIndex] = allianceIndex;
+        if (gs.CapturePointCaptors != null && pointIndex < gs.CapturePointCaptors.Length)
+            gs.CapturePointCaptors[pointIndex] = ""; // no robot captor — operator override
         string name = pointIndex < PointNames.Length ? PointNames[pointIndex] : pointIndex.ToString();
         OnPointCaptured?.Invoke(pointIndex, allianceIndex, name);
     }

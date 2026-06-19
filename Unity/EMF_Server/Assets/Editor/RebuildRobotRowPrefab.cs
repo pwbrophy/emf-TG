@@ -46,6 +46,10 @@ public static class RebuildRobotRowPrefab
         // ── Player label ──────────────────────────────────────────────────────────
         var playerGO = MakeTMPLabel(root.transform, "Player", "Unassigned", 11, minWidth: 80f, flexibleWidth: 0f, color: new Color(0.6f, 0.8f, 1f));
 
+        // ── Turret nudge buttons (◄ ►) ───────────────────────────────────────────
+        MakeTurretNudgeButton(root.transform, "TurretLeft",  "◄");
+        MakeTurretNudgeButton(root.transform, "TurretRight", "►");
+
         // ── Alliance toggle button (D / J / ?) ────────────────────────────────────
         var allianceGO = new GameObject("AllianceButton", typeof(RectTransform), typeof(Image), typeof(Button));
         allianceGO.transform.SetParent(root.transform, false);
@@ -103,6 +107,31 @@ public static class RebuildRobotRowPrefab
         var f = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(
             "Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF.asset");
         return f ?? TMP_Settings.defaultFontAsset;
+    }
+
+    static void MakeTurretNudgeButton(Transform parent, string name, string label)
+    {
+        var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+        go.transform.SetParent(parent, false);
+        go.GetComponent<Image>().color = new Color(0.20f, 0.40f, 0.45f, 1f);
+        go.AddComponent<HoldButton>();
+
+        var le = go.AddComponent<LayoutElement>();
+        le.minWidth       = 28;
+        le.preferredWidth = 28;
+        le.preferredHeight = 30;
+
+        var textGO = new GameObject("Text");
+        var textRT = textGO.AddComponent<RectTransform>();
+        textGO.transform.SetParent(go.transform, false);
+        textRT.anchorMin = Vector2.zero; textRT.anchorMax = Vector2.one;
+        textRT.offsetMin = Vector2.zero; textRT.offsetMax = Vector2.zero;
+        var tmp = textGO.AddComponent<TextMeshProUGUI>();
+        tmp.text      = label;
+        tmp.fontSize  = 13;
+        tmp.color     = Color.white;
+        tmp.alignment = TextAlignmentOptions.Center;
+        var f = GetFont(); if (f != null) tmp.font = f;
     }
 
     static GameObject MakeTMPLabel(Transform parent, string name, string text,

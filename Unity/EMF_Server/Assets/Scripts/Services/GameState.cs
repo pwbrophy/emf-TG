@@ -20,12 +20,18 @@ public sealed class GameState
     // Respawning robots (dead walk — can drive but not shoot/capture; return to base to revive)
     public HashSet<string> RespawningRobots = new HashSet<string>();
 
+    // Invulnerable robots (briefly immune after respawn/base-heal — cannot be damaged)
+    public HashSet<string>           InvulnerableRobots = new HashSet<string>();
+    public Dictionary<string, float> InvulnerableExpiry = new Dictionary<string, float>();
+
     // Match result — set when EndGame is called
     public int  WinnerAllianceIndex = -1;   // -1 = not yet decided
     public string EndReason         = "";   // "elimination" | "time" | "manual"
 
     // Capture points: index 0=North, 1=Centre, 2=South. Owner = alliance index, -1 = uncaptured.
-    public int[] CapturePointOwners = { -1, -1, -1 };
+    public int[]    CapturePointOwners  = { -1, -1, -1 };
+    // Player name of the last robot to capture each CP (empty = unknown/uncaptured).
+    public string[] CapturePointCaptors = { "", "", "" };
 
     // Team points tug-of-war
     public int[] TeamPoints = { 0, 0 };

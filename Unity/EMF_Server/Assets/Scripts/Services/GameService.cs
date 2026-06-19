@@ -27,6 +27,10 @@ public sealed class GameService
     // shooterId (null if operator/direct damage), targetId — fired when HP reaches zero
     public event Action<string, string> OnRobotKilled;
 
+    // robotId — fired when invulnerability starts and ends
+    public event Action<string> OnInvulnerabilityGranted;
+    public event Action<string> OnInvulnerabilityEnded;
+
     public bool CanStart() => true;
 
     public void StartGame()
@@ -84,6 +88,7 @@ public sealed class GameService
         // Drop in-flight IR results that resolve while the match is paused
         if (ServiceLocator.GameFlow?.IsPaused == true) return 0;
         if (State.DeadRobots.Contains(targetId) || State.RespawningRobots.Contains(targetId)) return 0;
+        if (State.InvulnerableRobots.Contains(targetId)) return 0;
         if (!State.RobotHp.ContainsKey(targetId)) return 0;
 
         var settings      = ServiceLocator.GameSettings;
@@ -134,6 +139,7 @@ public sealed class GameService
     {
         if (State == null) return -1;
         if (State.DeadRobots.Contains(targetId) || State.RespawningRobots.Contains(targetId)) return -1;
+        if (State.InvulnerableRobots.Contains(targetId)) return -1;
         if (!State.RobotHp.ContainsKey(targetId)) return -1;
 
         int newHp = Mathf.Max(0, State.RobotHp[targetId] - amount);
@@ -160,6 +166,7 @@ public sealed class GameService
     {
         if (State == null) return -1;
         if (State.DeadRobots.Contains(targetId) || State.RespawningRobots.Contains(targetId)) return -1;
+        if (State.InvulnerableRobots.Contains(targetId)) return -1;
         if (!State.RobotHp.ContainsKey(targetId)) return -1;
 
         var settings  = ServiceLocator.GameSettings;
@@ -190,6 +197,7 @@ public sealed class GameService
     {
         if (State == null) return;
         if (State.DeadRobots.Contains(robotId) || State.RespawningRobots.Contains(robotId)) return;
+        if (State.InvulnerableRobots.Contains(robotId)) return; // debounce: already healed recently
         if (!State.RobotHp.ContainsKey(robotId)) return;
 
         var settings = ServiceLocator.GameSettings;
@@ -198,6 +206,7 @@ public sealed class GameService
         State.RobotHp[robotId] = maxHp;
         OnHpChanged?.Invoke(robotId, maxHp);
         Debug.Log($"[GameService] Base heal: {robotId} restored to {maxHp} HP");
+        GrantInvulnerability(robotId);
     }
 
     /// <summary>
@@ -233,6 +242,65 @@ public sealed class GameService
         OnHpChanged?.Invoke(robotId, maxHp);
         OnRobotRespawned?.Invoke(robotId);
         Debug.Log($"[GameService] {robotId} respawned at base — HP restored to {maxHp}");
+        GrantInvulnerability(robotId);
+    }
+
+    /// <summary>
+    /// Grant temporary invulnerability after a base heal or respawn.
+    /// No-op if the robot is already invulnerable (debounce for repeated RFID scans).
+    /// </summary>
+    public void GrantInvulnerability(string robotId)
+    {
+        if (State == null) return;
+        if (State.InvulnerableRobots.Contains(robotId)) return;
+
+        var settings = ServiceLocator.GameSettings;
+        float duration = settings != null ? settings.InvulnerabilitySeconds : 5f;
+
+        State.InvulnerableRobots.Add(robotId);
+        State.InvulnerableExpiry[robotId] = Time.time + duration;
+
+        OnInvulnerabilityGranted?.Invoke(robotId);
+        Debug.Log($"[GameService] {robotId} invulnerable for {duration}s");
+    }
+
+    /// <summary>
+    /// Expire invulnerabilities whose timer has elapsed. Call every frame from PlayerWebSocketServer.Update().
+    /// </summary>
+    public void TickInvulnerability(float now)
+    {
+        if (State == null || State.InvulnerableExpiry.Count == 0) return;
+
+        List<string> expired = null;
+        foreach (var kvp in State.InvulnerableExpiry)
+            if (now >= kvp.Value)
+            {
+                if (expired == null) expired = new List<string>();
+                expired.Add(kvp.Key);
+            }
+
+        if (expired == null) return;
+        foreach (var robotId in expired)
+        {
+            State.InvulnerableRobots.Remove(robotId);
+            State.InvulnerableExpiry.Remove(robotId);
+            OnInvulnerabilityEnded?.Invoke(robotId);
+            Debug.Log($"[GameService] {robotId} invulnerability ended");
+        }
+    }
+
+    /// <summary>
+    /// Cancel all active invulnerabilities immediately (e.g. when the game ends).
+    /// Fires OnInvulnerabilityEnded for each robot so the robot LED can be restored.
+    /// </summary>
+    public void ClearAllInvulnerabilities()
+    {
+        if (State == null) return;
+        var robots = new List<string>(State.InvulnerableRobots);
+        State.InvulnerableRobots.Clear();
+        State.InvulnerableExpiry.Clear();
+        foreach (var robotId in robots)
+            OnInvulnerabilityEnded?.Invoke(robotId);
     }
 
     /// <summary>

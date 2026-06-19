@@ -62,6 +62,7 @@ public:
     void update(uint32_t now)
     {
         _updateEffect(now);
+        _updateInvuln(now); // runs after effect — draws invuln flicker when no effect active
         _updatePulse(now);
         _updateStatus(now);
         _updateBootAnim(now);
@@ -211,6 +212,38 @@ public:
         if (_statusPattern == p) return;
         _statusPattern    = p;
         _statusNextToggle = 0; // force immediate update
+    }
+
+    // Reset to idle bounce state: clears HP, all effects, and player colour so the
+    // white dot animation resumes. Call after a game ends or on a fresh connection.
+    void resetToIdle()
+    {
+        _hp                = 0;
+        _maxHp             = 100;
+        _effect            = Effect::None;
+        _playerColorActive = false;
+        _invulnActive      = false;
+        _countdownLeds     = -1;
+        _bouncePos         = 0;
+        _bounceDir         = 1;
+        _bounceNext        = 0;
+        _strip.clear();
+        _strip.show();
+    }
+
+    // Invulnerability flicker: alternates between dim-white and HP bar at 4 Hz.
+    // Starts immediately and runs until stopInvuln() is called.
+    void startInvuln()
+    {
+        _invulnActive     = true;
+        _invulnFlashOn    = true;
+        _invulnNextToggle = 0; // draw immediately on next update
+    }
+
+    void stopInvuln()
+    {
+        _invulnActive = false;
+        if (_effect == Effect::None && !_playerColorActive) _drawHpBar();
     }
 
     // OTA progress bar — bypasses the effect system (update() is not running during OTA).
@@ -478,6 +511,8 @@ private:
         if (_playerColorActive) {
             if (_countdownLeds >= 0) _drawPlayerBar(); // static countdown bar
             // pulse mode: _updateBootAnim picks up within 50ms
+        } else if (_invulnActive && _invulnFlashOn) {
+            _fillStrip(DIM_BRIGHTNESS, DIM_BRIGHTNESS, DIM_BRIGHTNESS);
         } else {
             _drawHpBar();
         }
@@ -517,6 +552,19 @@ private:
         }
 
         _strip.show();
+    }
+
+    // Invulnerability flicker: when active and no timed effect is playing, toggle between
+    // dim-white and the HP bar at 4 Hz (250 ms period, 125 ms each phase).
+    void _updateInvuln(uint32_t now)
+    {
+        if (!_invulnActive || _effect != Effect::None) return;
+        if ((int32_t)(now - _invulnNextToggle) >= 0) {
+            _invulnFlashOn    = !_invulnFlashOn;
+            _invulnNextToggle = now + 125;
+            if (_invulnFlashOn) _fillStrip(DIM_BRIGHTNESS, DIM_BRIGHTNESS, DIM_BRIGHTNESS);
+            else                _drawHpBar();
+        }
     }
 
     // Called every update() tick to handle flash timing and the post-boot bounce.
@@ -610,6 +658,11 @@ private:
     int               _bouncePos         = 0;
     int               _bounceDir         = 1;
     uint32_t          _bounceNext        = 0;
+
+    // Invulnerability flicker
+    bool              _invulnActive      = false;
+    bool              _invulnFlashOn     = false;
+    uint32_t          _invulnNextToggle  = 0;
 
     // Player identification colour (lobby phase)
     bool              _playerColorActive = false;

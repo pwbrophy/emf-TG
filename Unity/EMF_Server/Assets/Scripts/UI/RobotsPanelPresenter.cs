@@ -129,6 +129,8 @@ public class RobotsPanelPresenter : MonoBehaviour
         TextMeshProUGUI playerText = rowGO.transform.Find("Player").GetComponent<TextMeshProUGUI>();
         Button allianceButton      = rowGO.transform.Find("AllianceButton")?.GetComponent<Button>();
         Button editButton          = rowGO.transform.Find("EditButton").GetComponent<Button>();
+        HoldButton turretLeft      = rowGO.transform.Find("TurretLeft")?.GetComponent<HoldButton>();
+        HoldButton turretRight     = rowGO.transform.Find("TurretRight")?.GetComponent<HoldButton>();
 
         nameText.text   = r.Callsign;
         ipText.text     = string.IsNullOrEmpty(r.Ip) ? "IP: ?" : $"IP: {r.Ip}";
@@ -173,5 +175,17 @@ public class RobotsPanelPresenter : MonoBehaviour
                 }
             );
         });
+
+        string rid = r.RobotId;
+        if (turretLeft != null)
+        {
+            turretLeft.OnPressed  = () => { ServiceLocator.RobotServer?.SendMotorsOn(rid); ServiceLocator.RobotServer?.SendTurret(rid, 1f); };
+            turretLeft.OnReleased = () => ServiceLocator.RobotServer?.SendTurret(rid, 0f);
+        }
+        if (turretRight != null)
+        {
+            turretRight.OnPressed  = () => { ServiceLocator.RobotServer?.SendMotorsOn(rid); ServiceLocator.RobotServer?.SendTurret(rid, -1f); };
+            turretRight.OnReleased = () => ServiceLocator.RobotServer?.SendTurret(rid, 0f);
+        }
     }
 }

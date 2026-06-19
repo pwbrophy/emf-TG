@@ -97,7 +97,7 @@ public:
             // Don't clear _lastUid immediately — MIFARE Classic stays ACTIVE after
             // SELECT and won't respond to REQA for ~300 ms before auto-resetting.
             // Wait for 5 consecutive failures (~1 s) before treating the card as gone.
-            if (++_reqaFailCount >= 5) { _lastUid = ""; _reqaFailCount = 0; }
+            if (++_reqaFailCount >= 5) { _lastUid = ""; _lastUidHex = ""; _reqaFailCount = 0; }
             return "";
         }
         _reqaFailCount = 0;
@@ -113,7 +113,12 @@ public:
                  cl1[0], cl1[1], cl1[2], cl1[3]);
         String uidHex(hexBuf);
 
-        if (uidHex == _lastUid) return "";
+        // Gate tryReadLabel() on UID change, not on _lastUid string equality.
+        // _lastUid stores the resolved label ("north") but _lastUidHex stores the raw
+        // UID hex ("88AB12CD").  Without this check, when _lastUid = "north" the
+        // uidHex != _lastUid comparison always fails and tryReadLabel() runs every poll
+        // — ~10-15 ms of I2C blocking every 200 ms when a capture-point tag is present.
+        if (uidHex == _lastUidHex) return "";
 
         // Try to fully select the card and read a text label from NTAG user data
         String label = tryReadLabel(cl1);
@@ -121,7 +126,8 @@ public:
         String key = (label.length() > 0) ? label : uidHex;
         if (key == _lastUid) return "";
 
-        _lastUid = key;
+        _lastUid    = key;
+        _lastUidHex = uidHex;
         Serial.printf("[RFID] Tag: %s\n", key.c_str());
         return key;
     }
@@ -130,6 +136,7 @@ private:
     bool     _ok           = false;
     uint32_t _lastPoll     = 0;
     String   _lastUid;
+    String   _lastUidHex;  // raw CL1 hex — used to gate tryReadLabel() independently of _lastUid
     uint8_t  _reqaFailCount = 0; // consecutive REQA failures; card gone after 5 (~1 s)
 
     // ---- I2C register helpers ----

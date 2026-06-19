@@ -75,9 +75,16 @@ public class RobotWebSocketServer : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (_flow != null) _flow.OnPhaseChanged -= OnPhaseChanged;
         if (_self == this) _self = null;
         if (ServiceLocator.RobotServer == this) ServiceLocator.RobotServer = null;
         StopServer();
+    }
+
+    private void OnPhaseChanged(GamePhase phase)
+    {
+        if (phase == GamePhase.Ended)
+            BroadcastResetIdleToAll();
     }
 
     // ===== Public control =====
@@ -114,6 +121,8 @@ public class RobotWebSocketServer : MonoBehaviour
         serverStarted = true;
 
         ServiceLocator.RobotServer = this;
+
+        _flow.OnPhaseChanged += OnPhaseChanged;
     }
 
     public void StopServer()
@@ -320,11 +329,9 @@ public class RobotWebSocketServer : MonoBehaviour
             }
             else if (_flow?.Phase == GamePhase.Lobby)
             {
-                // Robot may have been left in a death animation from the previous game.
-                // Sending set_hp with full health clears any DeadBlink / DeathExplosion
-                // effect on the firmware so the player colour pulse works at game start.
-                if (gs != null)
-                    SendSetHp(id, gs.MaxHp, gs.MaxHp);
+                // Reset to idle bounce — clears any leftover HP bar / death animation
+                // from a previous game so the white dot animation plays while waiting.
+                SendResetIdle(id);
             }
 
             return;
@@ -678,6 +685,22 @@ public class RobotWebSocketServer : MonoBehaviour
         return ok;
     }
 
+    public bool SendInvulnStart(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"invuln_start\"}");
+        Debug.Log(ok ? $"[WS->Robot] invuln_start -> {robotId}" : $"[WS->Robot] FAILED invuln_start -> {robotId}");
+        return ok;
+    }
+
+    public bool SendInvulnEnd(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"invuln_end\"}");
+        Debug.Log(ok ? $"[WS->Robot] invuln_end -> {robotId}" : $"[WS->Robot] FAILED invuln_end -> {robotId}");
+        return ok;
+    }
+
     public bool SendSetHp(string robotId, int hp, int maxHp)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
@@ -698,6 +721,20 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         return SendJsonToRobot(robotId, "{\"cmd\":\"game_start_fanfare\"}");
+    }
+
+    public bool SendResetIdle(string robotId)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"reset_idle\"}");
+        Debug.Log(ok ? $"[WS->Robot] reset_idle -> {robotId}" : $"[WS->Robot] FAILED reset_idle -> {robotId}");
+        return ok;
+    }
+
+    public void BroadcastResetIdleToAll()
+    {
+        foreach (var robotId in _sessionByRobot.Keys.ToList())
+            SendResetIdle(robotId);
     }
 
     public bool SendPlayerColor(string robotId, byte r, byte g, byte b)

@@ -672,6 +672,18 @@
 
     .go-nemesis { color: var(--accent) !important; }
 
+    .go-stat-sub {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      width: 100%;
+      max-width: 320px;
+      padding: 4px 0 4px 12px;
+      gap: 16px;
+    }
+    .go-stat-sub .go-stat-label { font-size: 0.8rem; }
+    .go-stat-sub .go-stat-value { font-size: 0.95rem; font-weight: 600; color: var(--muted); }
+
     .go-btn-row {
       margin-top: 32px;
       display: flex;
@@ -1062,6 +1074,8 @@
     <div class="go-stat-row"><span class="go-stat-label">Your deaths</span><span class="go-stat-value" id="stat-deaths">&#8212;</span></div>
     <div class="go-stat-row"><span class="go-stat-label">Inflicted damage</span><span class="go-stat-value" id="stat-damage">&#8212;</span></div>
     <div class="go-stat-row"><span class="go-stat-label">Victory points gained</span><span class="go-stat-value" id="stat-vp">&#8212;</span></div>
+    <div class="go-stat-sub"><span class="go-stat-label">from captures</span><span class="go-stat-value" id="stat-vp-captures">&#8212;</span></div>
+    <div class="go-stat-sub"><span class="go-stat-label">from kills</span><span class="go-stat-value" id="stat-vp-kills">&#8212;</span></div>
     <div class="go-stat-row"><span class="go-stat-label">Your nemesis</span><span class="go-stat-value go-nemesis" id="stat-nemesis">&#8212;</span></div>
     <div class="go-btn-row">
       <button class="go-btn-primary" onclick="playAgain()">PLAY AGAIN</button>
@@ -1410,14 +1424,16 @@ function buildConnection() {
   conn.on('PlayerStats',  data     => {
     dbg('SignalR: PlayerStats kills=' + data.kills + ' deaths=' + data.deaths);
     _pendingStats = {
-      kills:         data.kills         ?? null,
-      deaths:        data.deaths        ?? null,
-      damage:        data.damage        ?? null,
-      victoryPoints: data.victoryPoints ?? null,
-      nemesis:       data.nemesis       || null,
+      kills:          data.kills          ?? null,
+      deaths:         data.deaths         ?? null,
+      damage:         data.damage         ?? null,
+      victoryPoints:  data.victoryPoints  ?? null,
+      vpFromCaptures: data.vpFromCaptures ?? null,
+      vpFromKills:    data.vpFromKills    ?? null,
+      nemesis:        data.nemesis        || null,
     };
   });
-  conn.on('RfidTag',      uid      => onRfidTag(uid));
+  conn.on('RfidTag',          text => showRfidToast(text));
   conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; pauseFireCooldown(); document.getElementById('game-paused-overlay').classList.add('active'); });
   conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; resumeFireCooldown(); document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
@@ -1878,6 +1894,13 @@ let _goParticles    = [];
 let _pendingStats   = null;
 
 function onGameOver(data) {
+  // Operator manually ended the game — no winner, no cinematic, straight to join screen.
+  if (data.reason === 'manual' || !data.winnerTeam) {
+    dbg('onGameOver: manual end — returning to join');
+    returnToJoin('Game ended by operator.');
+    return;
+  }
+
   // Only run the cinematic sequence for players actively in game.
   // Everyone else (join/lobby screen) just gets returned to the join screen.
   if (!document.getElementById('screen-playing').classList.contains('active')) {
@@ -1896,11 +1919,13 @@ function onGameOver(data) {
 
   // Save stats data for phase 3
   _pendingStats = {
-    kills:         data.kills         ?? null,
-    deaths:        data.deaths        ?? null,
-    damage:        data.damage        ?? null,
-    victoryPoints: data.victoryPoints ?? null,
-    nemesis:       data.nemesis       ?? null,
+    kills:          data.kills          ?? null,
+    deaths:         data.deaths         ?? null,
+    damage:         data.damage         ?? null,
+    victoryPoints:  data.victoryPoints  ?? null,
+    vpFromCaptures: data.vpFromCaptures ?? null,
+    vpFromKills:    data.vpFromKills    ?? null,
+    nemesis:        data.nemesis        ?? null,
   };
 
   // Stop game loop + fire cooldown
@@ -2006,11 +2031,13 @@ function goToStats() {
   setTimeout(() => {
     const fmtNum  = v => (v !== null && v !== undefined) ? String(v) : '0';
     const fmtName = v => (v !== null && v !== undefined) ? String(v) : '—';
-    document.getElementById('stat-kills').textContent   = fmtNum(_pendingStats?.kills);
-    document.getElementById('stat-deaths').textContent  = fmtNum(_pendingStats?.deaths);
-    document.getElementById('stat-damage').textContent  = fmtNum(_pendingStats?.damage);
-    document.getElementById('stat-vp').textContent      = fmtNum(_pendingStats?.victoryPoints);
-    document.getElementById('stat-nemesis').textContent = fmtName(_pendingStats?.nemesis);
+    document.getElementById('stat-kills').textContent        = fmtNum(_pendingStats?.kills);
+    document.getElementById('stat-deaths').textContent       = fmtNum(_pendingStats?.deaths);
+    document.getElementById('stat-damage').textContent       = fmtNum(_pendingStats?.damage);
+    document.getElementById('stat-vp').textContent           = fmtNum(_pendingStats?.victoryPoints);
+    document.getElementById('stat-vp-captures').textContent  = fmtNum(_pendingStats?.vpFromCaptures);
+    document.getElementById('stat-vp-kills').textContent     = fmtNum(_pendingStats?.vpFromKills);
+    document.getElementById('stat-nemesis').textContent      = fmtName(_pendingStats?.nemesis);
     p3.classList.add('visible');
   }, 700);
 }
@@ -2244,9 +2271,9 @@ function stopGoFireworks() {
 
 // ── RFID toast ───────────────────────────────────────────────────────────────
 let _rfidToastTimer = null;
-function onRfidTag(uid) {
+function showRfidToast(text) {
   const toast = document.getElementById('rfid-toast');
-  toast.textContent = 'RFID Tag: ' + uid;
+  toast.textContent = text;
   toast.classList.add('visible');
   if (_rfidToastTimer) clearTimeout(_rfidToastTimer);
   _rfidToastTimer = setTimeout(() => {

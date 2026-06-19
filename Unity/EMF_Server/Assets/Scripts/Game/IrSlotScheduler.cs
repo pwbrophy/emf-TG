@@ -260,9 +260,9 @@ public class IrSlotScheduler : MonoBehaviour
                 hitCount++;
 
                 var state = game?.State;
-                if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId)))
+                if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId) || state.InvulnerableRobots.Contains(enemyId)))
                 {
-                    Debug.Log($"[IrHs]   {enemyName} is dead/respawning — skipping");
+                    Debug.Log($"[IrHs]   {enemyName} is dead/respawning/invulnerable — skipping");
                     continue;
                 }
 

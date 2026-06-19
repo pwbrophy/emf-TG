@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v11";
+    const string BUILT_SENTINEL = "__ppb_v12";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -305,6 +305,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_rearMult    = MakeSettingsRow(gameSettingsContent,    "Rear Mult",   "Damage multiplier for S hits (rear).");
         var f_killPoints  = MakeSettingsRow(gameSettingsContent,    "Kill Pts",    "Team points awarded per robot destroyed.");
         var f_cooldown    = MakeSettingsRow(gameSettingsContent,    "Cooldown s",  "Minimum seconds between shots.");
+        var f_invuln      = MakeSettingsRow(gameSettingsContent,    "Invuln s",    "Seconds of invulnerability after respawn or base heal.");
         var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",  "Enable / disable buzzer sound effects.");
         var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret", "Turret speed fraction 0–1 (e.g. 0.4 = 40% speed).");
 
@@ -360,6 +361,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "rearMultField",    f_rearMult);
         Wire(psp, "killPointsField",  f_killPoints);
         Wire(psp, "cooldownField",    f_cooldown);
+        Wire(psp, "invulnField",      f_invuln);
         Wire(psp, "buzzerToggle",     f_buzzer);
         Wire(psp, "slowTurretField",  f_slowTurret);
 

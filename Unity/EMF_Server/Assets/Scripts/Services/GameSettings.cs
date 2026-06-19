@@ -62,6 +62,29 @@ public class GameSettings : MonoBehaviour
         return false;
     }
 
+    /// <summary>Returns true if uid matches either alliance's base.</summary>
+    public bool IsAnyBase(string uid)
+        => IsAllianceBase(0, uid) || IsAllianceBase(1, uid);
+
+    /// <summary>Returns the display name ("North", "Centre", "South") if uid is a capture point, or null.</summary>
+    public string GetCapturePointName(string uid)
+    {
+        if (string.IsNullOrEmpty(uid)) return null;
+        uid = uid.ToUpperInvariant();
+        if (UidInList(uid, NorthPointUids))  return "North";
+        if (UidInList(uid, CentrePointUids)) return "Centre";
+        if (UidInList(uid, SouthPointUids))  return "South";
+        return null;
+    }
+
+    private static bool UidInList(string uid, string[] arr)
+    {
+        if (arr == null) return false;
+        foreach (var entry in arr)
+            if (!string.IsNullOrEmpty(entry) && uid == entry.ToUpperInvariant()) return true;
+        return false;
+    }
+
     [Header("Phone Controls")]
     [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]
     public float SlowTurretSpeed = 0.4f;
@@ -86,6 +109,10 @@ public class GameSettings : MonoBehaviour
     [Header("Audio")]
     [Tooltip("When disabled, no buzzer sounds play on any robot.")]
     public bool BuzzerEnabled = true;
+
+    [Header("Respawn")]
+    [Tooltip("Seconds of invulnerability granted after respawn or base heal. Also debounces the RFID tag.")]
+    public float InvulnerabilitySeconds = 5f;
 
     [Header("Shot Timing")]
     [Tooltip("Minimum seconds between shots for the same robot.")]
@@ -132,6 +159,7 @@ public class GameSettings : MonoBehaviour
                 driveDeceleration        = DriveDeceleration,
                 turretAcceleration       = TurretAcceleration,
                 turretDeceleration       = TurretDeceleration,
+                invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
                 handshakeWindowMs        = HandshakeWindowMs,
                 handshakeAckTimeoutMs    = HandshakeAckTimeoutMs,
@@ -171,6 +199,7 @@ public class GameSettings : MonoBehaviour
             DriveDeceleration  = data.driveDeceleration;
             TurretAcceleration = data.turretAcceleration;
             TurretDeceleration = data.turretDeceleration;
+            if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
             if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
             if (data.handshakeAckTimeoutMs    > 0) HandshakeAckTimeoutMs    = data.handshakeAckTimeoutMs;
@@ -205,6 +234,7 @@ public class GameSettings : MonoBehaviour
         public float driveDeceleration;
         public float turretAcceleration;
         public float turretDeceleration;
+        public float invulnerabilitySeconds;
         public float fireCooldownSeconds;
         public int   handshakeWindowMs;
         public int   handshakeAckTimeoutMs;

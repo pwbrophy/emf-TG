@@ -67,12 +67,16 @@ public class PlayerWebSocketServer : MonoBehaviour
     private readonly HashSet<string> _lowHpWarned = new HashSet<string>();
 
     // ── Per-player end-of-game stats ──────────────────────────────────────────────
-    private readonly Dictionary<string, int> _statKills  = new Dictionary<string, int>();
-    private readonly Dictionary<string, int> _statDeaths = new Dictionary<string, int>();
-    private readonly Dictionary<string, int> _statDamage = new Dictionary<string, int>();
+    private readonly Dictionary<string, int>   _statKills          = new Dictionary<string, int>();
+    private readonly Dictionary<string, int>   _statDeaths         = new Dictionary<string, int>();
+    private readonly Dictionary<string, int>   _statDamage         = new Dictionary<string, int>();
     // target player name → (source player name → cumulative damage dealt to that target)
     private readonly Dictionary<string, Dictionary<string, int>> _statDamageFrom =
         new Dictionary<string, Dictionary<string, int>>();
+    // VP earned by this player: float accumulator for capture ticks (split per CP held)
+    private readonly Dictionary<string, float> _statVpFromCaptures = new Dictionary<string, float>();
+    // VP earned by this player from kill bonuses
+    private readonly Dictionary<string, int>   _statVpFromKills    = new Dictionary<string, int>();
     private int[]  _prevTeamPoints   = { 0, 0 };
     private bool[] _teamPoints50Fired = { false, false };
     private bool[] _teamPoints90Fired = { false, false };
@@ -136,8 +140,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             ServiceLocator.Game.OnHpChanged          += OnHpChanged;
             ServiceLocator.Game.OnRobotDied          += OnRobotDied;
-            ServiceLocator.Game.OnRobotRespawned     += OnRobotRespawned;
-            ServiceLocator.Game.OnGameWon            += OnGameWon;
+            ServiceLocator.Game.OnRobotRespawned         += OnRobotRespawned;
+            ServiceLocator.Game.OnGameWon                += OnGameWon;
+            ServiceLocator.Game.OnInvulnerabilityGranted += OnInvulnerabilityGranted;
+            ServiceLocator.Game.OnInvulnerabilityEnded   += OnInvulnerabilityEnded;
             ServiceLocator.Game.OnRobotHitDirection  += OnHitDirection;
             ServiceLocator.Game.OnRobotKilled        += OnRobotKilled;
             ServiceLocator.Game.OnDamageDealt        += OnDamageDealt;
@@ -150,8 +156,9 @@ public class PlayerWebSocketServer : MonoBehaviour
         // Capture points & match timer tick
         if (ServiceLocator.CapturePoints != null)
         {
-            ServiceLocator.CapturePoints.OnPointCaptured    += OnCapturePointCaptured;
+            ServiceLocator.CapturePoints.OnPointCaptured     += OnCapturePointCaptured;
             ServiceLocator.CapturePoints.OnTeamPointsChanged += OnTeamPointsChanged;
+            ServiceLocator.CapturePoints.OnCaptureVpAwarded  += OnCaptureVpAwardedStat;
         }
     }
 
@@ -177,8 +184,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             ServiceLocator.Game.OnHpChanged         -= OnHpChanged;
             ServiceLocator.Game.OnRobotDied         -= OnRobotDied;
-            ServiceLocator.Game.OnRobotRespawned    -= OnRobotRespawned;
-            ServiceLocator.Game.OnGameWon           -= OnGameWon;
+            ServiceLocator.Game.OnRobotRespawned         -= OnRobotRespawned;
+            ServiceLocator.Game.OnGameWon                -= OnGameWon;
+            ServiceLocator.Game.OnInvulnerabilityGranted -= OnInvulnerabilityGranted;
+            ServiceLocator.Game.OnInvulnerabilityEnded   -= OnInvulnerabilityEnded;
             ServiceLocator.Game.OnRobotHitDirection -= OnHitDirection;
             ServiceLocator.Game.OnRobotKilled       -= OnRobotKilled;
             ServiceLocator.Game.OnDamageDealt       -= OnDamageDealt;
@@ -228,9 +237,12 @@ public class PlayerWebSocketServer : MonoBehaviour
         PumpMain();
         CheckDeathTransitions();
 
-        // Award capture-point victory points every frame (smooth, evenly-spaced intervals)
+        // Award capture-point victory points and expire invulnerabilities every frame
         if (ServiceLocator.GameFlow?.Phase == GamePhase.Playing)
+        {
             ServiceLocator.CapturePoints?.Tick(Time.deltaTime);
+            ServiceLocator.Game?.TickInvulnerability(Time.time);
+        }
 
         // Push state updates (timer) to all players and display at ~1 Hz
         if (_started && Time.time - _lastStateUpdate >= 1.0f)
@@ -906,14 +918,18 @@ public class PlayerWebSocketServer : MonoBehaviour
             _statDeaths.Clear();
             _statDamage.Clear();
             _statDamageFrom.Clear();
+            _statVpFromCaptures.Clear();
+            _statVpFromKills.Clear();
             System.Array.Clear(_prevTeamPoints,    0, _prevTeamPoints.Length);
             System.Array.Clear(_teamPoints50Fired, 0, _teamPoints50Fired.Length);
             System.Array.Clear(_teamPoints90Fired, 0, _teamPoints90Fired.Length);
         }
         else if (phase == GamePhase.Ended)
         {
+            ServiceLocator.Game?.ClearAllInvulnerabilities();
             SendGameOver();
             DeactivateAllRobots();
+            ServiceLocator.RobotServer?.BroadcastResetIdleToAll();
             BroadcastDisplayUpdate();
         }
         else if (phase == GamePhase.Lobby)
@@ -921,9 +937,8 @@ public class PlayerWebSocketServer : MonoBehaviour
             // Clear stale death timers from the previous game so they don't fire
             // transitions on the new GameState when a fresh game starts.
             _deathTimes.Clear();
-            // Reset all robot LED displays to full HP bar immediately so the
-            // dead-blink effect clears as soon as the lobby opens.
-            ResetAllRobotLeds();
+            // Return all robots to the white-bounce idle animation.
+            ServiceLocator.RobotServer?.BroadcastResetIdleToAll();
             // Reset player and assignment state for a fresh game session.
             ResetForNewGame();
         }
@@ -958,17 +973,6 @@ public class PlayerWebSocketServer : MonoBehaviour
             ws.SendStreamOff(robot.RobotId);
             ws.SendMotorsOff(robot.RobotId);
         }
-    }
-
-    void ResetAllRobotLeds()
-    {
-        var server   = ServiceLocator.RobotServer;
-        var dir      = ServiceLocator.RobotDirectory;
-        var settings = ServiceLocator.GameSettings;
-        if (server == null || dir == null) return;
-        int maxHp = settings != null ? settings.MaxHp : 100;
-        foreach (var robot in dir.GetAll())
-            server.SendSetHp(robot.RobotId, maxHp, maxHp);
     }
 
     void OnHpChanged(string robotId, int newHp)
@@ -1118,7 +1122,12 @@ public class PlayerWebSocketServer : MonoBehaviour
                 string credit = !string.IsNullOrEmpty(kInfo.GunnerPlayer)
                     ? kInfo.GunnerPlayer : kInfo.AssignedPlayer ?? "";
                 if (!string.IsNullOrEmpty(credit))
+                {
                     _statKills[credit] = _statKills.GetValueOrDefault(credit) + 1;
+                    int killVp = ServiceLocator.GameSettings?.TeamPointsPerKill ?? 0;
+                    if (killVp > 0)
+                        _statVpFromKills[credit] = _statVpFromKills.GetValueOrDefault(credit) + killVp;
+                }
             }
         }
 
@@ -1162,6 +1171,11 @@ public class PlayerWebSocketServer : MonoBehaviour
             var from = _statDamageFrom[targetName];
             from[shooterName] = from.GetValueOrDefault(shooterName) + damage;
         }
+    }
+
+    void OnCaptureVpAwardedStat(string playerName, float points)
+    {
+        _statVpFromCaptures[playerName] = _statVpFromCaptures.GetValueOrDefault(playerName) + points;
     }
 
     string GetNemesisFor(string playerName)
@@ -1214,6 +1228,16 @@ public class PlayerWebSocketServer : MonoBehaviour
             BroadcastRaw(json);
             Debug.Log($"[PlayerWS] fire_result → {kvp.Value}: {resultText}");
         }
+    }
+
+    void OnInvulnerabilityGranted(string robotId)
+    {
+        ServiceLocator.RobotServer?.SendInvulnStart(robotId);
+    }
+
+    void OnInvulnerabilityEnded(string robotId)
+    {
+        ServiceLocator.RobotServer?.SendInvulnEnd(robotId);
     }
 
     void OnRobotRespawned(string robotId)
@@ -1323,7 +1347,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         var settings = ServiceLocator.GameSettings;
         var game     = ServiceLocator.Game;
 
-        // ---- Respawning robot at its team base → full revival ----
+        // ---- Respawning robot → only interacts with its own team base ----
         if (settings != null && game?.State != null && game.State.RespawningRobots.Contains(robotId))
         {
             int alliance = GetRobotAllianceIndex(robotId);
@@ -1333,6 +1357,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                 ServiceLocator.RobotServer?.SendFlashHeal(robotId);
                 if (game.State.RobotHp.TryGetValue(robotId, out int hp))
                     ServiceLocator.RobotServer?.SendSetHp(robotId, hp, settings.MaxHp);
+                SendRfidNotification(robotId, "You have respawned!");
             }
             return; // respawning robots don't capture points
         }
@@ -1343,7 +1368,28 @@ public class PlayerWebSocketServer : MonoBehaviour
         // ---- Normal play: try capture point, then check own base heal ----
         bool captured = ServiceLocator.CapturePoints?.TryCapture(robotId, uid) ?? false;
         if (captured)
+        {
             ServiceLocator.RobotServer?.SendFlashCapture(robotId);
+            string pointName = settings?.GetCapturePointName(uid) ?? "the point";
+            SendRfidNotification(robotId, "You have captured " + pointName + "!");
+        }
+        else
+        {
+            // If this IS a capture-point UID but capture failed, the team already owns it
+            string pointName = settings?.GetCapturePointName(uid);
+            if (pointName != null)
+            {
+                int allianceForCp = GetRobotAllianceIndex(robotId);
+                var stateForCp    = game?.State;
+                if (allianceForCp >= 0 && stateForCp != null)
+                {
+                    int pointIndex = pointName == "North" ? 0 : pointName == "Centre" ? 1 : 2;
+                    if (pointIndex < stateForCp.CapturePointOwners.Length &&
+                        stateForCp.CapturePointOwners[pointIndex] == allianceForCp)
+                        SendRfidNotification(robotId, "You already captured this point!");
+                }
+            }
+        }
 
         if (settings != null && game?.State != null)
         {
@@ -1354,24 +1400,27 @@ public class PlayerWebSocketServer : MonoBehaviour
                 ServiceLocator.RobotServer?.SendFlashHeal(robotId);
                 if (game.State.RobotHp.TryGetValue(robotId, out int hp))
                     ServiceLocator.RobotServer?.SendSetHp(robotId, hp, settings.MaxHp);
+                SendRfidNotification(robotId, "Hit points restored!");
+            }
+            else if (settings.IsAnyBase(uid))
+            {
+                SendRfidNotification(robotId, "This is not your base");
             }
         }
+    }
 
-        // Forward RFID tag event to the assigned player's phone
+    void SendRfidNotification(string robotId, string text)
+    {
         foreach (var kvp in _connToPlayer)
         {
-            string connId     = kvp.Key;
-            string playerName = kvp.Value;
-            if (PlayerToRobot(playerName) != robotId) continue;
-
-            string json = "{\"cmd\":\"rfid_tag\"" +
-                          ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
-                          ",\"uid\":\""           + EscapeJson(uid)   + "\"}";
+            if (PlayerToRobot(kvp.Value) != robotId) continue;
+            string json = "{\"cmd\":\"rfid_notification\"" +
+                          ",\"connectionId\":\"" + EscapeJson(kvp.Key) + "\"" +
+                          ",\"text\":\"" + EscapeJson(text) + "\"}";
             BroadcastRaw(json);
-            Debug.Log($"[PlayerWS] rfid_tag uid={uid} -> {playerName}");
+            Debug.Log($"[PlayerWS] rfid_notification → {kvp.Value}: {text}");
             return;
         }
-        Debug.Log($"[PlayerWS] rfid_tag uid={uid} from {robotId} (no assigned player)");
     }
 
     void OnPausedChanged(bool paused)
@@ -1638,16 +1687,8 @@ public class PlayerWebSocketServer : MonoBehaviour
         var players  = ServiceLocator.Players;
         string teamName = (state != null && state.WinnerAllianceIndex >= 0)
             ? AllianceName(state.WinnerAllianceIndex) : "";
-        string reason   = state?.EndReason ?? "manual";
-
-        // Operator pressed End Game with no natural winner — skip the game-over screen and
-        // send everyone straight back to the name-entry screen.
-        if (reason == "manual")
-        {
-            BroadcastRaw("{\"cmd\":\"return_to_join\"}");
-            Debug.Log("[PlayerWS] Sent return_to_join (operator end game)");
-            return;
-        }
+        string reason   = state?.EndReason;
+        if (string.IsNullOrEmpty(reason)) reason = "manual";
 
         var sb = new StringBuilder();
         sb.Append("{\"cmd\":\"game_over\"");
@@ -1666,21 +1707,21 @@ public class PlayerWebSocketServer : MonoBehaviour
             int damage        = _statDamage.GetValueOrDefault(playerName, 0);
             string nemesis    = GetNemesisFor(playerName);
 
-            // Victory points = the team's final tug-of-war score
-            int victoryPoints = 0;
-            if (players != null && state?.TeamPoints != null)
-                foreach (var p in players.GetAll())
-                    if (p.Name == playerName && p.AllianceIndex >= 0 && p.AllianceIndex < state.TeamPoints.Length)
-                    { victoryPoints = state.TeamPoints[p.AllianceIndex]; break; }
+            // Individual VP contribution: captures (float → rounded int) + kill bonuses
+            int vpFromCaptures = (int)System.Math.Round(_statVpFromCaptures.GetValueOrDefault(playerName, 0f));
+            int vpFromKills    = _statVpFromKills.GetValueOrDefault(playerName, 0);
+            int victoryPoints  = vpFromCaptures + vpFromKills;
 
             if (!first) sb.Append(",");
             first = false;
             sb.Append("{\"connectionId\":\""); sb.Append(EscapeJson(connId));    sb.Append("\"");
-            sb.Append(",\"kills\":");          sb.Append(kills);
-            sb.Append(",\"deaths\":");         sb.Append(deaths);
-            sb.Append(",\"damage\":");         sb.Append(damage);
-            sb.Append(",\"victoryPoints\":"); sb.Append(victoryPoints);
-            sb.Append(",\"nemesis\":\"");      sb.Append(EscapeJson(nemesis));   sb.Append("\"");
+            sb.Append(",\"kills\":");           sb.Append(kills);
+            sb.Append(",\"deaths\":");          sb.Append(deaths);
+            sb.Append(",\"damage\":");          sb.Append(damage);
+            sb.Append(",\"victoryPoints\":");   sb.Append(victoryPoints);
+            sb.Append(",\"vpFromCaptures\":");  sb.Append(vpFromCaptures);
+            sb.Append(",\"vpFromKills\":");     sb.Append(vpFromKills);
+            sb.Append(",\"nemesis\":\"");       sb.Append(EscapeJson(nemesis));   sb.Append("\"");
             sb.Append("}");
         }
         sb.Append("]}");

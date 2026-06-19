@@ -94,6 +94,11 @@ public sealed class GameFlow
             timer.StopTimer();
         }
 
+        // If no winner was declared by game logic, mark this as an operator manual end.
+        var state = ServiceLocator.Game?.State;
+        if (state != null && string.IsNullOrEmpty(state.EndReason))
+            state.EndReason = "manual";
+
         SetPhase(GamePhase.Ended);
     }
 
