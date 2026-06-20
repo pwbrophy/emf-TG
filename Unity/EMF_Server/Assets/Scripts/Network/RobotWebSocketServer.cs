@@ -298,6 +298,7 @@ public class RobotWebSocketServer : MonoBehaviour
                 SendPhysics(id, gs.DriveAcceleration, gs.DriveDeceleration,
                             gs.TurretAcceleration, gs.TurretDeceleration);
                 SendBuzzerEnabled(id, gs.BuzzerEnabled);
+                SendVideoConfig(id, gs.VideoFps, gs.VideoFrameSize, gs.VideoJpegQuality);
             }
 
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
@@ -433,8 +434,22 @@ public class RobotWebSocketServer : MonoBehaviour
                     if (_sessionByRobot.TryGetValue(rid, out var mapSid) && mapSid == sid)
                         _sessionByRobot.Remove(rid);
 
-                    _dir?.Remove(rid);
-                    if (VerboseLeaves) Debug.Log("[WS] Robot timeout: " + rid);
+                    _activeStreams.Remove(rid);
+
+                    // During Playing, keep the directory entry (and its player
+                    // assignment) so a brief Wi-Fi drop doesn't orphan the player.
+                    // Reconnect via hello refreshes the session with no dead-control
+                    // window. In other phases, drop it so stale robots clear from the
+                    // lobby list.
+                    if (_flow?.Phase == GamePhase.Playing)
+                    {
+                        if (VerboseLeaves) Debug.Log("[WS] Robot session timeout (kept in directory during Playing): " + rid);
+                    }
+                    else
+                    {
+                        _dir?.Remove(rid);
+                        if (VerboseLeaves) Debug.Log("[WS] Robot timeout: " + rid);
+                    }
                 }
             }
         }
@@ -598,6 +613,24 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         foreach (var robotId in _sessionByRobot.Keys.ToList())
             SendBuzzerEnabled(robotId, enabled);
+    }
+
+    public bool SendVideoConfig(string robotId, int fps, int frameSize, int quality)
+    {
+        if (string.IsNullOrEmpty(robotId)) return false;
+        string json = $"{{\"cmd\":\"set_video\",\"fps\":{fps},\"framesize\":{frameSize},\"quality\":{quality}}}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok
+            ? $"[WS->Robot] set_video fps={fps} fsize={frameSize} q={quality} -> {robotId}"
+            : $"[WS->Robot] FAILED set_video -> {robotId}");
+        return ok;
+    }
+
+    public void BroadcastVideoConfigToAll(GameSettings settings)
+    {
+        if (settings == null) return;
+        foreach (var robotId in _sessionByRobot.Keys.ToList())
+            SendVideoConfig(robotId, settings.VideoFps, settings.VideoFrameSize, settings.VideoJpegQuality);
     }
 
     public bool SendIrEmitStop(string robotId)

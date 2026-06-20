@@ -330,47 +330,6 @@ public sealed class GameService
     private static bool IsRearHit(string dir) => dir == "S";
     private static bool IsSideHit(string dir) => dir == "E" || dir == "W";
 
-    private void CheckWinCondition(PlayersService players, IRobotDirectory dir)
-    {
-        if (State == null) return;
-
-        // Count living robots per alliance.
-        // Robots in RespawningRobots (dead walk) count as alive — they can still return to base.
-        var surviving = new Dictionary<int, int>();
-        foreach (var r in State.Robots)
-        {
-            if (State.DeadRobots.Contains(r.RobotId) && !State.RespawningRobots.Contains(r.RobotId)) continue;
-            int alliance = GetAllianceIndex(r.RobotId, players, dir);
-            if (alliance < 0) continue;
-            surviving[alliance] = surviving.GetValueOrDefault(alliance) + 1;
-        }
-
-        // If any alliance has zero survivors, the other alliance wins
-        foreach (var kv in surviving)
-        {
-            if (kv.Value == 0)
-            {
-                // Find the alliance with survivors
-                int winner = -1;
-                foreach (var other in surviving)
-                    if (other.Value > 0) { winner = other.Key; break; }
-
-                DeclareWinner(winner, "elimination");
-                return;
-            }
-        }
-
-        // Also check if all alliances but one are wiped (handles >2 team edge case)
-        int aliveAlliances = 0;
-        int lastAlive = -1;
-        foreach (var kv in surviving)
-        {
-            if (kv.Value > 0) { aliveAlliances++; lastAlive = kv.Key; }
-        }
-        if (aliveAlliances == 1)
-            DeclareWinner(lastAlive, "elimination");
-    }
-
     private int DetermineWinnerByScore(PlayersService players, IRobotDirectory dir)
     {
         // Count surviving robots per alliance (respawning robots count as alive)

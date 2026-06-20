@@ -200,6 +200,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         {
             ServiceLocator.CapturePoints.OnPointCaptured    -= OnCapturePointCaptured;
             ServiceLocator.CapturePoints.OnTeamPointsChanged -= OnTeamPointsChanged;
+            ServiceLocator.CapturePoints.OnCaptureVpAwarded -= OnCaptureVpAwardedStat;
         }
         if (ServiceLocator.PlayerServer == this)
             ServiceLocator.PlayerServer = null;
@@ -905,6 +906,8 @@ public class PlayerWebSocketServer : MonoBehaviour
                 foreach (var r in dir.GetAll())
                     ServiceLocator.RobotServer?.SendClearPlayerColor(r.RobotId);
             _robotPrevPlayer.Clear(); // allow re-assignment of colours next lobby
+            _robotColorIndex.Clear(); // deterministic colour assignment each match
+            _nextColorIndex = 0;
 
             SendGameStartedToAll();
             ActivateAllRobots();
@@ -1811,13 +1814,18 @@ public class PlayerWebSocketServer : MonoBehaviour
         float timer    = ServiceLocator.MatchTimer?.Remaining ?? 0f;
         string phase   = flow?.Phase.ToString().ToLower() ?? "mainmenu";
 
+        // Only a live or just-finished match has meaningful robot/point state. In
+        // MainMenu/Lobby the previous GameState still lingers; suppress it so the
+        // display doesn't show stale robots/HP/points from the prior game.
+        bool inMatch = phase == "playing" || phase == "ended";
+
         int maxPlayers   = settings?.MaxPlayers    ?? 6;
         int maxTeamPts   = settings?.MaxTeamPoints  ?? 300;
         int maxHp        = settings?.MaxHp          ?? 100;
         int playerCount  = players?.Count ?? 0;
 
-        int tp0 = gs?.TeamPoints != null && gs.TeamPoints.Length > 0 ? gs.TeamPoints[0] : 0;
-        int tp1 = gs?.TeamPoints != null && gs.TeamPoints.Length > 1 ? gs.TeamPoints[1] : 0;
+        int tp0 = inMatch && gs?.TeamPoints != null && gs.TeamPoints.Length > 0 ? gs.TeamPoints[0] : 0;
+        int tp1 = inMatch && gs?.TeamPoints != null && gs.TeamPoints.Length > 1 ? gs.TeamPoints[1] : 0;
 
         bool paused = flow?.IsPaused ?? false;
 
@@ -1837,7 +1845,7 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         // Robots array
         sb.Append(",\"robots\":[");
-        if (gs?.Robots != null)
+        if (inMatch && gs?.Robots != null)
         {
             bool first = true;
             foreach (var r in gs.Robots)
@@ -1874,7 +1882,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         for (int i = 0; i < 3; i++)
         {
             if (i > 0) sb.Append(",");
-            int owner = gs?.CapturePointOwners != null && i < gs.CapturePointOwners.Length
+            int owner = inMatch && gs?.CapturePointOwners != null && i < gs.CapturePointOwners.Length
                 ? gs.CapturePointOwners[i] : -1;
             sb.Append("{\"name\":\""); sb.Append(cpNames[i]); sb.Append("\"");
             sb.Append(",\"owner\":"); sb.Append(owner);

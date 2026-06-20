@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -90,6 +91,7 @@ public class UnityBridgeService : BackgroundService
         _logger.LogInformation("[Bridge] Connected. Awaiting phase_changed from Unity…");
 
         var buffer = new byte[32768];
+        using var ms = new MemoryStream();
         while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
             var result = await _ws.ReceiveAsync(buffer, ct);
@@ -100,11 +102,17 @@ public class UnityBridgeService : BackgroundService
                 break;
             }
 
-            if (result.MessageType == WebSocketMessageType.Text)
-            {
-                string json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                await HandleUnityMessage(json);
-            }
+            if (result.MessageType != WebSocketMessageType.Text) continue;
+
+            // A single WebSocket message can arrive across multiple frames when it
+            // exceeds the buffer (e.g. a large display_update / game_over). Accumulate
+            // until EndOfMessage, then parse the whole message in one piece.
+            ms.Write(buffer, 0, result.Count);
+            if (!result.EndOfMessage) continue;
+
+            string json = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+            ms.SetLength(0);
+            await HandleUnityMessage(json);
         }
     }
 

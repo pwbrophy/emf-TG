@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v12";
+    const string BUILT_SENTINEL = "__ppb_v13";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -308,6 +308,9 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_invuln      = MakeSettingsRow(gameSettingsContent,    "Invuln s",    "Seconds of invulnerability after respawn or base heal.");
         var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",  "Enable / disable buzzer sound effects.");
         var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret", "Turret speed fraction 0–1 (e.g. 0.4 = 40% speed).");
+        var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution", "Camera resolution — tap to cycle QVGA / CIF / HVGA / VGA.");
+        var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap",    "Camera frame-rate cap 1–30. Lower = less Wi-Fi bandwidth.");
+        var f_videoQuality = MakeSettingsRow(gameSettingsContent,    "JPEG Qual",  "JPEG quality 8 (best) to 40 (smallest).");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -364,6 +367,10 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "invulnField",      f_invuln);
         Wire(psp, "buzzerToggle",     f_buzzer);
         Wire(psp, "slowTurretField",  f_slowTurret);
+        Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
+        Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
+        Wire(psp, "videoFpsField",     f_videoFps);
+        Wire(psp, "videoQualityField", f_videoQuality);
 
         var rsp = pp.GetComponent<RobotSelectionPanel>();
         if (rsp != null)
@@ -622,6 +629,46 @@ public class PlayingPanelBuilder : MonoBehaviour
         desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
 
         return toggle;
+    }
+
+    // A settings row whose value is a tappable button (used for cycling video
+    // resolution). Returns the button GameObject; its child TMP shows the value.
+    GameObject MakeSettingsButton(RectTransform parent, string labelText, string description)
+    {
+        var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
+        var rowVLG = row.AddComponent<VerticalLayoutGroup>();
+        rowVLG.spacing = 1f;
+        rowVLG.childForceExpandWidth = true; rowVLG.childForceExpandHeight = false;
+        rowVLG.childControlWidth = rowVLG.childControlHeight = true;
+        row.AddComponent<LayoutElement>().preferredHeight = 50f;
+
+        var topRow = MakeRect(row.transform, "TopRow");
+        var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
+        topHLG.spacing = 4f;
+        topHLG.childForceExpandWidth = false; topHLG.childForceExpandHeight = true;
+        topHLG.childControlWidth = topHLG.childControlHeight = true;
+        topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
+
+        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+                           new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
+        lbl.gameObject.AddComponent<LayoutElement>().preferredWidth = 96f;
+
+        var btnGo = MakeRect(topRow.transform, "Btn");
+        var btnImg = btnGo.AddComponent<Image>();
+        btnImg.color = new Color(0.18f, 0.18f, 0.24f);
+        var btn = btnGo.AddComponent<Button>();
+        btn.targetGraphic = btnImg;
+        btnGo.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
+        MakeTmp(btnGo.transform, "Text", "HVGA 480x320",
+                new Color(0.91f, 0.91f, 0.91f), 12f, TextAlignmentOptions.Center);
+
+        var desc = MakeTmp(row.transform, "Desc", description,
+                            new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
+        desc.enableWordWrapping = true;
+        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
+
+        return btnGo;
     }
 
     static GameObject CreateScrollCard(Transform parent, string name, out RectTransform content)

@@ -66,6 +66,17 @@ public:
     void setEnabled(bool on) { _enabled = on; }
     bool isEnabled()   const { return _enabled; }
 
+    // Cap the streamed frame rate. fps <= 0 = uncapped; fps > 30 clamped to 30.
+    // Default is 20 fps (set on the member). The streaming task paces itself to
+    // this interval so it never emits frames faster than requested — this is the
+    // main lever for keeping aggregate Wi-Fi bandwidth manageable with many robots.
+    void setMaxFps(int fps)
+    {
+        if (fps <= 0)       _minFrameIntervalMs = 0;
+        else if (fps > 30)  _minFrameIntervalMs = 1000u / 30u;
+        else                _minFrameIntervalMs = 1000u / (uint32_t)fps;
+    }
+
 private:
     static esp_err_t _streamHandler(httpd_req_t* req)
     {
@@ -78,12 +89,21 @@ private:
 
         char header[128];
         esp_err_t res = ESP_OK;
+        uint32_t lastFrameMs = 0;
 
         while (res == ESP_OK) {
             if (!self->_enabled) {
                 // Stream is paused (stream_off or lobby); wait rather than disconnect
                 vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
+            }
+
+            // Frame-rate cap: wait until the minimum inter-frame interval elapses.
+            uint32_t interval = self->_minFrameIntervalMs;
+            if (interval > 0) {
+                uint32_t since = millis() - lastFrameMs;
+                if (since < interval) vTaskDelay(pdMS_TO_TICKS(interval - since));
+                lastFrameMs = millis();
             }
 
             camera_fb_t* fb = esp_camera_fb_get();
@@ -117,6 +137,7 @@ private:
         return ESP_OK;
     }
 
-    httpd_handle_t _server  = nullptr;
-    volatile bool  _enabled = false;
+    httpd_handle_t   _server  = nullptr;
+    volatile bool    _enabled = false;
+    volatile uint32_t _minFrameIntervalMs = 50; // 50 ms = 20 fps default cap
 };

@@ -24,6 +24,16 @@ public class GameSettingsPanel : MonoBehaviour
     private Toggle         _buzzerToggle;
     private TMP_InputField _slowTurretField;
 
+    // Video controls
+    private Button          _videoResButton;
+    private TextMeshProUGUI _videoResLabel;
+    private TMP_InputField  _videoFpsField;
+    private TMP_InputField  _videoQualityField;
+
+    // Resolution index → operator-facing name (matches firmware videoIdxToFrameSize)
+    private static readonly string[] ResNames =
+        { "QVGA 320x240", "CIF 400x296", "HVGA 480x320", "VGA 640x480" };
+
     private GameSettings _settings;
     private TMP_FontAsset _font;
 
@@ -78,6 +88,13 @@ public class GameSettingsPanel : MonoBehaviour
         _invulnField      = AddInputRow("Invuln (s):");
         _buzzerToggle     = AddToggleRow("Buzzer SFX");
         _slowTurretField  = AddInputRow("Slow Turret:");
+
+        AddSectionLabel("── Video ──");
+        var resRow = AddButtonRow("Resolution:");
+        _videoResButton    = resRow.btn;
+        _videoResLabel     = resRow.label;
+        _videoFpsField     = AddInputRow("Frame Rate:");
+        _videoQualityField = AddInputRow("JPEG Quality:");
     }
 
     // ── Populate from GameSettings ───────────────────────────────────────────
@@ -95,7 +112,12 @@ public class GameSettingsPanel : MonoBehaviour
         if (_invulnField)        _invulnField.SetTextWithoutNotify(_settings.InvulnerabilitySeconds.ToString("F1"));
         if (_buzzerToggle)       _buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
         if (_slowTurretField)    _slowTurretField.SetTextWithoutNotify(_settings.SlowTurretSpeed.ToString("F2"));
+        if (_videoResLabel)      _videoResLabel.text = ResName(_settings.VideoFrameSize);
+        if (_videoFpsField)      _videoFpsField.SetTextWithoutNotify(_settings.VideoFps.ToString());
+        if (_videoQualityField)  _videoQualityField.SetTextWithoutNotify(_settings.VideoJpegQuality.ToString());
     }
+
+    static string ResName(int idx) => (idx >= 0 && idx < ResNames.Length) ? ResNames[idx] : ResNames[2];
 
     // ── Subscriptions ────────────────────────────────────────────────────────
 
@@ -112,6 +134,9 @@ public class GameSettingsPanel : MonoBehaviour
         if (_invulnField)        _invulnField.onValueChanged.AddListener(OnInvuln);
         if (_buzzerToggle)       _buzzerToggle.onValueChanged.AddListener(OnBuzzer);
         if (_slowTurretField)    _slowTurretField.onValueChanged.AddListener(OnSlowTurret);
+        if (_videoResButton)     _videoResButton.onClick.AddListener(OnVideoResCycle);
+        if (_videoFpsField)      _videoFpsField.onValueChanged.AddListener(OnVideoFps);
+        if (_videoQualityField)  _videoQualityField.onValueChanged.AddListener(OnVideoQuality);
     }
 
     void Unsubscribe()
@@ -127,6 +152,9 @@ public class GameSettingsPanel : MonoBehaviour
         if (_invulnField)        _invulnField.onValueChanged.RemoveListener(OnInvuln);
         if (_buzzerToggle)       _buzzerToggle.onValueChanged.RemoveListener(OnBuzzer);
         if (_slowTurretField)    _slowTurretField.onValueChanged.RemoveListener(OnSlowTurret);
+        if (_videoResButton)     _videoResButton.onClick.RemoveListener(OnVideoResCycle);
+        if (_videoFpsField)      _videoFpsField.onValueChanged.RemoveListener(OnVideoFps);
+        if (_videoQualityField)  _videoQualityField.onValueChanged.RemoveListener(OnVideoQuality);
     }
 
     // ── Handlers ─────────────────────────────────────────────────────────────
@@ -142,6 +170,17 @@ public class GameSettingsPanel : MonoBehaviour
     void OnInvuln(string v)        { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.InvulnerabilitySeconds = n; _settings.SaveToDisk(); } }
     void OnBuzzer(bool on)         { if (_settings != null) { _settings.BuzzerEnabled = on; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastBuzzerToAll(on); } }
     void OnSlowTurret(string v)    { if (_settings != null && float.TryParse(v, out float n) && n > 0f && n <= 1f) { _settings.SlowTurretSpeed = n; _settings.SaveToDisk(); } }
+
+    void OnVideoResCycle()
+    {
+        if (_settings == null) return;
+        _settings.VideoFrameSize = (Mathf.Clamp(_settings.VideoFrameSize, 0, ResNames.Length - 1) + 1) % ResNames.Length;
+        if (_videoResLabel) _videoResLabel.text = ResName(_settings.VideoFrameSize);
+        _settings.SaveToDisk();
+        ServiceLocator.RobotServer?.BroadcastVideoConfigToAll(_settings);
+    }
+    void OnVideoFps(string v)     { if (_settings != null && int.TryParse(v, out int n) && n >= 1 && n <= 30) { _settings.VideoFps = n; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastVideoConfigToAll(_settings); } }
+    void OnVideoQuality(string v) { if (_settings != null && int.TryParse(v, out int n) && n >= 8 && n <= 40) { _settings.VideoJpegQuality = n; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastVideoConfigToAll(_settings); } }
 
     // ── Row builders ─────────────────────────────────────────────────────────
 
@@ -212,6 +251,47 @@ public class GameSettingsPanel : MonoBehaviour
         field.textComponent = ttmp;
 
         return field;
+    }
+
+    (Button btn, TextMeshProUGUI label) AddButtonRow(string label)
+    {
+        var row = new GameObject(label.Replace(":", "") + "Row");
+        var rowRT = row.AddComponent<RectTransform>();
+        row.transform.SetParent(transform, false);
+        rowRT.sizeDelta = new Vector2(0, 26f);
+        row.AddComponent<LayoutElement>().preferredHeight = 26f;
+        var hlg = row.AddComponent<HorizontalLayoutGroup>();
+        hlg.childControlHeight = true; hlg.childControlWidth = true;
+        hlg.childForceExpandHeight = true; hlg.childForceExpandWidth = false;
+        hlg.spacing = 4f;
+
+        var lgo = new GameObject("Lbl");
+        var lLE = lgo.AddComponent<LayoutElement>(); lLE.preferredWidth = 95f; lLE.flexibleWidth = 0;
+        lgo.transform.SetParent(row.transform, false);
+        var ltmp = lgo.AddComponent<TextMeshProUGUI>();
+        if (_font) ltmp.font = _font;
+        ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
+        ltmp.alignment = TextAlignmentOptions.Right;
+
+        var bgo = new GameObject("Btn");
+        var bLE = bgo.AddComponent<LayoutElement>(); bLE.preferredWidth = 70f; bLE.flexibleWidth = 1;
+        bgo.transform.SetParent(row.transform, false);
+        var bimg = bgo.AddComponent<Image>();
+        bimg.color = new Color(0.18f, 0.18f, 0.24f);
+        var btn = bgo.AddComponent<Button>();
+        btn.targetGraphic = bimg;
+
+        var tgo = new GameObject("Text");
+        tgo.transform.SetParent(bgo.transform, false);
+        var trt = tgo.AddComponent<RectTransform>();
+        trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+        trt.offsetMin = new Vector2(4, 2); trt.offsetMax = new Vector2(-4, -2);
+        var ttmp = tgo.AddComponent<TextMeshProUGUI>();
+        if (_font) ttmp.font = _font;
+        ttmp.fontSize = 12; ttmp.color = Color.white;
+        ttmp.alignment = TextAlignmentOptions.Center;
+
+        return (btn, ttmp);
     }
 
     Toggle AddToggleRow(string label)

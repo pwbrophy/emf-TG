@@ -110,6 +110,14 @@ public class GameSettings : MonoBehaviour
     [Tooltip("When disabled, no buzzer sounds play on any robot.")]
     public bool BuzzerEnabled = true;
 
+    [Header("Video")]
+    [Tooltip("Robot camera frame-rate cap in fps (1-30). Lower = less Wi-Fi bandwidth. Default 20.")]
+    public int VideoFps = 20;
+    [Tooltip("Robot camera resolution index: 0=QVGA 320x240, 1=CIF 400x296, 2=HVGA 480x320, 3=VGA 640x480.")]
+    public int VideoFrameSize = 2;
+    [Tooltip("Robot camera JPEG quality (8=best/largest .. 40=worst/smallest). Default 10.")]
+    public int VideoJpegQuality = 10;
+
     [Header("Respawn")]
     [Tooltip("Seconds of invulnerability granted after respawn or base heal. Also debounces the RFID tag.")]
     public float InvulnerabilitySeconds = 5f;
@@ -167,6 +175,9 @@ public class GameSettings : MonoBehaviour
                 buzzerEnabled            = BuzzerEnabled ? 1 : 0,
                 twoPlayerModeEnabled     = TwoPlayerModeEnabled ? 1 : 0,
                 slowTurretEnabled        = SlowTurretEnabled ? 1 : 0,
+                videoFps                 = VideoFps,
+                videoFrameSize           = VideoFrameSize,
+                videoJpegQuality         = VideoJpegQuality,
             };
             File.WriteAllText(SavePath, JsonUtility.ToJson(data, true));
         }
@@ -209,6 +220,9 @@ public class GameSettings : MonoBehaviour
             // twoPlayerModeEnabled: -1 = not yet written → keep default false
             if (data.twoPlayerModeEnabled >= 0) TwoPlayerModeEnabled = data.twoPlayerModeEnabled != 0;
             if (data.slowTurretEnabled    >= 0) SlowTurretEnabled    = data.slowTurretEnabled    != 0;
+            if (data.videoFps             > 0)  VideoFps             = data.videoFps;
+            if (data.videoFrameSize       >= 0) VideoFrameSize       = data.videoFrameSize;
+            if (data.videoJpegQuality     > 0)  VideoJpegQuality     = data.videoJpegQuality;
 
             Debug.Log("[GameSettings] Loaded from " + SavePath);
         }
@@ -243,5 +257,8 @@ public class GameSettings : MonoBehaviour
         public int   buzzerEnabled = -1;         // -1 = not set (old save); 0 = off; 1 = on
         public int   twoPlayerModeEnabled = -1;
         public int   slowTurretEnabled = -1;
+        public int   videoFps;                   // 0 = not set → keep default 20
+        public int   videoFrameSize = -1;        // -1 = not set → keep default (index 2, HVGA)
+        public int   videoJpegQuality;           // 0 = not set → keep default 10
     }
 }

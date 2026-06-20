@@ -98,6 +98,24 @@ static int g_inv_throttle = 0;
 static int g_inv_steer    = 0;
 static int g_inv_turret   = 0;
 
+// Video settings — loaded from NVS on boot, updated by set_video command.
+// Frame size is an index into videoIdxToFrameSize(): 0=QVGA 1=CIF 2=HVGA 3=VGA.
+static int g_videoFps          = 20;  // default 20 fps cap
+static int g_videoFrameSizeIdx = 2;   // default HVGA 480x320 (matches old behaviour)
+static int g_videoQuality      = 10;  // default JPEG quality
+
+// Map the operator-facing frame-size index to an esp32-camera framesize_t.
+static framesize_t videoIdxToFrameSize(int idx)
+{
+    switch (idx) {
+        case 0: return FRAMESIZE_QVGA; // 320x240
+        case 1: return FRAMESIZE_CIF;  // 400x296
+        case 2: return FRAMESIZE_HVGA; // 480x320
+        case 3: return FRAMESIZE_VGA;  // 640x480
+        default: return FRAMESIZE_HVGA;
+    }
+}
+
 // Set by PCA9555 INT ISR (GPIO14 FALLING); consumed by IrController::updateWindow().
 // volatile so the compiler never caches it across loop iterations.
 volatile bool   g_pca9555IntFired = false;
@@ -818,6 +836,24 @@ static void handleWsText(const String& s)
         return;
     }
 
+    if (strcmp(cmd, "set_video") == 0) {
+        g_videoFps          = doc["fps"]       | g_videoFps;
+        g_videoFrameSizeIdx = doc["framesize"] | g_videoFrameSizeIdx;
+        g_videoQuality      = doc["quality"]   | g_videoQuality;
+        mjpeg.setMaxFps(g_videoFps);
+        cam.setFrameSize(videoIdxToFrameSize(g_videoFrameSizeIdx));
+        cam.setQuality(g_videoQuality);
+        Preferences prefs;
+        prefs.begin("tg_cam", false); // read-write
+        prefs.putInt("fps",      g_videoFps);
+        prefs.putInt("fsize",    g_videoFrameSizeIdx);
+        prefs.putInt("fquality", g_videoQuality);
+        prefs.end();
+        Serial.printf("[CAM] set_video fps=%d fsize=%d quality=%d\n",
+                      g_videoFps, g_videoFrameSizeIdx, g_videoQuality);
+        return;
+    }
+
     if (strcmp(cmd, "set_drive_config") == 0) {
         g_inv_throttle = doc["inv_throttle"] | g_inv_throttle;
         g_inv_steer    = doc["inv_steer"]    | g_inv_steer;
@@ -1044,7 +1080,10 @@ static void connectWebSocket()
                            ",\"vflip\":"         + String(g_vflip) +
                            ",\"inv_throttle\":"  + String(g_inv_throttle) +
                            ",\"inv_steer\":"     + String(g_inv_steer) +
-                           ",\"inv_turret\":"    + String(g_inv_turret) + "}";
+                           ",\"inv_turret\":"    + String(g_inv_turret) +
+                           ",\"fps\":"           + String(g_videoFps) +
+                           ",\"fsize\":"         + String(g_videoFrameSizeIdx) +
+                           ",\"fquality\":"      + String(g_videoQuality) + "}";
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
             leds.setBootPhase(BootPhase::ServerDone);
@@ -1129,9 +1168,16 @@ void setup()
         prefs.begin("tg_cam", true); // read-only
         g_hflip = prefs.getInt("hflip", 1);
         g_vflip = prefs.getInt("vflip", 1);
+        g_videoFps          = prefs.getInt("fps",      20);
+        g_videoFrameSizeIdx = prefs.getInt("fsize",    2);
+        g_videoQuality      = prefs.getInt("fquality", 10);
         prefs.end();
         cam.applyFlip(g_vflip != 0, g_hflip != 0);
-        Serial.printf("[CAM] flip loaded hflip=%d vflip=%d\n", g_hflip, g_vflip);
+        cam.setFrameSize(videoIdxToFrameSize(g_videoFrameSizeIdx));
+        cam.setQuality(g_videoQuality);
+        mjpeg.setMaxFps(g_videoFps);
+        Serial.printf("[CAM] flip loaded hflip=%d vflip=%d; video fps=%d fsize=%d quality=%d\n",
+                      g_hflip, g_vflip, g_videoFps, g_videoFrameSizeIdx, g_videoQuality);
     }
 
     // Load drive inversion prefs from NVS

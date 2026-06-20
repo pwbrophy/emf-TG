@@ -339,8 +339,8 @@
     /* ── Joystick (bottom-left, 5% inset) ── */
     #joystick-base {
       position: absolute;
-      left: 5vw;
-      bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
+      left: 5vmax;
+      bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
       width: 260px;
       height: 260px;
       border-radius: 50%;
@@ -364,8 +364,8 @@
     /* ── Turret buttons (bottom-right, 5% inset) ── */
     #turret-buttons {
       position: absolute;
-      right: 5vw;
-      bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
+      right: 5vmax;
+      bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
       display: flex;
       gap: 8px;
       touch-action: none;
@@ -395,7 +395,7 @@
     #fire-btn {
       position: absolute;
       left: 50%;
-      bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
+      bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
       transform: translateX(-50%);
       width: 88px;
       height: 88px;
@@ -876,10 +876,6 @@
         transform: rotate(90deg);
         transform-origin: center;
       }
-      /* vw/vh are swapped in portrait; correct controls to match rotated landscape */
-      body.game-active #joystick-base  { left: 5vh; bottom: max(10vw, calc(env(safe-area-inset-bottom) + 20px)); }
-      body.game-active #turret-buttons { right: 5vh; bottom: max(10vw, calc(env(safe-area-inset-bottom) + 20px)); }
-      body.game-active #fire-btn       { bottom: max(10vw, calc(env(safe-area-inset-bottom) + 20px)); }
       body.game-active #countdown-number { font-size: 40vmax; }
     }
   </style>
@@ -1142,6 +1138,33 @@ let fireCooldownPauseLeft  = 0;   // ms remaining when paused
 // ════════════════════════════════════════════════════════
 let _videoWs = null;
 
+// ── Screen Wake Lock ───────────────────────────────────────────────────────
+// Keeps the phone screen awake during play so the SignalR connection isn't
+// dropped by the device auto-locking mid-match. Feature-detected; no-op where
+// unsupported (older browsers). Re-acquired on visibilitychange because the OS
+// releases the lock whenever the tab is backgrounded.
+let _wakeLock = null;
+async function acquireWakeLock() {
+  if (_wakeLock || !('wakeLock' in navigator)) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+    dbg('wakeLock acquired');
+  } catch (e) { dbg('wakeLock failed: ' + (e && e.message)); _wakeLock = null; }
+}
+function releaseWakeLock() {
+  if (!_wakeLock) return;
+  try { _wakeLock.release(); } catch (_) {}
+  _wakeLock = null;
+  dbg('wakeLock released');
+}
+document.addEventListener('visibilitychange', () => {
+  // Only re-acquire while actually playing (playing screen is active).
+  if (document.visibilityState === 'visible'
+      && document.getElementById('screen-playing').classList.contains('active'))
+    acquireWakeLock();
+});
+
 // ── Join-button state helpers ──────────────────────────────────────────────
 // Tracks whether the lobby is currently open (Lobby phase). Updated by SignalR
 // events and the pre-join poll. Used to guard JoinRejected from re-enabling the
@@ -1344,6 +1367,7 @@ function returnToJoin(message) {
   fireCooldownPauseLeft = 0;
   document.getElementById('stream').src = '';
   stopVideoWs();
+  releaseWakeLock();
   const _sc = document.getElementById('stream-canvas');
   _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
   hideCountdown();
@@ -1816,6 +1840,7 @@ function onGameStarted(data) {
 
   updateHpBar();
   showScreen('screen-playing');
+  acquireWakeLock();
   dbg('onGameStarted done → screen-playing shown role=' + myRole);
   startGameLoop();
 }
@@ -2411,13 +2436,25 @@ function updateJoy(cx, cy) {
     dy = dy / dist * JOY_RADIUS;
   }
 
-  joyThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  // When the body is CSS-rotated 90° CW (portrait phone showing landscape content),
+  // pointer events arrive in portrait viewport coordinates but the joystick element
+  // lives in the rotated (landscape) coordinate space.
+  // Mapping: landscape-right = viewport-down (+dy), landscape-up = viewport-right (+dx).
+  let jdx, jdy;
+  if (document.body.classList.contains('game-active') && window.innerWidth < window.innerHeight) {
+    jdx =  dy;  // landscape right  = viewport down
+    jdy = -dx;  // landscape down   = −viewport right
+  } else {
+    jdx = dx;
+    jdy = dy;
+  }
 
-  // Normalise to [-1, 1]. dy is inverted (up = negative on screen).
-  const nx =  dx / JOY_RADIUS;
-  const ny = -dy / JOY_RADIUS;
+  joyThumb.style.transform = `translate(calc(-50% + ${jdx}px), calc(-50% + ${jdy}px))`;
 
-  const tx = nx * 0.50; // limit turn rate to 50% of max
+  const nx =  jdx / JOY_RADIUS;
+  const ny = -jdy / JOY_RADIUS;
+
+  const tx = nx * 0.50;
   joyL = clamp(ny + tx, -1, 1);
   joyR = clamp(ny - tx, -1, 1);
 }

@@ -124,6 +124,32 @@ public:
     int getVFlip()   const { return _vflip; }
     int getHMirror() const { return _hmirror; }
 
+    // Set capture resolution at runtime. Safe to call before or after start().
+    // The esp32-camera driver reconfigures the sensor and reallocates its frame
+    // buffers on a framesize change (same mechanism the Espressif CameraWebServer
+    // example uses), so no deinit/reinit is required.
+    void setFrameSize(framesize_t fs)
+    {
+        _frameSize      = fs;
+        _cfg.frame_size = fs;
+        if (_started) {
+            if (sensor_t* s = esp_camera_sensor_get()) s->set_framesize(s, fs);
+        }
+    }
+
+    // Set JPEG quality at runtime (0=best/largest … 63=worst/smallest).
+    // Clamped to a sane 8–40 band. Safe before or after start().
+    void setQuality(int q)
+    {
+        if (q < 8)  q = 8;
+        if (q > 40) q = 40;
+        _jpegQuality      = q;
+        _cfg.jpeg_quality = q;
+        if (_started) {
+            if (sensor_t* s = esp_camera_sensor_get()) s->set_quality(s, q);
+        }
+    }
+
 private:
     camera_config_t _cfg;
     bool            _started;
