@@ -271,7 +271,7 @@ public class IrSlotScheduler : MonoBehaviour
                 Debug.Log($"[IrHs]   damage={damage} newHp={newHp}/{maxHp}");
 
                 if (damage > 0 && newHp > 0)
-                    server.SendFlashHit(enemyId);
+                    server.SendFlashHit(enemyId, cardinalDir == "S");
 
                 server.SendSetHp(enemyId, newHp, maxHp);
 

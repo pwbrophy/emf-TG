@@ -21,11 +21,11 @@ $AllRobots = @(
     [pscustomobject]@{ Num = 10; Name = "Robot 10"; Ip = "192.168.86.110" }
 )
 
-$Robots = if ($Only.Count -gt 0) {
+$Robots = @(if ($Only.Count -gt 0) {
     $AllRobots | Where-Object { $Only -contains $_.Num }
 } else {
     $AllRobots
-}
+})
 
 if ($Robots.Count -eq 0) { Write-Error "No robots matched: $Only" }
 

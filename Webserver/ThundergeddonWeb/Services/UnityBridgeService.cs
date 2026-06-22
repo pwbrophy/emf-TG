@@ -334,16 +334,17 @@ public class UnityBridgeService : BackgroundService
         string? connId   = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        string callsign        = GetString(root, "callsign")    ?? "";
-        string videoUrl        = GetString(root, "videoUrl")    ?? "";
-        int    hp              = GetInt(root, "hp");
-        int    maxHp           = GetInt(root, "maxHp", 100);
-        float  slowTurretSpeed = GetFloat(root, "slowTurretSpeed", 0.4f);
-        string role            = GetString(root, "role")        ?? "solo";
-        string partnerName     = GetString(root, "partnerName") ?? "";
+        string callsign          = GetString(root, "callsign")         ?? "";
+        string videoUrl          = GetString(root, "videoUrl")         ?? "";
+        int    hp                = GetInt(root, "hp");
+        int    maxHp             = GetInt(root, "maxHp", 100);
+        float  slowTurretSpeed   = GetFloat(root, "slowTurretSpeed",   0.4f);
+        float  cooldownDuration  = GetFloat(root, "cooldownDuration",  3f);
+        string role              = GetString(root, "role")             ?? "solo";
+        string partnerName       = GetString(root, "partnerName")      ?? "";
 
         await _hub.Clients.Client(connId).SendAsync("GameStarted",
-            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed, role, partnerName });
+            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed, cooldownDuration, role, partnerName });
 
         _logger.LogInformation("[Bridge] GameStarted → conn {c} (robot={r}, role={role})",
             connId, callsign, role);
@@ -354,13 +355,14 @@ public class UnityBridgeService : BackgroundService
         string? connId = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        int   hp       = GetInt(root,   "hp");
-        int   maxHp    = GetInt(root,   "maxHp", 100);
-        float timer    = GetFloat(root, "timer");
-        float cooldown = GetFloat(root, "cooldown");
+        int   hp               = GetInt(root,   "hp");
+        int   maxHp            = GetInt(root,   "maxHp", 100);
+        float timer            = GetFloat(root, "timer");
+        float cooldown         = GetFloat(root, "cooldown");
+        float cooldownDuration = GetFloat(root, "cooldownDuration", 3f);
 
         await _hub.Clients.Client(connId).SendAsync("StateUpdate",
-            new { hp, maxHp, timer, cooldown });
+            new { hp, maxHp, timer, cooldown, cooldownDuration });
     }
 
     private async Task HandleYouAreDead(JsonElement root)

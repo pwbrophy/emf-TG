@@ -164,15 +164,22 @@ static void updateBuzzer(uint32_t now)
 // ---- Buzzer fire effect ----
 // Phase 1 (0–200 ms):   staccato crackle — alternating 2–5 ms tone bursts and silence gaps at ~3.5 kHz.
 // Phase 2 (200–600 ms): smooth exponential pitch-down 3000→100 Hz, volume decays to silence.
-static uint8_t  g_buzzerFirePhase  = 0; // 0=off, 1=bang, 2=tail
-static uint32_t g_buzzerFireStart  = 0;
-static uint32_t g_buzzerFireLastUp = 0;
+// Pitch is randomised ±50% each shot so no two shots sound identical.
+static uint8_t  g_buzzerFirePhase     = 0; // 0=off, 1=bang, 2=tail
+static uint32_t g_buzzerFireStart     = 0;
+static uint32_t g_buzzerFireLastUp    = 0;
+static float    g_buzzerFirePitchScale = 1.0f;
+static uint32_t g_buzzerFireTailMs     = 400u;
 
 static void startBuzzerFireEffect()
 {
     if (!g_buzzerEnabled) return;
-    g_buzzerActive = false; // cancel any plain tone
-    ledcSetup(BUZZER_LEDC_CH, 3500, 8);
+    g_buzzerFirePitchScale = 0.25f + (float)(random(276)) / 100.0f; // 0.25–3.0×
+    g_buzzerFireTailMs     = 400u + (uint32_t)(random(401));         // 400–800 ms
+    g_buzzerActive = false;
+    uint32_t centreFreq = (uint32_t)(3500.0f * g_buzzerFirePitchScale);
+    if (centreFreq > 20000) centreFreq = 20000;
+    ledcSetup(BUZZER_LEDC_CH, centreFreq, 8);
     ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
     ledcWrite(BUZZER_LEDC_CH, 128);
     g_buzzerFirePhase  = 1;
@@ -195,8 +202,7 @@ static void updateBuzzerFireEffect(uint32_t now)
         }
         if ((int32_t)(now - g_buzzerFireLastUp) >= 0) {
             if (random(2) == 0) {
-                // tone burst — random pitch around 3.5 kHz, ±100 % spread
-                float centre = 3500.0f;
+                float centre = 3500.0f * g_buzzerFirePitchScale;
                 int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * centre);
                 int32_t raw  = (int32_t)centre + rnd;
                 if (raw < 40)    raw = 40;
@@ -215,16 +221,16 @@ static void updateBuzzerFireEffect(uint32_t now)
     // ---- Phase 2: smooth exponential pitch-down (400 ms) ----
     if (g_buzzerFirePhase == 2) {
         uint32_t ph2 = elapsed - 200u;
-        if (ph2 >= 400u) {
+        if (ph2 >= g_buzzerFireTailMs) {
             silenceBuzzer();
             g_buzzerFirePhase = 0;
             return;
         }
         if ((int32_t)(now - g_buzzerFireLastUp) >= 10) {
             g_buzzerFireLastUp = now;
-            float t    = (float)ph2 / 400.0f;          // 0 → 1
-            float freq = 3000.0f * expf(-3.4f * t);    // 3000 → ~100 Hz
-            float duty = 128.0f  * expf(-5.0f  * t);   // 128  → ~0
+            float t    = (float)ph2 / (float)g_buzzerFireTailMs;
+            float freq = 3000.0f * g_buzzerFirePitchScale * expf(-3.4f * t);
+            float duty = 128.0f  * expf(-5.0f  * t);
             ledcSetup(BUZZER_LEDC_CH, (uint32_t)freq, 8);
             ledcWrite(BUZZER_LEDC_CH, (uint8_t)duty);
         }
@@ -236,16 +242,32 @@ static void updateBuzzerFireEffect(uint32_t now)
 // Phase 1 (0–50 ms):   clean sharp strike at 1200 Hz, full volume.
 // Phase 2 (50–380 ms): pixelated falling noise — centre descends 1200→150 Hz,
 //                       ±50 % random spread, 8 ms blocks, volume fades 128→0.
-static uint8_t  g_buzzerHitPhase     = 0; // 0=off, 1=strike, 2=fall
-static uint32_t g_buzzerHitStart     = 0;
-static uint32_t g_buzzerHitNextBlock = 0;
+// Pitch is randomised ±50% each hit.
+static uint8_t  g_buzzerHitPhase      = 0; // 0=off, 1=strike, 2=fall
+static uint32_t g_buzzerHitStart      = 0;
+static uint32_t g_buzzerHitNextBlock  = 0;
+static float    g_buzzerHitPitchScale  = 1.0f;
+
+// ---- Buzzer rear-hit effect ----
+// Aggressive "OUCH" shriek for rear (3×) impacts.
+// Phase 1 (0–30 ms):   loud crack at ~5000 Hz (scaled), duty=220.
+// Phase 2 (30–450 ms): falling wail 7000→200 Hz, ±50% noise, 6 ms blocks, volume 220→0.
+static uint8_t  g_buzzerRearHitPhase      = 0;
+static uint32_t g_buzzerRearHitStart      = 0;
+static uint32_t g_buzzerRearHitNextBlock  = 0;
+static float    g_buzzerRearHitPitchScale  = 1.0f;
 
 static void startBuzzerHitEffect()
 {
     if (!g_buzzerEnabled) return;
-    g_buzzerActive    = false; // cancel plain tone
-    g_buzzerFirePhase = 0;     // cancel fire effect
-    ledcSetup(BUZZER_LEDC_CH, 1200, 8);
+    g_buzzerHitPitchScale = 0.25f + (float)(random(276)) / 100.0f; // 0.25–3.0×
+    g_buzzerActive       = false;
+    g_buzzerFirePhase    = 0;
+    g_buzzerRearHitPhase = 0;
+    uint32_t strikeFreq  = (uint32_t)(1200.0f * g_buzzerHitPitchScale);
+    if (strikeFreq < 40)    strikeFreq = 40;
+    if (strikeFreq > 20000) strikeFreq = 20000;
+    ledcSetup(BUZZER_LEDC_CH, strikeFreq, 8);
     ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
     ledcWrite(BUZZER_LEDC_CH, 128);
     g_buzzerHitPhase = 1;
@@ -273,8 +295,8 @@ static void updateBuzzerHitEffect(uint32_t now)
             return;
         }
         if ((int32_t)(now - g_buzzerHitNextBlock) >= 0) {
-            float t = (float)ph2 / 330.0f; // 0→1
-            float centre = 1200.0f - t * 1050.0f; // 1200→150 Hz
+            float t      = (float)ph2 / 330.0f;
+            float centre = (1200.0f - t * 1050.0f) * g_buzzerHitPitchScale;
             float spread = centre * 0.5f;
             int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * spread);
             int32_t raw  = (int32_t)centre + rnd;
@@ -284,6 +306,75 @@ static void updateBuzzerHitEffect(uint32_t now)
             ledcSetup(BUZZER_LEDC_CH, (uint32_t)raw, 8);
             ledcWrite(BUZZER_LEDC_CH, duty);
             g_buzzerHitNextBlock = now + 8; // 8 ms blocks for chunky pixel feel
+        }
+    }
+}
+
+static void startBuzzerRearHitEffect()
+{
+    if (!g_buzzerEnabled) return;
+    g_buzzerRearHitPitchScale = 0.75f + (float)(random(51)) / 100.0f; // 0.75–1.25×
+    g_buzzerActive    = false;
+    g_buzzerFirePhase = 0;
+    g_buzzerHitPhase  = 0;
+    uint32_t startFreq = (uint32_t)(4000.0f * g_buzzerRearHitPitchScale);
+    ledcSetup(BUZZER_LEDC_CH, startFreq, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    g_buzzerRearHitPhase     = 1;
+    g_buzzerRearHitStart     = millis();
+    g_buzzerRearHitNextBlock = millis();
+}
+
+static void updateBuzzerRearHitEffect(uint32_t now)
+{
+    if (g_buzzerRearHitPhase == 0) return;
+    uint32_t elapsed = now - g_buzzerRearHitStart;
+
+    // Phase 1 (0–180 ms): triangle pitch sweep 4000→10000→4000 Hz, volume 0→220→0.
+    if (g_buzzerRearHitPhase == 1) {
+        const uint32_t P1_MS = 180u;
+        if (elapsed >= P1_MS) {
+            g_buzzerRearHitPhase = 2;
+            g_buzzerRearHitNextBlock = now;
+            return;
+        }
+        if ((int32_t)(now - g_buzzerRearHitNextBlock) >= 0) {
+            float t      = (float)elapsed / (float)P1_MS;
+            float tri    = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+            float centre = (4000.0f + tri * 6000.0f) * g_buzzerRearHitPitchScale;
+            float spread = centre * 0.2f;
+            int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * spread);
+            int32_t raw  = (int32_t)centre + rnd;
+            if (raw < 60)    raw = 60;
+            if (raw > 20000) raw = 20000;
+            ledcSetup(BUZZER_LEDC_CH, (uint32_t)raw, 8);
+            ledcWrite(BUZZER_LEDC_CH, (uint8_t)(tri * 220.0f));
+            g_buzzerRearHitNextBlock = now + 4;
+        }
+        return;
+    }
+
+    // Phase 2 (180–880 ms): rising squeak tail, 4000→12000 Hz climbing as it fades.
+    if (g_buzzerRearHitPhase == 2) {
+        const uint32_t P2_MS = 700u;
+        uint32_t ph2 = elapsed - 180u;
+        if (ph2 >= P2_MS) {
+            silenceBuzzer();
+            g_buzzerRearHitPhase = 0;
+            return;
+        }
+        if ((int32_t)(now - g_buzzerRearHitNextBlock) >= 0) {
+            float t      = (float)ph2 / (float)P2_MS;
+            float centre = (4000.0f + t * 8000.0f) * g_buzzerRearHitPitchScale; // rises 4000→12000 Hz
+            float spread = centre * 0.12f;
+            int32_t rnd  = (int32_t)(((float)(random(2001) - 1000) / 1000.0f) * spread);
+            int32_t raw  = (int32_t)centre + rnd;
+            if (raw < 500)   raw = 500;
+            if (raw > 20000) raw = 20000;
+            ledcSetup(BUZZER_LEDC_CH, (uint32_t)raw, 8);
+            ledcWrite(BUZZER_LEDC_CH, (uint8_t)((1.0f - t) * 180.0f));
+            g_buzzerRearHitNextBlock = now + 4;
         }
     }
 }
@@ -495,16 +586,14 @@ static void updateBuzzerCaptureEffect(uint32_t now)
 }
 
 // ---- Buzzer countdown tick effect ----
-// Chunky noise pulse with fade-in → sustain → fade-out envelope.
+// Sine-bell envelope: smooth fade-in → fade-out over CDOWN_TOTAL_MS.
 // baseFreq and targetDuty both rise each tick (pitch and volume increase toward game start).
 static uint8_t  g_buzzerCountdownPhase      = 0; // 0=off, 1=playing
 static uint32_t g_buzzerCountdownStart      = 0;
 static uint32_t g_buzzerCountdownBaseFreq   = 100;
 static uint8_t  g_buzzerCountdownTargetDuty = 100;
 
-static const uint32_t CDOWN_FADEIN_MS  = 20u;
-static const uint32_t CDOWN_SUSTAIN_MS = 15u;
-static const uint32_t CDOWN_FADEOUT_MS = 40u;
+static const uint32_t CDOWN_TOTAL_MS = 110u;
 
 static void startBuzzerCountdownTick(uint32_t baseFreq, uint8_t targetDuty)
 {
@@ -522,27 +611,15 @@ static void startBuzzerCountdownTick(uint32_t baseFreq, uint8_t targetDuty)
 static void updateBuzzerCountdownEffect(uint32_t now)
 {
     if (g_buzzerCountdownPhase == 0) return;
-
-    uint32_t elapsed  = now - g_buzzerCountdownStart;
-    const uint32_t P2 = CDOWN_FADEIN_MS;
-    const uint32_t P3 = CDOWN_FADEIN_MS + CDOWN_SUSTAIN_MS;
-    const uint32_t PE = CDOWN_FADEIN_MS + CDOWN_SUSTAIN_MS + CDOWN_FADEOUT_MS;
-
-    if (elapsed >= PE) {
+    uint32_t elapsed = now - g_buzzerCountdownStart;
+    if (elapsed >= CDOWN_TOTAL_MS) {
         silenceBuzzer();
         g_buzzerCountdownPhase = 0;
         return;
     }
-
-    uint8_t duty;
-    if (elapsed < P2) {
-        duty = (uint8_t)((float)g_buzzerCountdownTargetDuty * (float)elapsed / (float)CDOWN_FADEIN_MS);
-    } else if (elapsed < P3) {
-        duty = g_buzzerCountdownTargetDuty;
-    } else {
-        float t = (float)(elapsed - P3) / (float)CDOWN_FADEOUT_MS;
-        duty = (uint8_t)((float)g_buzzerCountdownTargetDuty * (1.0f - t));
-    }
+    float t      = (float)elapsed / (float)CDOWN_TOTAL_MS;
+    float tri    = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+    uint8_t duty = (uint8_t)((float)g_buzzerCountdownTargetDuty * tri);
     ledcWrite(BUZZER_LEDC_CH, duty);
 }
 
@@ -596,6 +673,100 @@ static void updateBuzzerFanfareEffect(uint32_t now)
         ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
     }
     ledcWrite(BUZZER_LEDC_CH, pipOff < PIP_ON ? FANFARE_PIP_DUTIES[pipIdx] : 0);
+}
+
+// ---- Boot beeps: double blip (blip + pitched-up blip) ----
+// Each boot beep = 35 ms blip at base freq, 12 ms silence, 35 ms blip at freq×1.4.
+// Triangle envelope (sharp peak) on each blip.
+static const uint32_t BOOTBLIP_ON_MS  = 35u;
+static const uint32_t BOOTBLIP_GAP_MS = 12u;
+static const float    BOOTBLIP_LO     = 0.5f;  // first blip — octave below
+static const float    BOOTBLIP_HI     = 1.4f;  // second blip — higher than base
+
+// Blocking version — call only from setup().
+static void playBuzzerBootBlip(uint32_t freqHz)
+{
+    if (!g_buzzerEnabled) return;
+    uint32_t freqLo = (uint32_t)((float)freqHz * BOOTBLIP_LO);
+    uint32_t freqHi = (uint32_t)((float)freqHz * BOOTBLIP_HI);
+    if (freqLo < 40)    freqLo = 40;
+    if (freqHi > 20000) freqHi = 20000;
+
+    ledcSetup(BUZZER_LEDC_CH, freqLo, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    uint32_t start = millis();
+    while (millis() - start < BOOTBLIP_ON_MS) {
+        float t   = (float)(millis() - start) / (float)BOOTBLIP_ON_MS;
+        float tri = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+        ledcWrite(BUZZER_LEDC_CH, (uint8_t)(128.0f * tri));
+        delay(3);
+    }
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    delay(BOOTBLIP_GAP_MS);
+
+    ledcSetup(BUZZER_LEDC_CH, freqHi, 8);
+    start = millis();
+    while (millis() - start < BOOTBLIP_ON_MS) {
+        float t   = (float)(millis() - start) / (float)BOOTBLIP_ON_MS;
+        float tri = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+        ledcWrite(BUZZER_LEDC_CH, (uint8_t)(128.0f * tri));
+        delay(3);
+    }
+    silenceBuzzer();
+}
+
+// Non-blocking version — for the server-connected beep (fires inside loop).
+static uint8_t  g_buzzerBootBlipPhase  = 0; // 0=off 1=blip1 2=gap 3=blip2
+static uint32_t g_buzzerBootBlipStart  = 0;
+static uint32_t g_buzzerBootBlipFreqHz = 0;
+
+static void startBuzzerBootBlip(uint32_t freqHz)
+{
+    if (!g_buzzerEnabled) return;
+    g_buzzerActive        = false;
+    g_buzzerFirePhase     = 0;
+    g_buzzerHitPhase      = 0;
+    g_buzzerRearHitPhase  = 0;
+    g_buzzerBootBlipFreqHz = freqHz;
+    uint32_t freqLo = (uint32_t)((float)freqHz * BOOTBLIP_LO);
+    if (freqLo < 40) freqLo = 40;
+    ledcSetup(BUZZER_LEDC_CH, freqLo, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 0);
+    g_buzzerBootBlipStart = millis();
+    g_buzzerBootBlipPhase = 1;
+}
+
+static void updateBuzzerBootBlip(uint32_t now)
+{
+    if (g_buzzerBootBlipPhase == 0) return;
+    uint32_t elapsed = now - g_buzzerBootBlipStart;
+
+    if (g_buzzerBootBlipPhase == 1) {
+        if (elapsed >= BOOTBLIP_ON_MS) { ledcWrite(BUZZER_LEDC_CH, 0); g_buzzerBootBlipPhase = 2; return; }
+        float t   = (float)elapsed / (float)BOOTBLIP_ON_MS;
+        float tri = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+        ledcWrite(BUZZER_LEDC_CH, (uint8_t)(128.0f * tri));
+        return;
+    }
+    if (g_buzzerBootBlipPhase == 2) {
+        if (elapsed >= BOOTBLIP_ON_MS + BOOTBLIP_GAP_MS) {
+            uint32_t freqHi = (uint32_t)((float)g_buzzerBootBlipFreqHz * BOOTBLIP_HI);
+            if (freqHi > 20000) freqHi = 20000;
+            ledcSetup(BUZZER_LEDC_CH, freqHi, 8);
+            ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+            ledcWrite(BUZZER_LEDC_CH, 0);
+            g_buzzerBootBlipPhase = 3;
+        }
+        return;
+    }
+    if (g_buzzerBootBlipPhase == 3) {
+        uint32_t ph3 = elapsed - BOOTBLIP_ON_MS - BOOTBLIP_GAP_MS;
+        if (ph3 >= BOOTBLIP_ON_MS) { silenceBuzzer(); g_buzzerBootBlipPhase = 0; return; }
+        float t   = (float)ph3 / (float)BOOTBLIP_ON_MS;
+        float tri = (t < 0.5f) ? (t * 2.0f) : ((1.0f - t) * 2.0f);
+        ledcWrite(BUZZER_LEDC_CH, (uint8_t)(128.0f * tri));
+    }
 }
 
 // ---- OTA audio/LED callbacks ----
@@ -900,7 +1071,10 @@ static void handleWsText(const String& s)
 
     if (strcmp(cmd, "flash_hit") == 0) {
         leds.flashHit();
-        startBuzzerHitEffect();
+        if (doc["rear"] | false)
+            startBuzzerRearHitEffect();
+        else
+            startBuzzerHitEffect();
         return;
     }
 
@@ -982,14 +1156,16 @@ static void handleWsText(const String& s)
         g_buzzerEnabled = (doc["enabled"] | 1) != 0;
         if (!g_buzzerEnabled) {
             // Silence any currently-playing effect
-            g_buzzerActive     = false;
-            g_buzzerFirePhase  = 0;
-            g_buzzerHitPhase   = 0;
-            g_buzzerHealPhase  = 0;
-            g_buzzerDeathPhase = 0;
+            g_buzzerActive         = false;
+            g_buzzerFirePhase      = 0;
+            g_buzzerHitPhase       = 0;
+            g_buzzerRearHitPhase   = 0;
+            g_buzzerHealPhase      = 0;
+            g_buzzerDeathPhase     = 0;
             g_buzzerCapturePhase   = 0;
             g_buzzerCountdownPhase = 0;
             g_buzzerFanfarePhase   = 0;
+            g_buzzerBootBlipPhase  = 0;
             silenceBuzzer();
         }
         Serial.printf("[BUZZER] %s\n", g_buzzerEnabled ? "enabled" : "disabled");
@@ -1087,6 +1263,7 @@ static void connectWebSocket()
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
             leds.setBootPhase(BootPhase::ServerDone);
+            startBuzzerBootBlip(1100); // B♭5 blip-blip — server connected
             Serial.println("[WS] opened");
 
         } else if (e == WebsocketsEvent::ConnectionClosed) {
@@ -1206,11 +1383,13 @@ void setup()
 
     // Hardware init complete — solid red on LEDs 0,1
     leds.setBootPhase(BootPhase::HwDone);
+    playBuzzerBootBlip(440); // A4 blip-blip — hardware ready
 
     // Wi-Fi: blocking until connected — flashing green on LEDs 2,3
     leds.setBootPhase(BootPhase::WifiConnecting);
     connectWifi();
     leds.setBootPhase(BootPhase::WifiDone);
+    playBuzzerBootBlip(700); // F5 blip-blip — Wi-Fi connected
 
     // MJPEG server binds port 81 now; streaming gate (_enabled) stays false
     // until the server sends stream_on
@@ -1222,11 +1401,18 @@ void setup()
         otaHost.c_str(),
         "thunder123",
         []() {
-            // Pause: stop everything that could cause problems during OTA
+            // Pause: stop everything that could cause problems during OTA.
+            // mjpeg.stop() blocks until the HTTP server task exits, so it is
+            // safe to call cam.stop() immediately after with no race condition.
+            // Closing the WebSocket removes competing TCP buffer traffic on the
+            // Wi-Fi radio during the OTA transfer.
             motors.enable(false);
             ir.stopEmit();
-            mjpeg.setEnabled(false);
+            mjpeg.stop();
             if (cam.isStarted()) cam.stop();
+            ws.close();
+            g_wsOpen = false;
+            g_wsUrl.clear();
             // Start chirp: two tiny ascending pips
             ledcSetup(BUZZER_LEDC_CH, 1200, 8); ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
             ledcWrite(BUZZER_LEDC_CH, 28); delay(18);
@@ -1285,10 +1471,12 @@ void loop()
     updateBuzzerCountdownEffect(now);
     updateBuzzerFireEffect(now);
     updateBuzzerHitEffect(now);
+    updateBuzzerRearHitEffect(now);
     updateBuzzerHealEffect(now);
     updateBuzzerDeathEffect(now);
     updateBuzzerCaptureEffect(now);
     updateBuzzerFanfareEffect(now);
+    updateBuzzerBootBlip(now);
 
     // ---- RFID tag scan ----
     {

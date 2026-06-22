@@ -987,6 +987,20 @@
            border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 7px;
            color:rgba(255,255,255,0.8);font-size:0.75rem;cursor:pointer;line-height:1;">⛶</button>
 
+  <!-- Input hints (keyboard + gamepad, stacked; each shown when that input is detected) -->
+  <div id="input-hints" style="position:absolute;top:58px;right:10px;z-index:15;display:flex;flex-direction:column;gap:4px;pointer-events:none;">
+    <div id="kb-hint" style="display:none;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.18);border-radius:6px;padding:5px 8px;font-size:0.62rem;color:rgba(255,255,255,0.65);font-family:monospace;line-height:1.6;text-align:right;">
+      WASD drive<br>
+      , . turret<br>
+      SPC fire
+    </div>
+    <div id="gp-hint" style="display:none;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.18);border-radius:6px;padding:5px 8px;font-size:0.62rem;color:rgba(255,255,255,0.65);font-family:monospace;line-height:1.6;text-align:right;">
+      L-stick drive<br>
+      R-stick turret<br>
+      A/&#10005; fire
+    </div>
+  </div>
+
   <!-- Controls -->
   <div id="controls">
     <!-- Joystick -->
@@ -1124,7 +1138,7 @@ let lastDriveSend = 0;
 let slowTurretSpeed = 0.4; // updated from server via TurretSettings / game_started
 
 // Fire cooldown
-const FIRE_COOLDOWN_MS     = 3000;
+let fireCooldownMs         = 3000; // updated from server via game_started.cooldownDuration
 let fireCooldownUntil      = 0;
 let fireCooldownTimer      = null;
 let fireCooldownPauseLeft  = 0;   // ms remaining when paused
@@ -1362,6 +1376,7 @@ function returnToJoin(message) {
   joyL = joyR = turretSpeed = 0;
   joystickActive = false;
   turretActive   = false;
+  for (const k of Object.keys(_kbHeld)) delete _kbHeld[k];
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
   fireCooldownPauseLeft = 0;
@@ -1811,7 +1826,8 @@ function onGameStarted(data) {
   resetFireCooldown();
   maxHp           = data.maxHp           || 100;
   currentHp       = data.hp              || maxHp;
-  if (data.slowTurretSpeed) slowTurretSpeed = data.slowTurretSpeed;
+  if (data.slowTurretSpeed)   slowTurretSpeed = data.slowTurretSpeed;
+  if (data.cooldownDuration)  fireCooldownMs  = data.cooldownDuration * 1000;
   isDead     = false;
   isDeadWalk = false;
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
@@ -1856,6 +1872,7 @@ function onStateUpdate(data) {
   if (data.timer !== undefined && !gamePaused) {
     updateTimer(data.timer);
   }
+  if (data.cooldownDuration) fireCooldownMs = data.cooldownDuration * 1000;
 }
 
 function onYouAreDead() {
@@ -2381,10 +2398,13 @@ function startGameLoop() {
 function gameLoop(ts) {
   rafId = requestAnimationFrame(gameLoop);
   if (isDead) return;
+
+  const now = performance.now();
+  _gpPoll(now); // poll gamepad for all roles (turret/fire work for gunners too)
+
   if (myRole === 'gunner') return; // gunners never send drive
 
   // Drive at up to DRIVE_HZ
-  const now = performance.now();
   if (now - lastDriveSend >= 1000 / DRIVE_HZ) {
     lastDriveSend = now;
     if (connection && joystickActive) {
@@ -2503,7 +2523,7 @@ function onFire() {
   const now = Date.now();
   if (now < fireCooldownUntil) return;
 
-  fireCooldownUntil = now + FIRE_COOLDOWN_MS;
+  fireCooldownUntil = now + fireCooldownMs;
   haptic([15, 10, 25, 10, 60]); // rising smooth pulse
   if (connection) connection.invoke('Fire').catch(() => {});
 
@@ -2583,6 +2603,169 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ════════════════════════════════════════════════════════
+// Keyboard controls (detected on first keydown during gameplay)
+// ════════════════════════════════════════════════════════
+let _kbMode = false;
+const _kbHeld = {};
+
+const _normKey = k => k.length === 1 ? k.toLowerCase() : k;
+
+function _kbGameActive() {
+  return document.getElementById('screen-playing').classList.contains('active');
+}
+
+function _updateKbDrive() {
+  if (myRole === 'gunner') return;
+  const fwd  = _kbHeld['w'] ? 1 : (_kbHeld['s'] ? -1 : 0);
+  const turn = _kbHeld['d'] ? 1 : (_kbHeld['a'] ? -1 : 0);
+  if (fwd === 0 && turn === 0) {
+    if (joystickActive) {
+      joystickActive = false;
+      joyL = joyR = 0;
+      if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+    }
+  } else {
+    joystickActive = true;
+    joyL = clamp(fwd + turn * 0.5, -1, 1);
+    joyR = clamp(fwd - turn * 0.5, -1, 1);
+  }
+}
+
+function _updateKbTurret() {
+  if (!connection || myRole === 'driver') return;
+  const speed = _kbHeld[','] ? 1 : (_kbHeld['.'] ? -1 : 0);
+  connection.invoke('SendTurret', speed).catch(() => {});
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const k = _normKey(e.key);
+  if (_kbHeld[k]) return; // suppress auto-repeat
+  _kbHeld[k] = true;
+
+  if (!_kbGameActive()) return;
+
+  if (['w','a','s','d'].includes(k)) {
+    e.preventDefault();
+    if (!_kbMode) {
+      _kbMode = true;
+      const hint = document.getElementById('kb-hint');
+      if (hint) hint.style.display = 'block';
+      dbg('keyboard mode detected');
+    }
+    if (!isDead) _updateKbDrive();
+    return;
+  }
+
+  if (k === ',') { e.preventDefault(); _updateKbTurret(); return; }
+  if (k === '.') { e.preventDefault(); _updateKbTurret(); return; }
+  if (k === ' ') { e.preventDefault(); onFire(); return; }
+});
+
+document.addEventListener('keyup', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const k = _normKey(e.key);
+  delete _kbHeld[k];
+
+  if (!_kbGameActive()) return;
+
+  if (['w','a','s','d'].includes(k)) { _updateKbDrive(); return; }
+  if (k === ',' || k === '.') { _updateKbTurret(); return; }
+});
+
+// Clear stuck keys when window loses focus
+window.addEventListener('blur', () => {
+  for (const k of Object.keys(_kbHeld)) delete _kbHeld[k];
+  if (_kbGameActive()) {
+    _updateKbDrive();
+    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+  }
+});
+
+// ════════════════════════════════════════════════════════
+// Gamepad support
+// ════════════════════════════════════════════════════════
+const GP_DEADZONE     = 0.12;
+const GP_TURRET_HZ    = 20;
+
+let _gpFireWasPressed = false;
+let _gpTurretActive   = false;
+let _gpTurretSendLast = 0;
+
+function _gpDeadzone(v) {
+  return Math.abs(v) < GP_DEADZONE ? 0 : v;
+}
+
+function _anyKbDriveHeld() {
+  return !!(_kbHeld['w'] || _kbHeld['a'] || _kbHeld['s'] || _kbHeld['d']);
+}
+
+function _gpPoll(now) {
+  if (!navigator.getGamepads) return;
+  const gamepads = navigator.getGamepads();
+  let gp = null;
+  for (const g of gamepads) { if (g && g.connected) { gp = g; break; } }
+  if (!gp) return;
+
+  // Left stick → drive (axes 0=X, 1=Y); skip for gunners
+  if (myRole !== 'gunner') {
+    const sx = _gpDeadzone(gp.axes[0] || 0);
+    const sy = _gpDeadzone(gp.axes[1] || 0);
+    if (sx !== 0 || sy !== 0) {
+      const fwd = -sy; // stick up = forward
+      const trn =  sx;
+      joyL = clamp(fwd + trn * 0.5, -1, 1);
+      joyR = clamp(fwd - trn * 0.5, -1, 1);
+      joystickActive = true;
+    } else if (!_anyKbDriveHeld() && joystickActive) {
+      // Stick centred and no keyboard drive held → stop
+      joystickActive = false;
+      joyL = joyR = 0;
+    }
+  }
+
+  // Right stick X → turret (axis 2); skip for drivers
+  if (myRole !== 'driver') {
+    const tx = _gpDeadzone(gp.axes[2] || 0);
+    if (tx !== 0 && now - _gpTurretSendLast >= 1000 / GP_TURRET_HZ) {
+      _gpTurretSendLast = now;
+      _gpTurretActive   = true;
+      if (connection) connection.invoke('SendTurret', roundF(tx)).catch(() => {});
+    } else if (tx === 0 && _gpTurretActive) {
+      _gpTurretActive = false;
+      if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    }
+  }
+
+  // Fire: A (button 0) or X (button 2) — edge detect so one press = one shot
+  const fireNow = !!(gp.buttons[0]?.pressed || gp.buttons[2]?.pressed);
+  if (fireNow && !_gpFireWasPressed) onFire();
+  _gpFireWasPressed = fireNow;
+}
+
+window.addEventListener('gamepadconnected', e => {
+  dbg('gamepad connected: ' + e.gamepad.id);
+  const hint = document.getElementById('gp-hint');
+  if (hint) hint.style.display = 'block';
+});
+
+window.addEventListener('gamepaddisconnected', e => {
+  dbg('gamepad disconnected: ' + e.gamepad.id);
+  const hint = document.getElementById('gp-hint');
+  if (hint) hint.style.display = 'none';
+  _gpFireWasPressed = false;
+  _gpTurretActive   = false;
+  if (_kbGameActive()) {
+    if (!_anyKbDriveHeld() && joystickActive) {
+      joystickActive = false;
+      joyL = joyR = 0;
+      if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+    }
+    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+  }
+});
 
 // ── Submit on Enter ────────────────────────────────────
 document.getElementById('name-input').addEventListener('keydown', e => {

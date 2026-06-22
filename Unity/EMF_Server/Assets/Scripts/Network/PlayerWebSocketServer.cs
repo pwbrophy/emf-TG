@@ -1637,19 +1637,21 @@ public class PlayerWebSocketServer : MonoBehaviour
         int maxHp   = ServiceLocator.GameSettings?.MaxHp ?? 100;
         int hp      = GetCurrentHp(robotId, maxHp);
         float slowT = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.4f;
+        float cooldownDuration = ServiceLocator.GameSettings?.FireCooldownSeconds ?? 3f;
 
         string videoUrl = string.IsNullOrEmpty(ip) ? "" : "http://" + ip + ":81/stream";
 
         string json =
             "{\"cmd\":\"game_started\"" +
-            ",\"connectionId\":\""  + EscapeJson(connId)       + "\"" +
-            ",\"callsign\":\""      + EscapeJson(callsign)     + "\"" +
-            ",\"videoUrl\":\""      + EscapeJson(videoUrl)     + "\"" +
-            ",\"hp\":"              + hp                               +
-            ",\"maxHp\":"           + maxHp                            +
-            ",\"slowTurretSpeed\":" + slowT.ToString("F3")             +
-            ",\"role\":\""          + EscapeJson(role)          + "\"" +
-            ",\"partnerName\":\""   + EscapeJson(partnerName)   + "\"" +
+            ",\"connectionId\":\""  + EscapeJson(connId)           + "\"" +
+            ",\"callsign\":\""      + EscapeJson(callsign)         + "\"" +
+            ",\"videoUrl\":\""      + EscapeJson(videoUrl)         + "\"" +
+            ",\"hp\":"              + hp                                   +
+            ",\"maxHp\":"           + maxHp                                +
+            ",\"slowTurretSpeed\":" + slowT.ToString("F3")                 +
+            ",\"cooldownDuration\":" + cooldownDuration.ToString("F2")    +
+            ",\"role\":\""          + EscapeJson(role)              + "\"" +
+            ",\"partnerName\":\""   + EscapeJson(partnerName)       + "\"" +
             "}";
 
         BroadcastRaw(json);
@@ -1667,18 +1669,21 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
 
-        string robotId = PlayerToRobotAny(playerName);
-        int maxHp      = ServiceLocator.GameSettings?.MaxHp ?? 100;
-        int hp         = GetCurrentHp(robotId, maxHp);
-        float timer    = ServiceLocator.MatchTimer?.Remaining ?? 0f;
+        string robotId           = PlayerToRobotAny(playerName);
+        int maxHp                = ServiceLocator.GameSettings?.MaxHp ?? 100;
+        int hp                   = GetCurrentHp(robotId, maxHp);
+        float timer              = ServiceLocator.MatchTimer?.Remaining ?? 0f;
+        float cooldown           = ServiceLocator.Shooting?.CooldownRemaining(robotId) ?? 0f;
+        float cooldownDuration   = ServiceLocator.GameSettings?.FireCooldownSeconds ?? 3f;
 
         string json =
             "{\"cmd\":\"state_update\"" +
-            ",\"connectionId\":\""  + EscapeJson(connId) + "\"" +
-            ",\"hp\":"              + hp                        +
-            ",\"maxHp\":"           + maxHp                     +
-            ",\"timer\":"           + timer.ToString("F1")      +
-            ",\"cooldown\":0.0"     +
+            ",\"connectionId\":\""    + EscapeJson(connId)             + "\"" +
+            ",\"hp\":"                + hp                                    +
+            ",\"maxHp\":"             + maxHp                                 +
+            ",\"timer\":"             + timer.ToString("F1")                  +
+            ",\"cooldown\":"          + cooldown.ToString("F2")               +
+            ",\"cooldownDuration\":"  + cooldownDuration.ToString("F2")       +
             "}";
 
         BroadcastRaw(json);

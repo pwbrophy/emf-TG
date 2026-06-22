@@ -686,11 +686,12 @@ public class RobotWebSocketServer : MonoBehaviour
         return ok;
     }
 
-    public bool SendFlashHit(string robotId)
+    public bool SendFlashHit(string robotId, bool isRear = false)
     {
         if (string.IsNullOrEmpty(robotId)) return false;
-        bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_hit\"}");
-        Debug.Log(ok ? $"[WS->Robot] flash_hit -> {robotId}" : $"[WS->Robot] FAILED flash_hit -> {robotId}");
+        string json = isRear ? "{\"cmd\":\"flash_hit\",\"rear\":true}" : "{\"cmd\":\"flash_hit\"}";
+        bool ok = SendJsonToRobot(robotId, json);
+        Debug.Log(ok ? $"[WS->Robot] flash_hit{(isRear ? " (rear)" : "")} -> {robotId}" : $"[WS->Robot] FAILED flash_hit -> {robotId}");
         return ok;
     }
 
