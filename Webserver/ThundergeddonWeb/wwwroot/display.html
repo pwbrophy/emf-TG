@@ -852,71 +852,51 @@ async function startConnection() {
 }
 startConnection();
 
-// ── JS MJPEG decoder (fetch + ReadableStream — works in all browsers) ─────
-let _fpvReader = null;
+// ── WebSocket JPEG stream ────────────────────────────────────────────────
+// Uses /api/video-ws instead of /api/robot-stream to avoid Firefox's
+// 6-connection-per-server limit on HTTP/1.1 (WebSockets are not counted).
+let _fpvWs = null;
 
-function stopFpvStream() {
-  if (_fpvReader) { try { _fpvReader.cancel(); } catch(_) {} _fpvReader = null; }
+function videoWsUrl(robotUrl) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}`;
 }
 
-async function startFpvStream(url) {
+function stopFpvStream() {
+  if (_fpvWs) { try { _fpvWs.close(); } catch(_) {} _fpvWs = null; }
+}
+
+function startFpvStream(robotUrl) {
   stopFpvStream();
+  if (!robotUrl) return;
   const canvas = document.getElementById('fpv-canvas');
   const ctx    = canvas.getContext('2d');
-  let buf      = new Uint8Array(0);
 
-  let res;
-  try { res = await fetch(url, { mode: 'cors' }); }
-  catch (e) { console.warn('[FPV] fetch failed:', e); return; }
+  const ws = new WebSocket(videoWsUrl(robotUrl));
+  ws.binaryType = 'arraybuffer';
+  _fpvWs = ws;
 
-  _fpvReader = res.body.getReader();
-
-  const pump = async () => {
-    while (true) {
-      const { done, value } = await _fpvReader.read();
-      if (done) break;
-
-      const merged = new Uint8Array(buf.length + value.length);
-      merged.set(buf); merged.set(value, buf.length);
-      buf = merged;
-
-      while (buf.length > 3) {
-        let soi = -1;
-        for (let i = 0; i < buf.length - 1; i++)
-          if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
-        if (soi < 0) { buf = new Uint8Array(0); break; }
-
-        let eoi = -1;
-        for (let i = soi + 2; i < buf.length - 1; i++)
-          if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
-        if (eoi < 0) { buf = buf.slice(soi); break; }
-
-        const jpeg    = buf.slice(soi, eoi);
-        buf           = buf.slice(eoi);
-        const blob    = new Blob([jpeg], { type: 'image/jpeg' });
-        const blobUrl = URL.createObjectURL(blob);
-        const img     = new Image();
-        img.onload = () => {
-          if (!canvas.width || canvas.width !== img.naturalWidth)
-            canvas.width  = img.naturalWidth  || canvas.offsetWidth;
-          if (!canvas.height || canvas.height !== img.naturalHeight)
-            canvas.height = img.naturalHeight || canvas.offsetHeight;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          URL.revokeObjectURL(blobUrl);
-        };
-        img.src = blobUrl;
-      }
-    }
+  ws.onmessage = (e) => {
+    const blob    = new Blob([e.data], { type: 'image/jpeg' });
+    const blobUrl = URL.createObjectURL(blob);
+    const img     = new Image();
+    img.onload = () => {
+      if (!canvas.width  || canvas.width  !== img.naturalWidth)
+        canvas.width  = img.naturalWidth  || canvas.offsetWidth;
+      if (!canvas.height || canvas.height !== img.naturalHeight)
+        canvas.height = img.naturalHeight || canvas.offsetHeight;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(blobUrl);
+    };
+    img.src = blobUrl;
   };
-
-  pump().catch(err => {
-    if (err && err.name !== 'AbortError') console.warn('[FPV] decode error:', err);
-  });
+  ws.onerror = (e) => console.warn('[FPV-WS] error:', e);
+  ws.onclose = () => { if (_fpvWs === ws) _fpvWs = null; };
 }
 
 // ── Grid view ─────────────────────────────────────────────────────────────
-let _gridMode    = false;
-const _gridReaders = {};   // index → ReadableStreamDefaultReader
+let _gridMode = false;
+const _gridWs = {};   // index → WebSocket
 
 function toggleGrid() {
   _gridMode = !_gridMode;
@@ -969,8 +949,7 @@ function startGrid() {
     overlay.appendChild(cell);
 
     if (r.videoUrl && !r.dead) {
-      const proxyUrl = '/api/robot-stream?url=' + encodeURIComponent(r.videoUrl);
-      startGridStream(i, proxyUrl);
+      startGridStream(i, r.videoUrl);
     }
   });
 
@@ -978,67 +957,42 @@ function startGrid() {
 }
 
 function stopGrid() {
-  Object.keys(_gridReaders).forEach(k => {
-    try { _gridReaders[k].cancel(); } catch(_) {}
-    delete _gridReaders[k];
+  Object.keys(_gridWs).forEach(k => {
+    try { _gridWs[k].close(); } catch(_) {}
+    delete _gridWs[k];
   });
   const overlay = document.getElementById('grid-overlay');
   overlay.classList.remove('active');
   overlay.innerHTML = '';
 }
 
-async function startGridStream(index, url) {
-  const canvas  = document.getElementById(`grid-canvas-${index}`);
-  const noVid   = document.getElementById(`grid-nolvideo-${index}`);
+function startGridStream(index, robotUrl) {
+  const canvas = document.getElementById(`grid-canvas-${index}`);
+  const noVid  = document.getElementById(`grid-nolvideo-${index}`);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  let buf = new Uint8Array(0);
 
-  let res;
-  try { res = await fetch(url, { mode: 'cors' }); }
-  catch(e) { console.warn(`[Grid ${index}] fetch failed:`, e); return; }
+  const ws = new WebSocket(videoWsUrl(robotUrl));
+  ws.binaryType = 'arraybuffer';
+  _gridWs[index] = ws;
 
-  const reader = res.body.getReader();
-  _gridReaders[index] = reader;
-  if (noVid) noVid.style.display = 'none';
-
-  const pump = async () => {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const merged = new Uint8Array(buf.length + value.length);
-      merged.set(buf); merged.set(value, buf.length);
-      buf = merged;
-      while (buf.length > 3) {
-        let soi = -1;
-        for (let i = 0; i < buf.length - 1; i++)
-          if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
-        if (soi < 0) { buf = new Uint8Array(0); break; }
-        let eoi = -1;
-        for (let i = soi + 2; i < buf.length - 1; i++)
-          if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
-        if (eoi < 0) { buf = buf.slice(soi); break; }
-        const jpeg    = buf.slice(soi, eoi);
-        buf           = buf.slice(eoi);
-        const blob    = new Blob([jpeg], { type: 'image/jpeg' });
-        const blobUrl = URL.createObjectURL(blob);
-        const img     = new Image();
-        img.onload = () => {
-          if (!canvas.width  || canvas.width  !== img.naturalWidth)
-            canvas.width  = img.naturalWidth  || canvas.offsetWidth;
-          if (!canvas.height || canvas.height !== img.naturalHeight)
-            canvas.height = img.naturalHeight || canvas.offsetHeight;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          URL.revokeObjectURL(blobUrl);
-        };
-        img.src = blobUrl;
-      }
-    }
+  ws.onopen  = () => { if (noVid) noVid.style.display = 'none'; };
+  ws.onmessage = (e) => {
+    const blob    = new Blob([e.data], { type: 'image/jpeg' });
+    const blobUrl = URL.createObjectURL(blob);
+    const img     = new Image();
+    img.onload = () => {
+      if (!canvas.width  || canvas.width  !== img.naturalWidth)
+        canvas.width  = img.naturalWidth  || canvas.offsetWidth;
+      if (!canvas.height || canvas.height !== img.naturalHeight)
+        canvas.height = img.naturalHeight || canvas.offsetHeight;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(blobUrl);
+    };
+    img.src = blobUrl;
   };
-  pump().catch(err => {
-    if (err && err.name !== 'AbortError') console.warn(`[Grid ${index}] decode error:`, err);
-    if (noVid) noVid.style.display = '';
-  });
+  ws.onerror = () => { if (noVid) { noVid.textContent = 'no stream'; noVid.style.display = ''; } };
+  ws.onclose = () => { if (_gridWs[index] === ws) delete _gridWs[index]; };
 }
 
 function updateGrid() {
@@ -1092,8 +1046,7 @@ function applySpectateUpdate(data) {
   };
   document.getElementById('fpv-overlay').classList.add('active');
   if (fpvState.videoUrl) {
-    const proxyUrl = '/api/robot-stream?url=' + encodeURIComponent(fpvState.videoUrl);
-    startFpvStream(proxyUrl);
+    startFpvStream(fpvState.videoUrl);
   }
   renderFpv();
 }
