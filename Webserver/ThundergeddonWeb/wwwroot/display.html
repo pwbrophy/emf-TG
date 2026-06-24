@@ -74,7 +74,9 @@
     justify-content: space-around; }
 
   /* Alliance sections */
-  .alliance-block { background: var(--panel); border-radius: 8px; padding: 10px 14px; }
+  .alliance-block { border-radius: 8px; padding: 10px 14px; }
+  .alliance-block.a0 { background: rgba(200, 155, 60, 0.18); border: 1px solid rgba(200, 155, 60, 0.35); }
+  .alliance-block.a1 { background: rgba(50, 140, 47, 0.18);  border: 1px solid rgba(50, 140, 47, 0.35); }
   .alliance-title { font-size: 0.8em; font-weight: 700; text-transform: uppercase;
     letter-spacing: 1px; margin-bottom: 6px; }
   .alliance-title.a0 { color: var(--blue); }
@@ -83,13 +85,17 @@
   .robot-callsign { font-size: 0.85em; color: var(--dim); width: 90px; flex-shrink: 0; }
   .robot-player { font-size: 0.9em; font-weight: 600; width: 140px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hp-bar-wrap { flex: 1; height: 14px; background: #111; border-radius: 7px; overflow: hidden; }
-  .hp-bar { height: 100%; border-radius: 7px; transition: width 0.3s ease; }
-  .hp-bar.a0 { background: var(--blue); }
-  .hp-bar.a1 { background: var(--red); }
+  .hp-bar { height: 100%; border-radius: 7px; background: #1E90FF; transition: width 0.3s ease; }
   .hp-num { font-size: 0.8em; color: var(--dim); width: 36px; text-align: right; flex-shrink: 0; }
   .robot-row.dead .robot-player,
   .robot-row.dead .robot-callsign { opacity: 0.35; text-decoration: line-through; }
   .robot-row.dead .hp-bar { background: #444; }
+  @keyframes hp-hit-flash {
+    0%   { background: #ff2828; box-shadow: 0 0 6px rgba(255,40,40,0.9); }
+    50%  { background: #ff2828; box-shadow: 0 0 6px rgba(255,40,40,0.9); }
+    100% { background: #1E90FF; box-shadow: none; }
+  }
+  .hp-bar.hit-flash { animation: hp-hit-flash 0.35s ease-out forwards; }
 
   /* Capture points */
   .cp-block { display: flex; flex-direction: column; align-items: center;
@@ -791,6 +797,20 @@ function populateGoStats(serverStats) {
   });
 }
 
+// ── HP hit-flash queue (populated before state merge, applied after render) ──
+const _pendingHpFlashes = new Set();
+
+function applyPendingHpFlashes() {
+  _pendingHpFlashes.forEach(cs => {
+    const el = document.getElementById('hpbar_' + cs.replace(/\W/g, '_'));
+    if (!el) return;
+    el.classList.remove('hit-flash');
+    void el.offsetWidth; // restart animation
+    el.classList.add('hit-flash');
+  });
+  _pendingHpFlashes.clear();
+}
+
 // ── Timer milestone tracking ──────────────────────────────────────────────
 let _prevTimer = null;
 const _milestoneFired = {};
@@ -1177,6 +1197,14 @@ function applyDisplayUpdate(data) {
   // Track HP deltas before state merges so we can compute damage received per player
   if (wasPlaying && data.robots) trackHpForStats(data.robots);
 
+  // Detect HP decreases — queue bar flash (applied after render rebuilds the DOM)
+  if (wasPlaying && data.robots) {
+    data.robots.forEach(r => {
+      const prev = (state.robots || []).find(x => x.callsign === r.callsign);
+      if (prev && r.hp < prev.hp) _pendingHpFlashes.add(r.callsign);
+    });
+  }
+
   state = Object.assign(state, data);
   const nowPlaying = (state.phase === 'playing');
 
@@ -1220,6 +1248,7 @@ function applyDisplayUpdate(data) {
   }
 
   render();
+  applyPendingHpFlashes();
   updateGrid();
 }
 
@@ -1347,19 +1376,20 @@ function renderAlliances() {
   [0, 1].forEach(a => {
     if (byAlliance[a].length === 0) return;
     const block = document.createElement('div');
-    block.className = 'alliance-block';
+    block.className = 'alliance-block a' + a;
     const squadNames = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
     block.innerHTML = `<div class="alliance-title a${a}">${escHtml(squadNames[a])}</div>`;
 
     byAlliance[a].forEach(r => {
       const pct = Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
       const isBurning = (r.callsign === _killBurnCallsign && Date.now() < _killBurnExpiry);
+      const barId = 'hpbar_' + (r.callsign || '').replace(/\W/g, '_');
       const row = document.createElement('div');
       row.className = 'robot-row' + (r.dead ? ' dead' : '') + (isBurning ? ' hp-row-burn' : '');
       row.innerHTML =
         `<span class="robot-callsign">${escHtml(r.callsign || '')}</span>` +
         `<span class="robot-player">${escHtml(r.gunnerPlayer ? (r.player || '—') + ' & ' + r.gunnerPlayer : (r.player || '—'))}</span>` +
-        `<div class="hp-bar-wrap"><div class="hp-bar a${a}" style="width:${pct}%"></div></div>` +
+        `<div class="hp-bar-wrap"><div class="hp-bar" id="${barId}" style="width:${pct}%"></div></div>` +
         `<span class="hp-num">${r.dead ? 'DEAD' : r.hp}</span>`;
       block.appendChild(row);
     });
