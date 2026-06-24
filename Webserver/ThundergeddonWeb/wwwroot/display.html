@@ -34,6 +34,11 @@
   #mute-btn { background: none; border: 1px solid #444; border-radius: 6px;
     color: #ccc; font-size: 1.2em; cursor: pointer; padding: 4px 8px; margin-left: 12px; }
   #mute-btn:hover { border-color: #888; color: #fff; }
+  #grid-btn { background: none; border: 1px solid #444; border-radius: 6px;
+    color: #ccc; font-size: 0.85em; cursor: pointer; padding: 4px 10px; margin-left: 8px;
+    letter-spacing: 1px; font-weight: 600; }
+  #grid-btn:hover { border-color: #888; color: #fff; }
+  #grid-btn.active { border-color: #4af; color: #4af; }
   #version { position: fixed; bottom: 6px; right: 10px; font-size: 0.65em;
     color: #444; pointer-events: none; z-index: 9999; }
   #timer.urgent { color: #ff4444; animation: flash 0.5s infinite alternate; }
@@ -207,6 +212,40 @@
     to   { transform: scale(1);   opacity: 1; }
   }
 
+  /* ── Game-over sequence ─────────────────────────────────────────── */
+  #gameover-bg { position: fixed; inset: 0; z-index: 70; pointer-events: none;
+    background: rgba(0,0,0,0.92); opacity: 0; transition: opacity 0.7s; }
+  #gameover-bg.active { opacity: 1; }
+  #fireworks-canvas { position: fixed; inset: 0; z-index: 71; pointer-events: none; display: none; }
+  #gameover-overlay { position: fixed; inset: 0; z-index: 72; pointer-events: none; }
+  .go-phase { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    opacity: 0; transition: opacity 0.6s; }
+  .go-phase.visible { opacity: 1; }
+  #go-title { font-size: 12vw; font-weight: 900; letter-spacing: 6px;
+    text-transform: uppercase; color: #f0c040;
+    text-shadow: 0 0 60px rgba(240,192,64,0.9), 0 0 120px rgba(240,192,64,0.4); }
+  .go-anim-in { animation: go-in 0.55s cubic-bezier(0.22,1,0.36,1) both; }
+  @keyframes go-in {
+    from { transform: scale(1.5); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+  #go-winner-name { font-size: 7.5vw; font-weight: 900; letter-spacing: 4px;
+    text-transform: uppercase; text-shadow: 0 0 50px currentColor; }
+  #go-victory-sub { font-size: 3vw; font-weight: 700; letter-spacing: 8px;
+    text-transform: uppercase; color: #fff; text-shadow: 0 0 30px rgba(255,255,255,0.5); }
+  #go-stats { background: rgba(8,8,8,0.78); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px; padding: 28px 52px; min-width: 500px; }
+  .go-stat { display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.07); gap: 32px; }
+  .go-stat:last-child { border-bottom: none; }
+  .go-stat.featured { padding: 13px 0; border-bottom: 2px solid rgba(255,255,255,0.18); margin-bottom: 6px; }
+  .gos-label { color: #777; font-size: 0.8em; letter-spacing: 1px;
+    text-transform: uppercase; white-space: nowrap; }
+  .go-stat.featured .gos-label { color: #bbb; font-size: 0.95em; }
+  .gos-value { color: #fff; font-weight: 700; text-align: right; min-width: 180px; }
+  .go-stat.featured .gos-value { color: #f0c040; font-size: 1.35em; }
+
   /* ── FPV overlay ────────────────────────────────────────────────── */
   #fpv-overlay { position: fixed; inset: 0; background: #000; z-index: 25; display: none;
     flex-direction: column; }
@@ -242,17 +281,43 @@
   #fpv-video-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
     overflow: hidden; background: #000; min-height: 0; }
   #fpv-canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
+  /* ── Grid overlay ───────────────────────────────────────────────── */
+  #grid-overlay { position: fixed; inset: 0; z-index: 26; display: none;
+    padding: 4px; gap: 4px; background: #000; }
+  #grid-overlay.active { display: grid; }
+
+  .grid-cell { background: #111; border-radius: 4px; display: flex;
+    flex-direction: column; overflow: hidden; }
+  .grid-cell.dead { opacity: 0.4; }
+
+  .grid-cell-hdr { display: flex; align-items: center; gap: 8px;
+    background: rgba(0,0,0,0.78); padding: 4px 10px; flex-shrink: 0; }
+  .grid-cell-name { font-size: 0.8em; font-weight: 700; color: #eee;
+    flex-shrink: 0; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+  .grid-cell-hpwrap { flex: 1; height: 10px; background: #333; border-radius: 5px; overflow: hidden; }
+  .grid-cell-hpbar { height: 100%; border-radius: 5px; transition: width 0.3s; }
+  .grid-cell-hpbar.a0 { background: var(--blue); }
+  .grid-cell-hpbar.a1 { background: var(--red); }
+  .grid-cell-hpbar.dead-bar { background: #444; }
+  .grid-cell-hpnum { font-size: 0.7em; color: #888; flex-shrink: 0; white-space: nowrap; }
+
+  .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000; }
+  .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .grid-cell-nolvideo { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #444; font-size: 0.85em; }
 </style>
 </head>
 <body>
 
-<div id="version">display v7</div>
+<div id="version">display v9</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
     <div id="title">&#9889; <span>THUNDERGEDDON</span></div>
     <div id="timer">--:--</div>
     <button id="mute-btn" onclick="toggleMute()" title="Toggle announcer">&#128266;</button>
+  <button id="grid-btn" onclick="toggleGrid()" title="Toggle 6-tank grid view">&#9707; GRID</button>
   </div>
 
   <!-- Team points bar -->
@@ -338,6 +403,9 @@
   </div>
 </div>
 
+<!-- Grid overlay: all-robot FPV grid, toggled by the GRID button -->
+<div id="grid-overlay"></div>
+
 <div id="countdown-overlay" class="hidden">
   <div id="countdown-number">5</div>
   <div id="countdown-get-ready">GET READY!</div>
@@ -349,6 +417,54 @@
 </div>
 
 <div id="kill-overlay"></div>
+
+<div id="gameover-bg"></div>
+<canvas id="fireworks-canvas"></canvas>
+<div id="gameover-overlay">
+  <div class="go-phase" id="go-phase1">
+    <div id="go-title">GAME OVER</div>
+  </div>
+  <div class="go-phase" id="go-phase2">
+    <div id="go-winner-name"></div>
+    <div id="go-victory-sub">ARE VICTORIOUS!</div>
+  </div>
+  <div class="go-phase" id="go-phase3">
+    <div id="go-stats">
+      <div class="go-stat featured">
+        <span class="gos-label">&#11088;&nbsp; Best Player</span>
+        <span class="gos-value" id="gos-best">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Kills</span>
+        <span class="gos-value" id="gos-kills">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Deaths</span>
+        <span class="gos-value" id="gos-deaths">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Damage Given</span>
+        <span class="gos-value" id="gos-damage-gvn">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Damage Taken</span>
+        <span class="gos-value" id="gos-damage-tkn">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Points Captured</span>
+        <span class="gos-value" id="gos-captures">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Points Gained</span>
+        <span class="gos-value" id="gos-points">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Ground Covered</span>
+        <span class="gos-value" id="gos-ground">—</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="status-banner">Connecting&hellip;</div>
 
@@ -389,6 +505,283 @@ let state = {
 };
 let eventLines = [];
 
+// ── Game-over client-side stat accumulation ───────────────────────────────
+let _csDeaths     = {};  // { playerName: count }
+let _csKills      = {};  // { playerName: count } — inferred from KillEvent
+let _csHpSnap     = {};  // { callsign: lastKnownHp }
+let _csDmgRcvd    = {};  // { playerName: totalDamageReceived }
+let _gameOverActive = false;
+let _goTimers       = [];
+
+function _goDelay(fn, ms) { const t = setTimeout(fn, ms); _goTimers.push(t); }
+function _goClearTimers()  { _goTimers.forEach(clearTimeout); _goTimers = []; }
+
+function resetGameStats() { _csDeaths = {}; _csKills = {}; _csHpSnap = {}; _csDmgRcvd = {}; }
+
+function trackHpForStats(robots) {
+  if (!robots) return;
+  robots.forEach(r => {
+    if (!r.callsign) return;
+    const prev = _csHpSnap[r.callsign];
+    if (prev != null && r.hp < prev) {
+      const p = r.player || r.callsign;
+      _csDmgRcvd[p] = (_csDmgRcvd[p] || 0) + (prev - r.hp);
+    }
+    _csHpSnap[r.callsign] = r.hp;
+  });
+}
+
+function trackDeathForStats(targetCallsign) {
+  const victim = (state.robots || []).find(x => x.callsign === targetCallsign);
+  const vp = victim ? (victim.player || targetCallsign) : targetCallsign;
+  if (vp) _csDeaths[vp] = (_csDeaths[vp] || 0) + 1;
+
+  // Infer kill: if the opposing team has exactly one alive robot (excluding the victim), credit it
+  if (!victim) return;
+  const killerTeam = victim.alliance === 0 ? 1 : 0;
+  const candidates = (state.robots || []).filter(
+    r => r.alliance === killerTeam && !r.dead && r.callsign !== targetCallsign
+  );
+  if (candidates.length === 1) {
+    const kp = candidates[0].player || candidates[0].callsign;
+    if (kp) _csKills[kp] = (_csKills[kp] || 0) + 1;
+  }
+}
+
+function csStatWinner(map) {
+  let best = null, bestVal = -Infinity;
+  Object.entries(map).forEach(([k, v]) => { if (v > bestVal) { best = k; bestVal = v; } });
+  return best ? { player: best, value: bestVal } : null;
+}
+
+// ── Fireworks engine (identical to player client) ─────────────────────────
+const SQUAD_FW_COLORS = {
+  0: ['#FF8C00','#FFD700','#FFC300','#FF6000','#FFAA00','#FFE566'],
+  1: ['#00D400','#50FF00','#FFFFFF','#ADFF2F','#00FF88','#CCFF33'],
+};
+const FW_SPARK_SCALE   = 0.25;
+const FW_GRAVITY_SPARK = 180;
+let _goFireworksRaf = null;
+let _goParticles    = [];
+
+function startGoFireworks(colors, canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  _goParticles  = [];
+
+  let lastT      = 0;
+  let nextRocket = 0;
+
+  function launchRocket() {
+    const apexX = canvas.width  * (0.12 + Math.random() * 0.76);
+    const apexY = canvas.height * (0.04 + Math.random() * 0.24);
+    const T     = 1.4 + Math.random() * 1.0;
+    const h     = canvas.height - apexY;
+    const vy0   = -2 * h / T;
+    const grav  = 2 * h / (T * T);
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const vx      = (Math.random() * 2 - 1) * Math.abs(vy0) * 0.5774;
+    const launchX = Math.max(0, Math.min(canvas.width, apexX - vx * T));
+    _goParticles.push({ type:'rocket', x:launchX, y:canvas.height, vx, vy:vy0, grav, trail:[], color });
+  }
+
+  function explodeRocket(rx, ry) {
+    _goParticles.push({ type:'flash', x:rx, y:ry });
+    const count = 54 + Math.floor(Math.random() * 32);
+    for (let i = 0; i < count; i++) {
+      const angle   = Math.random() * Math.PI * 2;
+      const speed   = 180 + Math.random() * 570;
+      const maxLife = 0.24 + Math.random() * 0.20;
+      const size    = 3.3 + Math.random() * 5.7;
+      const color   = colors[Math.floor(Math.random() * colors.length)];
+      _goParticles.push({
+        type:'spark', x:rx, y:ry,
+        vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
+        life:maxLife, maxLife, color, size,
+        freq:  10 + Math.random() * 22,
+        phase: Math.random() * Math.PI * 2,
+        age:   0,
+      });
+    }
+  }
+
+  function frame(t) {
+    const dt = Math.min((t - lastT) / 1000, 0.05);
+    lastT = t;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (t >= nextRocket) {
+      launchRocket();
+      nextRocket = t + 266 + Math.random() * 334;
+    }
+    const alive = [];
+    for (const p of _goParticles) {
+      if (p.type === 'rocket') {
+        p.trail.push({x:p.x, y:p.y});
+        if (p.trail.length > 10) p.trail.shift();
+        p.vy += p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.vy >= 0) {
+          explodeRocket(p.x, p.y);
+        } else {
+          for (let i = 0; i < p.trail.length; i++) {
+            ctx.globalAlpha = (i / p.trail.length) * 0.8;
+            ctx.fillStyle   = p.color;
+            ctx.beginPath(); ctx.arc(p.trail[i].x, p.trail[i].y, 1.6, 0, Math.PI*2); ctx.fill();
+          }
+          ctx.globalAlpha = 1; ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 2.8, 0, Math.PI*2); ctx.fill();
+          alive.push(p);
+        }
+      } else if (p.type === 'flash') {
+        const flashR = Math.min(canvas.width, canvas.height) * 0.25;
+        const flashG = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, flashR);
+        flashG.addColorStop(0, 'rgba(255,255,255,0.75)'); flashG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 1;
+        ctx.fillStyle = flashG; ctx.beginPath(); ctx.arc(p.x, p.y, flashR, 0, Math.PI*2); ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        const sdt = dt * FW_SPARK_SCALE;
+        p.age += dt;
+        const drag = 1 - 0.08 * sdt * 60;
+        p.vx *= drag; p.vy *= drag; p.vy += FW_GRAVITY_SPARK * sdt;
+        p.x += p.vx * sdt; p.y += p.vy * sdt; p.life -= sdt;
+        if (p.life > 0) {
+          const frac    = p.life / p.maxLife;
+          const flicker = 0.5 + 0.5 * Math.sin(p.age * p.freq * Math.PI * 2 + p.phase);
+          const endFade = frac < 0.20 ? (frac / 0.20) : 1.0;
+          const alpha   = flicker * endFade;
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = alpha * 0.6;
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
+          glowGrad.addColorStop(0, p.color); glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = glowGrad; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI*2); ctx.fill();
+          ctx.globalAlpha = alpha;
+          const bodyGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+          bodyGrad.addColorStop(0, p.color); bodyGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = bodyGrad; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+          if (flicker > 0.45) {
+            const coreFrac = (flicker - 0.45) / 0.55;
+            ctx.globalAlpha = alpha * coreFrac; ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI*2); ctx.fill();
+          }
+          if (flicker > 0.80) {
+            const peakFrac = (flicker - 0.80) / 0.20;
+            const len = p.size * 3.5 * Math.max(0.3, frac);
+            ctx.globalAlpha = alpha * peakFrac * 0.95; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9;
+            ctx.beginPath();
+            ctx.moveTo(p.x - len, p.y); ctx.lineTo(p.x + len, p.y);
+            ctx.moveTo(p.x, p.y - len); ctx.lineTo(p.x, p.y + len);
+            ctx.stroke();
+          }
+          ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+          alive.push(p);
+        }
+      }
+    }
+    _goParticles    = alive;
+    _goFireworksRaf = requestAnimationFrame(frame);
+  }
+  _goFireworksRaf = requestAnimationFrame(t0 => { lastT = t0; _goFireworksRaf = requestAnimationFrame(frame); });
+}
+
+function stopGoFireworks() {
+  if (_goFireworksRaf) { cancelAnimationFrame(_goFireworksRaf); _goFireworksRaf = null; }
+  _goParticles = [];
+}
+
+// ── Game-over sequence ────────────────────────────────────────────────────
+function showGameOver(winnerTeam, serverStats) {
+  if (_gameOverActive) return;
+  _gameOverActive = true;
+  _goClearTimers();
+
+  const bg     = document.getElementById('gameover-bg');
+  const p1     = document.getElementById('go-phase1');
+  const p2     = document.getElementById('go-phase2');
+  const p3     = document.getElementById('go-phase3');
+  const nameEl = document.getElementById('go-winner-name');
+
+  const allianceIdx = (state.allianceNames || []).indexOf(winnerTeam);
+  nameEl.textContent = winnerTeam || 'WINNER';
+  nameEl.style.color = allianceIdx === 0 ? 'var(--blue)' : allianceIdx === 1 ? 'var(--red)' : '#f0c040';
+
+  p1.classList.remove('visible'); p2.classList.remove('visible'); p3.classList.remove('visible');
+  bg.classList.add('active');
+
+  // Phase 1: "GAME OVER" with scale-in animation
+  _goDelay(() => {
+    const titleEl = document.getElementById('go-title');
+    titleEl.classList.remove('go-anim-in'); void titleEl.offsetWidth; titleEl.classList.add('go-anim-in');
+    p1.classList.add('visible');
+  }, 100);
+
+  // Phase 2: victory proclamation + fireworks start
+  _goDelay(() => {
+    p1.classList.remove('visible');
+    const _fwCv = document.getElementById('fireworks-canvas');
+    _fwCv.style.display = 'block';
+    startGoFireworks(SQUAD_FW_COLORS[allianceIdx] || SQUAD_FW_COLORS[0], _fwCv);
+    _goDelay(() => p2.classList.add('visible'), 200);
+  }, 2500);
+
+  // Phase 3: stats (fireworks keep running)
+  _goDelay(() => {
+    p2.classList.remove('visible');
+    populateGoStats(serverStats);
+    _goDelay(() => p3.classList.add('visible'), 300);
+  }, 7000);
+}
+
+function hideGameOver() {
+  if (!_gameOverActive) return;
+  _gameOverActive = false;
+  _goClearTimers();
+  stopGoFireworks();
+  const _fwCv = document.getElementById('fireworks-canvas');
+  if (_fwCv) { _fwCv.getContext('2d').clearRect(0, 0, _fwCv.width, _fwCv.height); _fwCv.style.display = 'none'; }
+  document.getElementById('gameover-bg').classList.remove('active');
+  ['go-phase1','go-phase2','go-phase3'].forEach(id =>
+    document.getElementById(id).classList.remove('visible'));
+}
+
+function populateGoStats(serverStats) {
+  const s      = serverStats || {};
+  const deathW = csStatWinner(_csDeaths);
+  const killsW = csStatWinner(_csKills);
+  const dmgW   = csStatWinner(_csDmgRcvd);
+
+  // Best player: server value, or highest-HP surviving winner robot
+  let bestPlayer = (s.bestPlayer && s.bestPlayer.player) ? s.bestPlayer : null;
+  if (!bestPlayer) {
+    const an    = state.allianceNames || [];
+    const wText = document.getElementById('go-winner-name').textContent;
+    const wIdx  = an.indexOf(wText);
+    const alive = (state.robots || []).filter(r => r.alliance === wIdx && !r.dead);
+    if (alive.length) {
+      const best = alive.reduce((a, b) => a.hp > b.hp ? a : b);
+      bestPlayer = { player: best.player || best.callsign, value: best.hp + ' HP' };
+    }
+  }
+
+  const rows = [
+    { id: 'gos-best',       data: bestPlayer },
+    { id: 'gos-kills',      data: s.mostKills       || killsW },
+    { id: 'gos-deaths',     data: s.mostDeaths      || deathW },
+    { id: 'gos-damage-gvn', data: s.mostDamageGiven || null },
+    { id: 'gos-damage-tkn', data: s.mostDamageTaken || dmgW   },
+    { id: 'gos-captures',   data: s.mostCaptures    || null },
+    { id: 'gos-points',     data: s.mostPoints      || null },
+    { id: 'gos-ground',     data: s.mostGround      || null },
+  ];
+
+  rows.forEach(({ id, data }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!data || !data.player) { el.textContent = '—'; return; }
+    el.textContent = data.value != null ? `${data.player}  (${data.value})` : data.player;
+  });
+}
+
 // ── Timer milestone tracking ──────────────────────────────────────────────
 let _prevTimer = null;
 const _milestoneFired = {};
@@ -420,11 +813,10 @@ conn.on('DisplayEvent', text => {
 });
 
 conn.on('GameOver', data => {
-  const msg = data.winnerTeam
-    ? `${data.winnerTeam} wins!`
-    : `Game over!`;
+  const msg = data.winnerTeam ? `${data.winnerTeam} wins!` : `Game over!`;
   addEvent(msg);
   // Full spoken announcement arrives via DisplayEvent just before this — don't cancel it
+  showGameOver(data.winnerTeam || '', data.stats || null);
 });
 
 conn.on('CountdownStarted', total => {
@@ -528,6 +920,156 @@ async function startFpvStream(url) {
   });
 }
 
+// ── Grid view ─────────────────────────────────────────────────────────────
+let _gridMode    = false;
+const _gridReaders = {};   // index → ReadableStreamDefaultReader
+
+function toggleGrid() {
+  _gridMode = !_gridMode;
+  const btn = document.getElementById('grid-btn');
+  if (btn) {
+    btn.classList.toggle('active', _gridMode);
+    btn.textContent = _gridMode ? '✖ CLOSE' : '✇ GRID';
+  }
+  if (_gridMode) startGrid();
+  else           stopGrid();
+}
+
+function startGrid() {
+  stopGrid();
+  const overlay = document.getElementById('grid-overlay');
+  const robots  = state.robots || [];
+  const n       = robots.length;
+  if (n === 0) { overlay.classList.remove('active'); return; }
+
+  const cols = n <= 2 ? n : n <= 4 ? 2 : 3;
+  const rows = Math.ceil(n / cols);
+  overlay.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  overlay.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
+  overlay.innerHTML = '';
+
+  robots.forEach((r, i) => {
+    const pct = r.dead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+    const alCls    = r.alliance === 0 ? 'a0' : r.alliance === 1 ? 'a1' : '';
+    const hpBarCls = r.dead ? 'dead-bar' : alCls;
+    const hpLabel  = r.dead ? 'DEAD' : String(r.hp);
+    const nameText = r.gunnerPlayer
+      ? escHtml((r.callsign || '?') + ' — ' + (r.player || '?') + ' & ' + r.gunnerPlayer)
+      : escHtml((r.callsign || '?') + (r.player ? ' — ' + r.player : ''));
+
+    const cell = document.createElement('div');
+    cell.className = 'grid-cell' + (r.dead ? ' dead' : '');
+    cell.id = `grid-cell-${i}`;
+    cell.innerHTML =
+      `<div class="grid-cell-hdr">` +
+        `<span class="grid-cell-name">${nameText}</span>` +
+        `<div class="grid-cell-hpwrap">` +
+          `<div class="grid-cell-hpbar ${hpBarCls}" id="grid-hp-${i}" style="width:${pct}%"></div>` +
+        `</div>` +
+        `<span class="grid-cell-hpnum" id="grid-hpnum-${i}">${hpLabel}</span>` +
+      `</div>` +
+      `<div class="grid-cell-video">` +
+        `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
+        `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}">${r.dead ? '💥 DESTROYED' : 'no stream'}</div>` +
+      `</div>`;
+    overlay.appendChild(cell);
+
+    if (r.videoUrl && !r.dead) {
+      const proxyUrl = '/api/robot-stream?url=' + encodeURIComponent(r.videoUrl);
+      startGridStream(i, proxyUrl);
+    }
+  });
+
+  overlay.classList.add('active');
+}
+
+function stopGrid() {
+  Object.keys(_gridReaders).forEach(k => {
+    try { _gridReaders[k].cancel(); } catch(_) {}
+    delete _gridReaders[k];
+  });
+  const overlay = document.getElementById('grid-overlay');
+  overlay.classList.remove('active');
+  overlay.innerHTML = '';
+}
+
+async function startGridStream(index, url) {
+  const canvas  = document.getElementById(`grid-canvas-${index}`);
+  const noVid   = document.getElementById(`grid-nolvideo-${index}`);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let buf = new Uint8Array(0);
+
+  let res;
+  try { res = await fetch(url, { mode: 'cors' }); }
+  catch(e) { console.warn(`[Grid ${index}] fetch failed:`, e); return; }
+
+  const reader = res.body.getReader();
+  _gridReaders[index] = reader;
+  if (noVid) noVid.style.display = 'none';
+
+  const pump = async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const merged = new Uint8Array(buf.length + value.length);
+      merged.set(buf); merged.set(value, buf.length);
+      buf = merged;
+      while (buf.length > 3) {
+        let soi = -1;
+        for (let i = 0; i < buf.length - 1; i++)
+          if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
+        if (soi < 0) { buf = new Uint8Array(0); break; }
+        let eoi = -1;
+        for (let i = soi + 2; i < buf.length - 1; i++)
+          if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
+        if (eoi < 0) { buf = buf.slice(soi); break; }
+        const jpeg    = buf.slice(soi, eoi);
+        buf           = buf.slice(eoi);
+        const blob    = new Blob([jpeg], { type: 'image/jpeg' });
+        const blobUrl = URL.createObjectURL(blob);
+        const img     = new Image();
+        img.onload = () => {
+          if (!canvas.width  || canvas.width  !== img.naturalWidth)
+            canvas.width  = img.naturalWidth  || canvas.offsetWidth;
+          if (!canvas.height || canvas.height !== img.naturalHeight)
+            canvas.height = img.naturalHeight || canvas.offsetHeight;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(blobUrl);
+        };
+        img.src = blobUrl;
+      }
+    }
+  };
+  pump().catch(err => {
+    if (err && err.name !== 'AbortError') console.warn(`[Grid ${index}] decode error:`, err);
+    if (noVid) noVid.style.display = '';
+  });
+}
+
+function updateGrid() {
+  if (!_gridMode) return;
+  const robots = state.robots || [];
+  robots.forEach((r, i) => {
+    const hpBar = document.getElementById(`grid-hp-${i}`);
+    const hpNum = document.getElementById(`grid-hpnum-${i}`);
+    const cell  = document.getElementById(`grid-cell-${i}`);
+    if (!hpBar || !hpNum || !cell) return;
+    const pct = r.dead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+    hpBar.style.width = pct + '%';
+    hpNum.textContent = r.dead ? 'DEAD' : String(r.hp);
+    if (r.dead && !cell.classList.contains('dead')) {
+      cell.classList.add('dead');
+      hpBar.classList.remove('a0', 'a1');
+      hpBar.classList.add('dead-bar');
+      if (_gridReaders[i]) {
+        try { _gridReaders[i].cancel(); } catch(_) {}
+        delete _gridReaders[i];
+      }
+    }
+  });
+}
+
 // ── Spectate state ────────────────────────────────────────────────────────
 let fpvState = { active: false, playerName: '', hp: 0, maxHp: 100, videoUrl: '' };
 
@@ -585,10 +1127,9 @@ let _killBurnExpiry    = 0;   // ms timestamp; 0 = inactive
 let _killBarResetTimer = null;
 
 conn.on('KillEvent', data => {
-  triggerKillBurn(
-    (data && data.teamIndex != null) ? data.teamIndex : -1,
-    (data && data.targetCallsign)    ? data.targetCallsign : ''
-  );
+  const callsign = (data && data.targetCallsign) ? data.targetCallsign : '';
+  triggerKillBurn((data && data.teamIndex != null) ? data.teamIndex : -1, callsign);
+  if (callsign) trackDeathForStats(callsign);
 });
 
 function triggerKillBurn(teamIndex, targetCallsign) {
@@ -657,6 +1198,10 @@ function applyDisplayUpdate(data) {
   const wasPlaying = (state.phase === 'playing');
   const prevTimerVal = _prevTimer;
   const oldTp = (state.teamPoints || [0, 0]).slice();
+
+  // Track HP deltas before state merges so we can compute damage received per player
+  if (wasPlaying && data.robots) trackHpForStats(data.robots);
+
   state = Object.assign(state, data);
   const nowPlaying = (state.phase === 'playing');
 
@@ -670,6 +1215,13 @@ function applyDisplayUpdate(data) {
     _spokenCountdownSecs.clear();
     _cpFlashCounter[0] = _cpFlashCounter[1] = 0;
     speak('To battle, show no mercy!');
+    resetGameStats();
+    hideGameOver();
+  }
+
+  // Dismiss game-over overlay when operator returns to lobby / main menu
+  if (_gameOverActive && (state.phase === 'lobby' || state.phase === 'mainmenu')) {
+    hideGameOver();
   }
 
   // Check timer milestones each update (function guards on phase + paused)
@@ -693,6 +1245,7 @@ function applyDisplayUpdate(data) {
   }
 
   render();
+  updateGrid();
 }
 
 function addEvent(text) {

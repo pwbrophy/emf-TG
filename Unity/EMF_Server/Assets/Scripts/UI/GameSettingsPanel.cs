@@ -232,23 +232,38 @@ public class GameSettingsPanel : MonoBehaviour
         ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
         ltmp.alignment = TextAlignmentOptions.Right;
 
+        // Create igo inactive so TMP_InputField.OnEnable fires only after textViewport
+        // and textComponent are both set — otherwise the dirty-vertex callbacks that
+        // keep the label live never get registered, making the field appear non-editable
+        // on the first lobby entry.
         var igo = new GameObject("Field");
+        igo.SetActive(false);
         var iLE = igo.AddComponent<LayoutElement>(); iLE.preferredWidth = 70f; iLE.flexibleWidth = 1;
-        igo.transform.SetParent(row.transform, false);
         igo.AddComponent<Image>().color = new Color(0.15f, 0.15f, 0.2f);
         var field = igo.AddComponent<TMP_InputField>();
         field.contentType = TMP_InputField.ContentType.DecimalNumber;
 
+        var taGO = new GameObject("Text Area");
+        var taRT = taGO.AddComponent<RectTransform>();
+        taGO.transform.SetParent(igo.transform, false);
+        taGO.AddComponent<RectMask2D>();
+        taRT.anchorMin = Vector2.zero; taRT.anchorMax = Vector2.one;
+        taRT.offsetMin = new Vector2(4, 2); taRT.offsetMax = new Vector2(-4, -2);
+        field.textViewport = taRT;
+
         var tgo = new GameObject("Text");
-        tgo.transform.SetParent(igo.transform, false);
+        tgo.transform.SetParent(taGO.transform, false);
         var trt = tgo.AddComponent<RectTransform>();
         trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
-        trt.offsetMin = new Vector2(4, 2); trt.offsetMax = new Vector2(-4, -2);
+        trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
         var ttmp = tgo.AddComponent<TextMeshProUGUI>();
         if (_font) ttmp.font = _font;
         ttmp.fontSize = 12; ttmp.color = Color.white;
         ttmp.alignment = TextAlignmentOptions.Left;
         field.textComponent = ttmp;
+
+        igo.transform.SetParent(row.transform, false);
+        igo.SetActive(true);
 
         return field;
     }

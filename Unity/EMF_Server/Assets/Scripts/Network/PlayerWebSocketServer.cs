@@ -77,6 +77,8 @@ public class PlayerWebSocketServer : MonoBehaviour
     private readonly Dictionary<string, float> _statVpFromCaptures = new Dictionary<string, float>();
     // VP earned by this player from kill bonuses
     private readonly Dictionary<string, int>   _statVpFromKills    = new Dictionary<string, int>();
+    // Accumulated drive effort: sum of (Abs(l)+Abs(r)) per drive call during Playing
+    private readonly Dictionary<string, float> _statGround         = new Dictionary<string, float>();
     private int[]  _prevTeamPoints   = { 0, 0 };
     private bool[] _teamPoints50Fired = { false, false };
     private bool[] _teamPoints90Fired = { false, false };
@@ -91,7 +93,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         ("CYAN",     0, 220, 255),
         ("PINK",   255,   0, 180),
         ("ORANGE", 255,  70,   0),
-        ("PURPLE", 150,   0, 255),
+        ("PURPLE",  50,   0, 255),
         ("LIME",    80, 255,   0),
         ("WHITE",  255, 255, 255),
     };
@@ -810,7 +812,10 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         string playerName = _connToPlayer.TryGetValue(connId, out var n) ? n : null;
         if (playerName != null)
+        {
             OnPlayerInput?.Invoke(playerName, l, r, GetLastTurret(playerName));
+            _statGround[playerName] = _statGround.GetValueOrDefault(playerName) + Mathf.Abs(l) + Mathf.Abs(r);
+        }
 
         _lastTurret[connId] = GetLastTurret(_connToPlayer.TryGetValue(connId, out var nm) ? nm : "");
     }
@@ -923,6 +928,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             _statDamageFrom.Clear();
             _statVpFromCaptures.Clear();
             _statVpFromKills.Clear();
+            _statGround.Clear();
             System.Array.Clear(_prevTeamPoints,    0, _prevTeamPoints.Length);
             System.Array.Clear(_teamPoints50Fired, 0, _teamPoints50Fired.Length);
             System.Array.Clear(_teamPoints90Fired, 0, _teamPoints90Fired.Length);
@@ -1702,6 +1708,16 @@ public class PlayerWebSocketServer : MonoBehaviour
         sb.Append("{\"cmd\":\"game_over\"");
         sb.Append(",\"winnerTeam\":\""); sb.Append(EscapeJson(teamName)); sb.Append("\"");
         sb.Append(",\"reason\":\"");     sb.Append(EscapeJson(reason));   sb.Append("\"");
+        // Most ground covered: player with highest accumulated drive effort
+        string mostGroundPlayer = "";
+        float  mostGroundVal    = -1f;
+        foreach (var kvp in _statGround)
+            if (kvp.Value > mostGroundVal) { mostGroundVal = kvp.Value; mostGroundPlayer = kvp.Key; }
+        if (!string.IsNullOrEmpty(mostGroundPlayer))
+        {
+            sb.Append(",\"mostGround\":\""); sb.Append(EscapeJson(mostGroundPlayer)); sb.Append("\"");
+        }
+
         sb.Append(",\"playerStats\":[");
         bool first = true;
         foreach (var kvp in _connToPlayer)
@@ -1722,7 +1738,8 @@ public class PlayerWebSocketServer : MonoBehaviour
 
             if (!first) sb.Append(",");
             first = false;
-            sb.Append("{\"connectionId\":\""); sb.Append(EscapeJson(connId));    sb.Append("\"");
+            sb.Append("{\"connectionId\":\""); sb.Append(EscapeJson(connId));      sb.Append("\"");
+            sb.Append(",\"playerName\":\"");   sb.Append(EscapeJson(playerName)); sb.Append("\"");
             sb.Append(",\"kills\":");           sb.Append(kills);
             sb.Append(",\"deaths\":");          sb.Append(deaths);
             sb.Append(",\"damage\":");          sb.Append(damage);
@@ -1869,6 +1886,12 @@ public class PlayerWebSocketServer : MonoBehaviour
                 int hp = gs.RobotHp.TryGetValue(r.RobotId, out int v) ? v : maxHp;
                 bool dead = gs.DeadRobots.Contains(r.RobotId);
 
+                // Get live IP from directory (snapshot in gs may be stale after reconnect)
+                string liveIp = "";
+                if (dir != null && dir.TryGet(r.RobotId, out var liveInfo))
+                    liveIp = liveInfo.Ip ?? "";
+                string videoUrl = string.IsNullOrEmpty(liveIp) ? "" : "http://" + liveIp + ":81/stream";
+
                 sb.Append("{\"callsign\":\"");     sb.Append(EscapeJson(callsign));   sb.Append("\"");
                 sb.Append(",\"player\":\"");        sb.Append(EscapeJson(playerName)); sb.Append("\"");
                 sb.Append(",\"gunnerPlayer\":\"");  sb.Append(EscapeJson(gunnerName)); sb.Append("\"");
@@ -1876,6 +1899,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                 sb.Append(",\"hp\":"); sb.Append(hp);
                 sb.Append(",\"maxHp\":"); sb.Append(maxHp);
                 sb.Append(",\"dead\":"); sb.Append(dead ? "true" : "false");
+                sb.Append(",\"videoUrl\":\""); sb.Append(EscapeJson(videoUrl)); sb.Append("\"");
                 sb.Append("}");
             }
         }

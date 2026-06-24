@@ -1644,7 +1644,7 @@ function onLobbyUpdate(players) {
 
 const TANK_COLOR_CSS = {
   RED: '#ff4040', GREEN: '#00c800', BLUE: '#4488ff', YELLOW: '#ffc800',
-  CYAN: '#00dcff', PINK: '#ff00b4', ORANGE: '#ff4600', PURPLE: '#9600ff',
+  CYAN: '#00dcff', PINK: '#ff00b4', ORANGE: '#ff4600', PURPLE: '#3200ff',
   LIME: '#50ff00', WHITE: '#ffffff',
 };
 
@@ -2427,7 +2427,8 @@ joyBase.addEventListener('pointerdown', e => {
   const rect  = joyBase.getBoundingClientRect();
   joyOriginX  = rect.left + rect.width  / 2;
   joyOriginY  = rect.top  + rect.height / 2;
-  joystickActive = true;
+  _joyPointerHeld = true;
+  joystickActive  = true;
   updateJoy(e.clientX, e.clientY);
 });
 
@@ -2440,7 +2441,8 @@ joyBase.addEventListener('pointerup',     releaseJoy);
 joyBase.addEventListener('pointercancel', releaseJoy);
 
 function releaseJoy(e) {
-  joystickActive = false;
+  _joyPointerHeld = false;
+  joystickActive  = false;
   joyL = joyR = 0;
   joyThumb.style.transform = 'translate(-50%, -50%)';
   if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
@@ -2693,6 +2695,7 @@ const GP_TURRET_HZ    = 20;
 let _gpFireWasPressed = false;
 let _gpTurretActive   = false;
 let _gpTurretSendLast = 0;
+let _joyPointerHeld   = false; // true while a pointer is held on the joystick element
 
 function _gpDeadzone(v) {
   return Math.abs(v) < GP_DEADZONE ? 0 : v;
@@ -2719,8 +2722,8 @@ function _gpPoll(now) {
       joyL = clamp(fwd + trn * 0.5, -1, 1);
       joyR = clamp(fwd - trn * 0.5, -1, 1);
       joystickActive = true;
-    } else if (!_anyKbDriveHeld() && joystickActive) {
-      // Stick centred and no keyboard drive held → stop
+    } else if (!_anyKbDriveHeld() && !_joyPointerHeld && joystickActive) {
+      // Stick centred, no keyboard drive, no pointer held → stop
       joystickActive = false;
       joyL = joyR = 0;
     }

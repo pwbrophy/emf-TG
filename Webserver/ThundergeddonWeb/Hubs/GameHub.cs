@@ -155,6 +155,9 @@ public class GameHub : Hub
         // Replay last display state so the display page can resume mid-game on refresh
         if (_bridge.LastDisplayUpdate != null)
             await Clients.Caller.SendAsync("DisplayUpdate", _bridge.LastDisplayUpdate);
+        // Replay last spectate state so the display page can resume FPV on refresh
+        if (_bridge.LastSpectateUpdate != null)
+            await Clients.Caller.SendAsync("SpectateUpdate", _bridge.LastSpectateUpdate);
 
         await base.OnConnectedAsync();
     }

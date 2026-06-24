@@ -26,7 +26,8 @@ public class UnityBridgeService : BackgroundService
     private bool   _connectedToUnity = false;
     private bool   _joinAllowed      = false;
     private string _currentPhase     = "mainmenu";
-    private string? _lastDisplayUpdate = null;
+    private string? _lastDisplayUpdate  = null;
+    private string? _lastSpectateUpdate = null;
 
     /// <summary>True while the WebSocket connection to Unity's PlayerWebSocketServer is open.</summary>
     public bool IsConnectedToUnity => _connectedToUnity;
@@ -36,6 +37,9 @@ public class UnityBridgeService : BackgroundService
 
     /// <summary>Last display_update JSON received from Unity, or null if none yet received.</summary>
     public string? LastDisplayUpdate => _lastDisplayUpdate;
+
+    /// <summary>Last spectate_update JSON received from Unity (may be null or enabled:false).</summary>
+    public string? LastSpectateUpdate => _lastSpectateUpdate;
 
     /// <summary>
     /// True when Unity is reachable AND in Lobby (accepting new players).
@@ -181,6 +185,7 @@ public class UnityBridgeService : BackgroundService
                     break;
 
                 case "spectate_update":
+                    _lastSpectateUpdate = json;
                     await _hub.Clients.All.SendAsync("SpectateUpdate", json);
                     break;
 
@@ -416,13 +421,52 @@ public class UnityBridgeService : BackgroundService
     {
         string winnerTeam = GetString(root, "winnerTeam") ?? "Unknown";
         string reason     = GetString(root, "reason")     ?? "";
+        bool   hasStats      = root.TryGetProperty("playerStats", out var statsArray);
+        string mostGroundP   = GetString(root, "mostGround") ?? "";
 
-        await _hub.Clients.All.SendAsync("GameOver", new { winnerTeam, reason });
-
-        // Route per-player stats to each player's SignalR connection
-        if (root.TryGetProperty("playerStats", out var statsEl))
+        // ── Aggregate stats for the display page ──────────────────────────────────
+        object? displayStats = null;
+        if (hasStats)
         {
-            foreach (var stat in statsEl.EnumerateArray())
+            string killsP = "", deathsP = "", damGvnP = "", ptsP = "", capP = "";
+            int    killsV = -1, deathsV = -1, damGvnV = -1, ptsV = -1, capV = -1;
+
+            foreach (var s in statsArray.EnumerateArray())
+            {
+                string? n = GetString(s, "playerName");
+                if (string.IsNullOrEmpty(n)) continue;
+                int k  = GetInt(s, "kills"),  d = GetInt(s, "deaths"),
+                    dm = GetInt(s, "damage"), vp = GetInt(s, "victoryPoints"),
+                    cp = GetInt(s, "vpFromCaptures");
+                if (k  > killsV)  { killsV  = k;  killsP  = n; }
+                if (d  > deathsV) { deathsV = d;  deathsP = n; }
+                if (dm > damGvnV) { damGvnV = dm; damGvnP = n; }
+                if (vp > ptsV)    { ptsV    = vp; ptsP    = n; }
+                if (cp > capV)    { capV    = cp; capP    = n; }
+            }
+
+            // Best player: most kills first, most damage as tiebreaker
+            string bestP = !string.IsNullOrEmpty(killsP)  ? killsP
+                         : !string.IsNullOrEmpty(damGvnP) ? damGvnP : "";
+
+            displayStats = new
+            {
+                bestPlayer      = bestP.Length > 0 ? (object)new { player = bestP }                              : null,
+                mostKills       = killsV  >= 0     ? (object)new { player = killsP,  value = (object)killsV  }  : null,
+                mostDeaths      = deathsV >= 0     ? (object)new { player = deathsP, value = (object)deathsV }  : null,
+                mostDamageGiven = damGvnV >= 0     ? (object)new { player = damGvnP, value = (object)damGvnV }  : null,
+                mostPoints      = ptsV    >= 0     ? (object)new { player = ptsP,    value = (object)ptsV    }  : null,
+                mostCaptures    = capV    >= 0     ? (object)new { player = capP,    value = (object)capV    }  : null,
+                mostGround      = mostGroundP.Length > 0 ? (object)new { player = mostGroundP }                : null,
+            };
+        }
+
+        await _hub.Clients.All.SendAsync("GameOver", new { winnerTeam, reason, stats = displayStats });
+
+        // ── Route per-player stats to individual phone connections ────────────────
+        if (hasStats)
+        {
+            foreach (var stat in statsArray.EnumerateArray())
             {
                 string? connId = GetString(stat, "connectionId");
                 if (string.IsNullOrEmpty(connId)) continue;

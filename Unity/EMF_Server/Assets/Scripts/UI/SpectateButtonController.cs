@@ -60,7 +60,15 @@ public class SpectateButtonController : MonoBehaviour
             string robotId = _robotListPanel != null ? _robotListPanel.CurrentRobotId : null;
             if (string.IsNullOrEmpty(robotId))
             {
-                Debug.LogWarning("[SpectateBtn] No robot selected — cannot enable FPV.");
+                // No robot explicitly selected — fall back to the first connected robot
+                var dir = ServiceLocator.RobotDirectory;
+                if (dir != null)
+                    foreach (var r in dir.GetAll())
+                    { robotId = r.RobotId; break; }
+            }
+            if (string.IsNullOrEmpty(robotId))
+            {
+                Debug.LogWarning("[SpectateBtn] No robot selected or connected — cannot enable FPV.");
                 return;
             }
             ServiceLocator.PlayerServer?.SendSpectateUpdate(robotId, true);
