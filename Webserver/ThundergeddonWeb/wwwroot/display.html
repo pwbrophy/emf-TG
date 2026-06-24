@@ -34,11 +34,6 @@
   #mute-btn { background: none; border: 1px solid #444; border-radius: 6px;
     color: #ccc; font-size: 1.2em; cursor: pointer; padding: 4px 8px; margin-left: 12px; }
   #mute-btn:hover { border-color: #888; color: #fff; }
-  #grid-btn { background: none; border: 1px solid #444; border-radius: 6px;
-    color: #ccc; font-size: 0.85em; cursor: pointer; padding: 4px 10px; margin-left: 8px;
-    letter-spacing: 1px; font-weight: 600; }
-  #grid-btn:hover { border-color: #888; color: #fff; }
-  #grid-btn.active { border-color: #4af; color: #4af; }
   #version { position: fixed; bottom: 6px; right: 10px; font-size: 0.65em;
     color: #444; pointer-events: none; z-index: 9999; }
   #timer.urgent { color: #ff4444; animation: flash 0.5s infinite alternate; }
@@ -317,7 +312,6 @@
     <div id="title">&#9889; <span>THUNDERGEDDON</span></div>
     <div id="timer">--:--</div>
     <button id="mute-btn" onclick="toggleMute()" title="Toggle announcer">&#128266;</button>
-  <button id="grid-btn" onclick="toggleGrid()" title="Toggle 6-tank grid view">&#9707; GRID</button>
   </div>
 
   <!-- Team points bar -->
@@ -1074,13 +1068,21 @@ function updateGrid() {
 let fpvState = { active: false, playerName: '', hp: 0, maxHp: 100, videoUrl: '' };
 
 function applySpectateUpdate(data) {
-  if (!data.enabled) {
-    fpvState.active = false;
-    stopFpvStream();
-    document.getElementById('fpv-overlay').classList.remove('active');
+  // Always stop whatever is currently showing before switching modes.
+  fpvState.active = false;
+  stopFpvStream();
+  document.getElementById('fpv-overlay').classList.remove('active');
+  if (_gridMode) { _gridMode = false; stopGrid(); }
+
+  if (!data.enabled) return;
+
+  if (data.mode === 'grid') {
+    _gridMode = true;
+    startGrid();
     return;
   }
 
+  // Single-robot FPV (mode === 'single', or absent for backward compat).
   fpvState = {
     active:     true,
     playerName: data.playerName || '—',
@@ -1088,10 +1090,11 @@ function applySpectateUpdate(data) {
     maxHp:      data.maxHp != null ? data.maxHp : 100,
     videoUrl:   data.videoUrl || ''
   };
-
   document.getElementById('fpv-overlay').classList.add('active');
-  const proxyUrl = '/api/robot-stream?url=' + encodeURIComponent(fpvState.videoUrl);
-  startFpvStream(proxyUrl);
+  if (fpvState.videoUrl) {
+    const proxyUrl = '/api/robot-stream?url=' + encodeURIComponent(fpvState.videoUrl);
+    startFpvStream(proxyUrl);
+  }
   renderFpv();
 }
 

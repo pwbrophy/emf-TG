@@ -1950,13 +1950,20 @@ public class PlayerWebSocketServer : MonoBehaviour
         string json =
             "{\"cmd\":\"spectate_update\"" +
             ",\"enabled\":true" +
+            ",\"mode\":\"single\"" +
             ",\"videoUrl\":\""    + EscapeJson(videoUrl)    + "\"" +
             ",\"playerName\":\"" + EscapeJson(playerName)  + "\"" +
             ",\"hp\":"           + hp                             +
             ",\"maxHp\":"        + maxHp                          +
             "}";
         BroadcastRaw(json);
-        Debug.Log("[PlayerWS] spectate_update → player=" + playerName + " url=" + videoUrl);
+        Debug.Log("[PlayerWS] spectate_update single → player=" + playerName + " url=" + videoUrl);
+    }
+
+    public void SendSpectateUpdateGrid()
+    {
+        BroadcastRaw("{\"cmd\":\"spectate_update\",\"enabled\":true,\"mode\":\"grid\"}");
+        Debug.Log("[PlayerWS] spectate_update grid");
     }
 
     public void BroadcastTwoPlayerModeChanged(bool enabled)

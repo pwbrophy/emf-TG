@@ -34,7 +34,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v13";
+    const string BUILT_SENTINEL = "__ppb_v14";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -273,10 +273,12 @@ public class PlayingPanelBuilder : MonoBehaviour
         var capSouthBtn  = MakeButton(capRow.transform, "CaptureSouthBtn",  "SOUTH\n—",  C_CAPNTR, C_TEXT, 9f);
         SetRowHeights(34f, capNorthBtn, capCentreBtn, capSouthBtn);
 
-        // FPV spectate button
-        var fpvRow = MakeActionRow(leftCol.transform, "FpvRow");
-        var fpvBtn = MakeButton(fpvRow.transform, "FpvButton", "FPV: OFF", C_DKBLU2, C_TEXT, 12f);
-        fpvBtn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        // FPV spectate buttons (side by side in one row)
+        var fpvRow  = MakeActionRow(leftCol.transform, "FpvRow");
+        var fpv1Btn = MakeButton(fpvRow.transform, "Fpv1Button", "FPV×1", C_DKBLU2, C_TEXT, 12f);
+        fpv1Btn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var fpv6Btn = MakeButton(fpvRow.transform, "Fpv6Button", "FPV×6", C_DKBLU2, C_TEXT, 12f);
+        fpv6Btn.AddComponent<LayoutElement>().preferredHeight = 34f;
 
         // Roster scroll
         RectTransform rosterContent;
@@ -289,8 +291,10 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(rlp, "rowContainer", rosterContent);
 
         var sbc = GetOrAdd<SpectateButtonController>(pp);
-        Wire(sbc, "_fpvButton",     fpvBtn.GetComponent<Button>());
-        Wire(sbc, "_fpvLabel",      fpvBtn.GetComponentInChildren<TextMeshProUGUI>());
+        Wire(sbc, "_fpv1Button",    fpv1Btn.GetComponent<Button>());
+        Wire(sbc, "_fpv1Label",     fpv1Btn.GetComponentInChildren<TextMeshProUGUI>());
+        Wire(sbc, "_fpv6Button",    fpv6Btn.GetComponent<Button>());
+        Wire(sbc, "_fpv6Label",     fpv6Btn.GetComponentInChildren<TextMeshProUGUI>());
         Wire(sbc, "_robotListPanel", rlp);
 
         // ── Game settings column ──────────────────────────────────────────────
