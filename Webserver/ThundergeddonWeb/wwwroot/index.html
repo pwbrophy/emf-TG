@@ -19,7 +19,7 @@
       --text:     #e8e8f0;
       --muted:    #6b6b90;
       --green:    #2a7a2a;
-      --hp-fill:  #22cc55;
+      --hp-fill:  #1E90FF;
       --hp-low:   #ee3333;
     }
 
@@ -273,6 +273,12 @@
       transition: width 0.3s ease, background 0.3s ease;
       width: 100%;
     }
+    @keyframes hp-critical-flash {
+      0%   { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+      50%  { background: #fff;    box-shadow: 0 0 14px rgba(255,255,255,1),  0 0 30px rgba(255,100,100,0.7); }
+      100% { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+    }
+    #hp-bar-fill.hp-critical { animation: hp-critical-flash 0.65s ease-in-out infinite; }
     #hp-text {
       position: absolute;
       inset: 0;
@@ -2397,9 +2403,11 @@ function updateHpBar() {
   const pct  = Math.max(0, Math.min(100, (currentHp / maxHp) * 100));
   const fill = document.getElementById('hp-bar-fill');
   const text = document.getElementById('hp-text');
-  fill.style.width      = pct + '%';
-  fill.style.background = pct > 40 ? 'var(--hp-fill)' : 'var(--hp-low)';
-  text.textContent      = currentHp + ' / ' + maxHp;
+  fill.style.width = pct + '%';
+  const critical = pct < 15;
+  fill.classList.toggle('hp-critical', critical);
+  fill.style.background = critical ? '' : (pct > 40 ? 'var(--hp-fill)' : 'var(--hp-low)');
+  text.textContent = currentHp + ' / ' + maxHp;
 }
 
 function updateTimer(seconds) {

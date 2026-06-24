@@ -96,6 +96,13 @@
     100% { background: #1E90FF; box-shadow: none; }
   }
   .hp-bar.hit-flash { animation: hp-hit-flash 0.35s ease-out forwards; }
+  @keyframes hp-critical-flash {
+    0%   { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+    50%  { background: #fff;    box-shadow: 0 0 14px rgba(255,255,255,1),  0 0 30px rgba(255,100,100,0.7); }
+    100% { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+  }
+  .hp-bar.hp-critical          { animation: hp-critical-flash 0.65s ease-in-out infinite; }
+  .grid-cell-hpbar.hp-critical { animation: hp-critical-flash 0.65s ease-in-out infinite; }
 
   /* Capture points */
   .cp-block { display: flex; flex-direction: column; align-items: center;
@@ -814,13 +821,13 @@ function applyPendingHpFlashes() {
   _pendingHpFlashes.forEach(cs => {
     // Main layout bar
     const el = document.getElementById('hpbar_' + cs.replace(/\W/g, '_'));
-    if (el) { el.classList.remove('hit-flash'); void el.offsetWidth; el.classList.add('hit-flash'); }
+    if (el) { el.classList.remove('hit-flash'); void el.offsetWidth; el.classList.add('hit-flash'); setTimeout(() => el.classList.remove('hit-flash'), 370); }
     // Grid bar (bars are indexed by position in state.robots)
     if (_gridMode) {
       const idx = (state.robots || []).findIndex(r => r.callsign === cs);
       if (idx >= 0) {
         const gel = document.getElementById('grid-hp-' + idx);
-        if (gel) { gel.classList.remove('hit-flash'); void gel.offsetWidth; gel.classList.add('hit-flash'); }
+        if (gel) { gel.classList.remove('hit-flash'); void gel.offsetWidth; gel.classList.add('hit-flash'); setTimeout(() => gel.classList.remove('hit-flash'), 370); }
       }
     }
   });
@@ -1073,6 +1080,7 @@ function updateGrid() {
     if (!hpBar || !hpNum || !cell) return;
     const pct = r.dead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
     hpBar.style.width = pct + '%';
+    hpBar.classList.toggle('hp-critical', !r.dead && r.hp > 0 && pct < 15);
     hpNum.textContent = r.dead ? 'DEAD' : String(r.hp);
     if (r.dead && !cell.classList.contains('dead')) {
       cell.classList.add('dead');
@@ -1418,7 +1426,7 @@ function renderAlliances() {
       row.innerHTML =
         `<span class="robot-callsign">${escHtml(r.callsign || '')}</span>` +
         `<span class="robot-player">${escHtml(r.gunnerPlayer ? (r.player || '—') + ' & ' + r.gunnerPlayer : (r.player || '—'))}</span>` +
-        `<div class="hp-bar-wrap"><div class="hp-bar" id="${barId}" style="width:${pct}%"></div></div>` +
+        `<div class="hp-bar-wrap"><div class="hp-bar${!r.dead && pct < 15 ? ' hp-critical' : ''}" id="${barId}" style="width:${pct}%"></div></div>` +
         `<span class="hp-num">${r.dead ? 'DEAD' : r.hp}</span>`;
       block.appendChild(row);
     });
