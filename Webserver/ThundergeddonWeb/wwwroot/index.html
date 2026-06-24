@@ -285,10 +285,26 @@
       text-shadow: 0 1px 3px rgba(0,0,0,0.8);
     }
 
+    /* ── Player name (top-centre, large) ── */
+    #player-name-hud {
+      position: absolute;
+      top: 30px; left: 50%; transform: translateX(-50%);
+      max-width: 60%;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.95);
+      text-shadow: 0 1px 5px rgba(0,0,0,0.9);
+      z-index: 12;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+    }
+
     /* ── Timer ── */
     #timer-label {
       position: absolute;
-      top: 34px; left: 50%; transform: translateX(-50%);
+      top: 34px; right: 10px;
       font-size: 1rem;
       font-weight: 700;
       color: #fff;
@@ -781,7 +797,7 @@
     #hit-by-label {
       position: absolute;
       left: 50%;
-      top: 36px;
+      top: 58px;
       transform: translateX(-50%);
       z-index: 25;
       background: rgba(160,0,0,0.88);
@@ -975,8 +991,9 @@
     <div id="hp-text">HP</div>
   </div>
 
-  <!-- Timer & robot label -->
+  <!-- Timer, player name & robot label -->
   <div id="timer-label">3:00</div>
+  <div id="player-name-hud"></div>
   <div id="robot-label"></div>
   <div id="role-label"></div>
   <div id="partner-label"></div>
@@ -1401,8 +1418,9 @@ function returnToJoin(message) {
   // Restore HUD elements that onGameOver hides
   document.getElementById('hp-bar-wrap').style.display = '';
   document.getElementById('timer-label').style.display = '';
-  document.getElementById('robot-label').style.display = '';
-  document.getElementById('controls').style.display    = '';
+  document.getElementById('robot-label').style.display      = '';
+  document.getElementById('player-name-hud').style.display  = '';
+  document.getElementById('controls').style.display         = '';
   // Restore controls that may have been hidden by role gating
   document.getElementById('joystick-base').style.display  = '';
   document.getElementById('fire-btn').style.display       = '';
@@ -1850,7 +1868,8 @@ function onGameStarted(data) {
 
   enterFullscreenLandscape();
 
-  document.getElementById('robot-label').textContent = data.callsign || '';
+  document.getElementById('robot-label').textContent      = data.callsign || '';
+  document.getElementById('player-name-hud').textContent  = myName;
 
   startGameStream(data.videoUrl);
 
@@ -1980,7 +1999,8 @@ function onGameOver(data) {
   // Hide gameplay HUD + controls (keep video visible for phase 1)
   document.getElementById('hp-bar-wrap').style.display   = 'none';
   document.getElementById('timer-label').style.display   = 'none';
-  document.getElementById('robot-label').style.display   = 'none';
+  document.getElementById('robot-label').style.display      = 'none';
+  document.getElementById('player-name-hud').style.display  = 'none';
   const roleEl    = document.getElementById('role-label');
   const partnerEl = document.getElementById('partner-label');
   if (roleEl)    roleEl.style.display    = 'none';
