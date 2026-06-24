@@ -272,9 +272,17 @@
   #fpv-timer.urgent { color: #ff4444; animation: flash 0.5s infinite alternate; }
 
   /* Video area */
-  #fpv-video-wrap { flex: 1; display: flex; align-items: center; justify-content: center;
-    overflow: hidden; background: #000; min-height: 0; }
+  #fpv-video-wrap { position: relative; flex: 1; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; background: #000; min-height: 0; }
   #fpv-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #fpv-name-overlay {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    font-size: 2.4em; font-weight: 900; color: #fff;
+    text-shadow: 0 1px 5px rgba(0,0,0,1);
+    background: rgba(0,0,0,0.45); padding: 3px 20px; border-radius: 22px;
+    white-space: nowrap; pointer-events: none; z-index: 2;
+    max-width: 80%; overflow: hidden; text-overflow: ellipsis;
+  }
 
   /* ── Grid overlay ───────────────────────────────────────────────── */
   #grid-overlay { position: fixed; inset: 0; z-index: 26; display: none;
@@ -300,6 +308,14 @@
   .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
   .grid-cell-nolvideo { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: center; color: #444; font-size: 0.85em; }
+  .grid-cell-namelabel {
+    position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    font-size: 1.2em; font-weight: 800; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,1);
+    background: rgba(0,0,0,0.45); padding: 2px 12px; border-radius: 14px;
+    white-space: nowrap; pointer-events: none; z-index: 2;
+    max-width: 88%; overflow: hidden; text-overflow: ellipsis;
+  }
 </style>
 </head>
 <body>
@@ -392,6 +408,7 @@
   </div>
   <div id="fpv-video-wrap">
     <canvas id="fpv-canvas"></canvas>
+    <div id="fpv-name-overlay"></div>
   </div>
 </div>
 
@@ -928,6 +945,9 @@ function startGrid() {
     const nameText = r.gunnerPlayer
       ? escHtml((r.callsign || '?') + ' — ' + (r.player || '?') + ' & ' + r.gunnerPlayer)
       : escHtml((r.callsign || '?') + (r.player ? ' — ' + r.player : ''));
+    const playerLabel = r.gunnerPlayer
+      ? escHtml((r.player || '?') + ' & ' + r.gunnerPlayer)
+      : escHtml(r.player || '');
 
     const cell = document.createElement('div');
     cell.className = 'grid-cell' + (r.dead ? ' dead' : '');
@@ -943,6 +963,7 @@ function startGrid() {
       `<div class="grid-cell-video">` +
         `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
         `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}">${r.dead ? '💥 DESTROYED' : 'no stream'}</div>` +
+        (playerLabel ? `<div class="grid-cell-namelabel">${playerLabel}</div>` : '') +
       `</div>`;
     overlay.appendChild(cell);
 
@@ -1229,6 +1250,9 @@ function renderFpv() {
   const an = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
   document.getElementById('fpv-tp-label-0').textContent = `${an[0]} — ${tp[0]} pts`;
   document.getElementById('fpv-tp-label-1').textContent = `${tp[1]} pts — ${an[1]}`;
+
+  // Player name overlay on video
+  document.getElementById('fpv-name-overlay').textContent = fpvState.playerName;
 
   // HP
   const pct = Math.max(0, Math.min(100, (fpvState.hp / (fpvState.maxHp || 100)) * 100));
