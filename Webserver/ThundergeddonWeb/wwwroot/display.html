@@ -991,9 +991,7 @@ function startGrid() {
     const alCls    = r.alliance === 0 ? 'a0' : r.alliance === 1 ? 'a1' : '';
     const hpBarCls = r.dead ? 'dead-bar' : '';
     const hpLabel  = r.dead ? 'DEAD' : String(r.hp);
-    const nameText = r.gunnerPlayer
-      ? escHtml((r.callsign || '?') + ' — ' + (r.player || '?') + ' & ' + r.gunnerPlayer)
-      : escHtml((r.callsign || '?') + (r.player ? ' — ' + r.player : ''));
+    const nameText = escHtml(r.callsign || '?');
     const playerLabel = r.gunnerPlayer
       ? escHtml((r.player || '?') + ' & ' + r.gunnerPlayer)
       : escHtml(r.player || '');
