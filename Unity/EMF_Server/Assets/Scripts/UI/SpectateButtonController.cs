@@ -102,8 +102,8 @@ public class SpectateButtonController : MonoBehaviour
         bool single = (mode == FpvMode.Single);
         bool grid   = (mode == FpvMode.Grid);
 
-        if (_fpv1Label != null) _fpv1Label.text = single ? "FPV×1 ON" : "FPV×1";
-        if (_fpv6Label != null) _fpv6Label.text = grid   ? "FPV×6 ON" : "FPV×6";
+        if (_fpv1Label != null) _fpv1Label.text = single ? "FPV: Selected ON" : "FPV: Selected";
+        if (_fpv6Label != null) _fpv6Label.text = grid   ? "FPV: All ON"      : "FPV: All";
         SetColor(_fpv1Button, single);
         SetColor(_fpv6Button, grid);
     }
