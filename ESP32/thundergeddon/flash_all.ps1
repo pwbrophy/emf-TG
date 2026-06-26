@@ -1,25 +1,44 @@
 #Requires -Version 5.1
 param(
-    [int[]]$Only = @()   # e.g. .\flash_all.ps1 1,2,7,8  -- omit to flash all
+    [int[]]$Only = @(),          # e.g. .\flash_all.ps1 1,2,7,8  -- omit to flash all
+    [ValidateSet("BFG","TG")]
+    [string]$Network = "BFG"     # BFG = desktop (192.168.86.x), TG = laptop (192.168.8.x)
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# --- Robot list --------------------------------------------------------------
-# Comment out any robot that is offline or not yet provisioned.
-$AllRobots = @(
-    [pscustomobject]@{ Num = 1;  Name = "Robot 1";  Ip = "192.168.86.101" }
-    [pscustomobject]@{ Num = 2;  Name = "Robot 2";  Ip = "192.168.86.102" }
-    [pscustomobject]@{ Num = 3;  Name = "Robot 3";  Ip = "192.168.86.103" }
-    [pscustomobject]@{ Num = 4;  Name = "Robot 4";  Ip = "192.168.86.104" }
-    [pscustomobject]@{ Num = 5;  Name = "Robot 5";  Ip = "192.168.86.105" }
-    [pscustomobject]@{ Num = 6;  Name = "Robot 6";  Ip = "192.168.86.106" }
-    [pscustomobject]@{ Num = 7;  Name = "Robot 7";  Ip = "192.168.86.107" }
-    [pscustomobject]@{ Num = 8;  Name = "Robot 8";  Ip = "192.168.86.108" }
-    [pscustomobject]@{ Num = 9;  Name = "Robot 9";  Ip = "192.168.86.109" }
-    [pscustomobject]@{ Num = 10; Name = "Robot 10"; Ip = "192.168.86.110" }
+# --- Robot lists -------------------------------------------------------------
+# BFG network: desktop PC on 192.168.86.x
+$BfgRobots = @(
+    [pscustomobject]@{ Num = 1;  Name = "Desert-01";  Ip = "192.168.86.101" }
+    [pscustomobject]@{ Num = 2;  Name = "Desert-02";  Ip = "192.168.86.102" }
+    [pscustomobject]@{ Num = 3;  Name = "Desert-03";  Ip = "192.168.86.103" }
+    [pscustomobject]@{ Num = 4;  Name = "Desert-04";  Ip = "192.168.86.104" }
+    [pscustomobject]@{ Num = 5;  Name = "Desert-05";  Ip = "192.168.86.105" }
+    [pscustomobject]@{ Num = 6;  Name = "Jungle-06";  Ip = "192.168.86.106" }
+    [pscustomobject]@{ Num = 7;  Name = "Jungle-07";  Ip = "192.168.86.107" }
+    [pscustomobject]@{ Num = 8;  Name = "Jungle-08";  Ip = "192.168.86.108" }
+    [pscustomobject]@{ Num = 9;  Name = "Jungle-09";  Ip = "192.168.86.109" }
+    [pscustomobject]@{ Num = 10; Name = "Jungle-10";  Ip = "192.168.86.110" }
 )
+
+# Thundergeddon network: laptop (HP, 192.168.8.100) on 192.168.8.x
+$TgRobots = @(
+    [pscustomobject]@{ Num = 1;  Name = "Desert-01";  Ip = "192.168.8.101" }
+    [pscustomobject]@{ Num = 2;  Name = "Desert-02";  Ip = "192.168.8.102" }
+    [pscustomobject]@{ Num = 3;  Name = "Desert-03";  Ip = "192.168.8.103" }
+    [pscustomobject]@{ Num = 4;  Name = "Desert-04";  Ip = "192.168.8.104" }
+    [pscustomobject]@{ Num = 5;  Name = "Desert-05";  Ip = "192.168.8.105" }
+    [pscustomobject]@{ Num = 6;  Name = "Jungle-06";  Ip = "192.168.8.106" }
+    [pscustomobject]@{ Num = 7;  Name = "Jungle-07";  Ip = "192.168.8.107" }
+    [pscustomobject]@{ Num = 8;  Name = "Jungle-08";  Ip = "192.168.8.108" }
+    [pscustomobject]@{ Num = 9;  Name = "Jungle-09";  Ip = "192.168.8.109" }
+    [pscustomobject]@{ Num = 10; Name = "Jungle-10";  Ip = "192.168.8.110" }
+)
+
+$AllRobots = if ($Network -eq "TG") { $TgRobots } else { $BfgRobots }
+Write-Host "Network: $Network  (subnet $(($AllRobots[0].Ip -replace '\.\d+$','')).*)" -ForegroundColor DarkCyan
 
 $Robots = @(if ($Only.Count -gt 0) {
     $AllRobots | Where-Object { $Only -contains $_.Num }

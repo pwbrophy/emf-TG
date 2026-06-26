@@ -48,20 +48,39 @@ The robot must be powered on and connected to Wi-Fi for OTA to work. The `platfo
 
 A successful upload ends with `Result: OK` / `Success`. If the hostname doesn't resolve, substitute the robot's current IP directly, e.g. `pio run -e thundergeddon_ota --target upload --upload-port 192.168.x.x`.
 
-**Robot IPs** are stored in the Claude memory file `C:\Users\Pete\.claude\projects\F--Data-Thundergeddon-EMF-Project\memory\project_robot_ip.md`. To flash all robots simultaneously, run `flash_all.ps1` from `ESP32/thundergeddon/` — it builds once then calls `espota.py` in parallel for every robot. Do **not** run multiple `pio run --target upload` in parallel; they share the scons build database and conflict.
+**Robot IPs by network:**
+
+| Robot | Name | MAC | BFG (desktop, 192.168.86.x) | TG (laptop, 192.168.8.x) |
+|-------|------|-----|------------------------------|--------------------------|
+| Laptop | HP | D8:C0:A6:D9:3E:89 | — | 192.168.8.100 |
+| 1 | Desert-01 | 90:70:69:18:F2:9C | 192.168.86.101 | 192.168.8.101 |
+| 2 | Desert-02 | 90:70:69:18:F2:A8 | 192.168.86.102 | 192.168.8.102 |
+| 3 | Desert-03 | 90:70:69:18:F2:78 | 192.168.86.103 | 192.168.8.103 |
+| 4 | Desert-04 | 90:70:69:18:F2:A0 | 192.168.86.104 | 192.168.8.104 |
+| 5 | Desert-05 | 90:70:69:18:F2:94 | 192.168.86.105 | 192.168.8.105 |
+| 6 | Jungle-06 | 90:70:69:18:F2:2C | 192.168.86.106 | 192.168.8.106 |
+| 7 | Jungle-07 | 90:70:69:18:F2:A4 | 192.168.86.107 | 192.168.8.107 |
+| 8 | Jungle-08 | 90:70:69:09:B6:D0 | 192.168.86.108 | 192.168.8.108 |
+| 9 | Jungle-09 | 90:70:69:18:F2:64 | 192.168.86.109 | 192.168.8.109 |
+| 10 | Jungle-10 | 90:70:69:09:B6:50 | 192.168.86.110 | 192.168.8.110 |
+
+To flash all robots simultaneously, run `flash_all.ps1` from `ESP32/thundergeddon/` — it builds once then calls `espota.py` in parallel for every robot. Use `-Network TG` when on the Thundergeddon network (laptop), default is BFG (desktop). Do **not** run multiple `pio run --target upload` in parallel; they share the scons build database and conflict.
 
 ```
 cd "F:\Data\Thundergeddon\EMF_Project\ESP32\thundergeddon"
-.\flash_all.ps1              # all 10 robots
-.\flash_all.ps1 1,2,7,8      # subset — pass robot numbers as a comma-separated list
+.\flash_all.ps1                      # all 10 robots, BFG network (desktop)
+.\flash_all.ps1 -Network TG          # all 10 robots, Thundergeddon network (laptop)
+.\flash_all.ps1 1,2,7,8              # subset, BFG network
+.\flash_all.ps1 1,2,7,8 -Network TG  # subset, Thundergeddon network
 ```
 
-**Per-robot OTA envs** (single robot) — use when flashing just one robot:
+**Per-robot OTA envs** (single robot) — `_r1.._r10` = BFG network, `_tg_r1.._tg_r10` = Thundergeddon network:
 ```
-pio run -e thundergeddon_ota_r1  --target upload   # 192.168.86.101
-pio run -e thundergeddon_ota_r2  --target upload   # 192.168.86.102
+pio run -e thundergeddon_ota_r1     --target upload   # BFG  192.168.86.101 Desert-01
+pio run -e thundergeddon_ota_tg_r1  --target upload   # TG   192.168.8.101  Desert-01
 ...
-pio run -e thundergeddon_ota_r10 --target upload   # 192.168.86.110
+pio run -e thundergeddon_ota_r10    --target upload   # BFG  192.168.86.110 Jungle-10
+pio run -e thundergeddon_ota_tg_r10 --target upload   # TG   192.168.8.110  Jungle-10
 ```
 
 ---
@@ -322,7 +341,7 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 - **Windows Firewall blocking port 8080** — If the robot can't connect via WebSocket (sends UDP announces, gets replies, but no `hello` appears in Unity console), two things are required:
   1. Add a port-allow rule: `netsh advfirewall firewall add rule name="UnityRobotWS" dir=in action=allow protocol=TCP localport=8080`
   2. **Delete the Unity.exe Block rule** — Windows auto-creates a per-app Block rule for Unity.exe when you first run it on a Public network (e.g. Google Home Wi-Fi). This Block rule silently drops all inbound TCP SYNs to Unity processes, overriding the port-allow rule above. Fix by running as admin: `netsh advfirewall firewall delete rule name="Unity 6000.4.10f1 Editor" dir=in` (repeat for any other Unity version shown). Alternatively, set the Wi-Fi network profile to **Private** (Settings → Network & Internet → Wi-Fi → click the network → Network profile type → Private), which avoids the Public-profile Block rule entirely.
-  - **AP isolation on Google Home Wi-Fi** — The router blocks 255.255.255.255 UDP broadcasts between Wi-Fi clients, so robots never receive normal UDP discovery replies from the laptop. Workaround already in place: `UdpDiscoveryListener` unicast-pushes the WebSocket URL to `_knownRobotIps` every 2 s (set in Inspector or via `SetRobotIps` editor script). Static IPs: robot 1 = 192.168.86.101, robot 2 = 192.168.86.102.
+  - **AP isolation on Google Home Wi-Fi** — The router blocks 255.255.255.255 UDP broadcasts between Wi-Fi clients, so robots never receive normal UDP discovery replies from the laptop. Workaround already in place: `UdpDiscoveryListener` unicast-pushes the WebSocket URL to `_knownRobotIps` every 2 s (set in Inspector or via `SetRobotIps` editor script). Static IPs vary by network — see table below. BFG network (desktop PC): 192.168.86.x. Thundergeddon network (laptop): 192.168.8.x. Both use the same last octet per robot.
 - **Robot re-registration after disconnect** — `RobotWebSocketServer.OnClosed` must NOT call `_dir.Remove()`. If it does, the robot re-enters the directory via UDP `Upsert` with no WebSocket session, and all commands silently fail (`FAILED motors_on`, `FAILED ping`). Only the heartbeat timeout sweep removes stale directory entries.
 - **`hello` is accepted in Lobby and Playing only** — The `hello` handler rejects robots in MainMenu and Ended. New robots must join during Lobby; robots that drop Wi-Fi mid-match can reconnect during Playing. Do not widen this to all phases or robots can join a finished game.
 - **WebSocketSharp must bind to 0.0.0.0** — `new WebSocketServer(Port)` (port-only constructor) is used instead of `new WebSocketServer("ws://ip:port")`. Binding to a specific IP in WebSocketSharp can silently reject connections.
