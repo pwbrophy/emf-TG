@@ -810,7 +810,7 @@ static void connectWifi()
     WiFi.setSleep(false);           // low-latency radio; important for drive commands
 
     const int NET_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
-    const unsigned long ATTEMPT_MS = 2000; // max ms before moving to next network
+    const unsigned long ATTEMPT_MS = 15000; // max ms before moving to next network
 
     while (true) {
         for (int i = 0; i < NET_COUNT; i++) {
