@@ -302,24 +302,6 @@
       z-index: 10;
     }
 
-    /* ── Player name HUD ── */
-    #player-name-hud {
-      position: absolute;
-      top: 30px; left: 50%; transform: translateX(-50%);
-      font-size: 1.8rem;
-      font-weight: 800;
-      color: #fff;
-      text-shadow: 0 1px 4px rgba(0,0,0,1), 0 0 12px rgba(0,0,0,0.9);
-      background: rgba(0,0,0,0.42);
-      padding: 2px 14px;
-      border-radius: 18px;
-      z-index: 10;
-      white-space: nowrap;
-      max-width: 50%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      pointer-events: none;
-    }
 
     /* ── Robot callsign ── */
     #robot-label {
@@ -1003,7 +985,6 @@
   <!-- Timer & robot label -->
   <div id="timer-label">3:00</div>
   <div id="robot-label"></div>
-  <div id="player-name-hud"></div>
   <div id="role-label"></div>
   <div id="partner-label"></div>
 
@@ -1428,8 +1409,6 @@ function returnToJoin(message) {
   document.getElementById('hp-bar-wrap').style.display     = '';
   document.getElementById('timer-label').style.display     = '';
   document.getElementById('robot-label').style.display     = '';
-  document.getElementById('player-name-hud').style.display = '';
-  document.getElementById('player-name-hud').textContent   = '';
   document.getElementById('controls').style.display        = '';
   // Restore controls that may have been hidden by role gating
   document.getElementById('joystick-base').style.display  = '';
@@ -1879,7 +1858,6 @@ function onGameStarted(data) {
   enterFullscreenLandscape();
 
   document.getElementById('robot-label').textContent     = data.callsign || '';
-  document.getElementById('player-name-hud').textContent = myName;
 
   startGameStream(data.videoUrl);
 
@@ -2010,7 +1988,6 @@ function onGameOver(data) {
   document.getElementById('hp-bar-wrap').style.display        = 'none';
   document.getElementById('timer-label').style.display        = 'none';
   document.getElementById('robot-label').style.display        = 'none';
-  document.getElementById('player-name-hud').style.display    = 'none';
   const roleEl    = document.getElementById('role-label');
   const partnerEl = document.getElementById('partner-label');
   if (roleEl)    roleEl.style.display    = 'none';
