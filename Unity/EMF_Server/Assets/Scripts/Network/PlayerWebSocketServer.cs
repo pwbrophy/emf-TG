@@ -1529,7 +1529,6 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
 
         // All three points captured by same alliance?
-        var gs = ServiceLocator.Game?.State;
         if (gs?.CapturePointOwners != null && gs.CapturePointOwners.Length >= 3
             && gs.CapturePointOwners[0] == allianceIndex
             && gs.CapturePointOwners[1] == allianceIndex
