@@ -1618,8 +1618,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         int maxHp = settings != null ? settings.MaxHp : 100;
         foreach (var robot in dir.GetAll())
         {
-            int hp = game.State.RobotHp.GetValueOrDefault(robot.RobotId, maxHp);
-            server.SendSetHp(robot.RobotId, hp, maxHp);
+            if (game.State.RobotHp.TryGetValue(robot.RobotId, out int hp))
+                server.SendSetHp(robot.RobotId, hp, maxHp);
+            else
+                server.SendResetIdle(robot.RobotId); // not in this game — revert to idle bounce
         }
     }
 
