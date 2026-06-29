@@ -1509,7 +1509,13 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void OnCapturePointCaptured(int pointIndex, int allianceIndex, string pointName)
     {
-        string playerName = FindPlayerForLastCapture(allianceIndex);
+        // Use the actual captor recorded at capture time, not just the first player in the alliance
+        var gs = ServiceLocator.Game?.State;
+        string playerName = null;
+        if (gs?.CapturePointCaptors != null && pointIndex < gs.CapturePointCaptors.Length)
+            playerName = gs.CapturePointCaptors[pointIndex];
+        if (string.IsNullOrEmpty(playerName))
+            playerName = FindPlayerForLastCapture(allianceIndex);
         string text = string.IsNullOrEmpty(playerName)
             ? $"{AllianceName(allianceIndex)} captured {pointName} Point!"
             : $"{playerName} captured {pointName} Point!";

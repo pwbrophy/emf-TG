@@ -306,7 +306,15 @@
     flex-direction: column; overflow: hidden; }
   .grid-cell.a0 { background: rgba(200, 155, 60, 0.25); outline: 6px solid rgba(210, 165, 60, 0.9); }
   .grid-cell.a1 { background: rgba(50, 140, 47, 0.25);  outline: 6px solid rgba(55, 155, 50, 0.9); }
-  .grid-cell.dead { opacity: 0.4; }
+  .grid-cell.dead { outline-color: rgba(200, 40, 40, 0.55) !important; }
+  .grid-dead-msg { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(0,0,0,0.72);
+    z-index: 10; pointer-events: none; }
+  .grid-dead-msg.hidden { display: none; }
+  .grid-dead-title { font-size: 3em; font-weight: 900; color: #ff2222; letter-spacing: 4px;
+    text-transform: uppercase; text-shadow: 0 0 30px rgba(255,0,0,0.6); }
+  .grid-dead-sub { font-size: 0.8em; color: #aaa; margin-top: 10px; letter-spacing: 1px;
+    text-transform: uppercase; }
 
   .grid-cell-hdr { display: flex; align-items: center; gap: 8px;
     background: rgba(0,0,0,0.78); padding: 4px 10px; flex-shrink: 0; }
@@ -994,17 +1002,18 @@ function startGrid() {
   overlay.appendChild(botBanner);
 
   robots.forEach((r, i) => {
-    const pct = r.dead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+    const isDead   = r.dead || r.hp === 0;
+    const pct      = isDead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
     const alCls    = r.alliance === 0 ? 'a0' : r.alliance === 1 ? 'a1' : '';
-    const hpBarCls = r.dead ? 'dead-bar' : '';
-    const hpLabel  = r.dead ? 'DEAD' : String(r.hp);
+    const hpBarCls = isDead ? 'dead-bar' : '';
+    const hpLabel  = isDead ? 'DEAD' : String(r.hp);
     const nameText = escHtml(r.callsign || '?');
     const playerLabel = r.gunnerPlayer
       ? escHtml((r.player || '?') + ' & ' + r.gunnerPlayer)
       : escHtml(r.player || '');
 
     const cell = document.createElement('div');
-    cell.className = 'grid-cell' + (r.dead ? ' dead' : '') + (alCls ? ' ' + alCls : '');
+    cell.className = 'grid-cell' + (isDead ? ' dead' : '') + (alCls ? ' ' + alCls : '');
     cell.id = `grid-cell-${i}`;
     cell.innerHTML =
       `<div class="grid-cell-hdr">` +
@@ -1016,12 +1025,17 @@ function startGrid() {
       `</div>` +
       `<div class="grid-cell-video">` +
         `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
-        `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}">${r.dead ? '💥 DESTROYED' : 'no stream'}</div>` +
+        `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
+          (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
+        `<div class="grid-dead-msg${isDead ? '' : ' hidden'}" id="grid-dead-${i}">` +
+          `<div class="grid-dead-title">DEAD</div>` +
+          `<div class="grid-dead-sub">Return to base to respawn</div>` +
+        `</div>` +
         (playerLabel ? `<div class="grid-cell-namelabel">${playerLabel}</div>` : '') +
       `</div>`;
     overlay.appendChild(cell);
 
-    if (r.videoUrl && !r.dead) {
+    if (r.videoUrl && !isDead) {
       startGridStream(i, r.videoUrl);
     }
   });
@@ -1072,23 +1086,38 @@ function startGridStream(index, robotUrl) {
 
 function updateGrid() {
   if (!_gridMode) return;
-  const robots = state.robots || [];
+  // Use same sort order as startGrid() so indices match DOM element IDs
+  const robots = [...(state.robots || [])].sort((a, b) => (a.alliance ?? 0) - (b.alliance ?? 0));
   robots.forEach((r, i) => {
-    const hpBar = document.getElementById(`grid-hp-${i}`);
-    const hpNum = document.getElementById(`grid-hpnum-${i}`);
-    const cell  = document.getElementById(`grid-cell-${i}`);
+    const hpBar  = document.getElementById(`grid-hp-${i}`);
+    const hpNum  = document.getElementById(`grid-hpnum-${i}`);
+    const cell   = document.getElementById(`grid-cell-${i}`);
+    const deadMsg = document.getElementById(`grid-dead-${i}`);
     if (!hpBar || !hpNum || !cell) return;
-    const pct = r.dead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+
+    const isDead = r.dead || r.hp === 0;
+    const pct    = isDead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
     hpBar.style.width = pct + '%';
-    hpBar.classList.toggle('hp-critical', !r.dead && r.hp > 0 && pct < 15);
-    hpNum.textContent = r.dead ? 'DEAD' : String(r.hp);
-    if (r.dead && !cell.classList.contains('dead')) {
+    hpBar.classList.toggle('hp-critical', !isDead && r.hp > 0 && pct < 15);
+    hpNum.textContent = isDead ? 'DEAD' : String(r.hp);
+    if (deadMsg) deadMsg.classList.toggle('hidden', !isDead);
+
+    if (isDead && !cell.classList.contains('dead')) {
+      // Transition → dead
       cell.classList.add('dead');
-      hpBar.classList.remove('a0', 'a1');
       hpBar.classList.add('dead-bar');
-      if (_gridReaders[i]) {
-        try { _gridReaders[i].cancel(); } catch(_) {}
-        delete _gridReaders[i];
+      if (_gridWs[i]) {
+        try { _gridWs[i].close(); } catch(_) {}
+        delete _gridWs[i];
+      }
+    } else if (!isDead && cell.classList.contains('dead')) {
+      // Transition → alive (respawned)
+      cell.classList.remove('dead');
+      hpBar.classList.remove('dead-bar');
+      if (r.videoUrl && !_gridWs[i]) {
+        const noVid = document.getElementById(`grid-nolvideo-${i}`);
+        if (noVid) { noVid.textContent = 'no stream'; noVid.style.display = ''; }
+        startGridStream(i, r.videoUrl);
       }
     }
   });
