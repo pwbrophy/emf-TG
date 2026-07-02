@@ -21,6 +21,12 @@
       --green:    #2a7a2a;
       --hp-fill:  #1E90FF;
       --hp-low:   #ee3333;
+      /* Extra clearance above the bottom edge so on-screen controls don't
+         overlap the browser's own chrome (e.g. iOS Safari's landscape
+         toolbar, which sits over the page rather than resizing it).
+         Same value on every platform so control layout stays consistent. */
+      --ctrl-bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
+      --ctrl-right:  max(10vmax, calc(env(safe-area-inset-right)  + 60px));
     }
 
     html, body {
@@ -240,6 +246,7 @@
       inset: 0;
       width: 100%;
       height: 100%;
+      object-fit: contain;
       background: #000;
       pointer-events: none;
       -webkit-touch-callout: none;
@@ -259,12 +266,18 @@
       pointer-events: none;
     }
 
-    /* ── HP bar ── */
+    /* ── HP bar — pill-shaped, inset from the top edge, 70% of screen width ── */
     #hp-bar-wrap {
       position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 28px;
-      background: rgba(0,0,0,0.6);
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 70vmax;
+      height: 30px;
+      border-radius: 15px;
+      border: 2px solid rgba(255,255,255,0.9);
+      background: rgba(10,10,16,0.65);
+      overflow: hidden;
       z-index: 10;
     }
     #hp-bar-fill {
@@ -291,10 +304,10 @@
       text-shadow: 0 1px 3px rgba(0,0,0,0.8);
     }
 
-    /* ── Timer ── */
+    /* ── Timer (under the HP bar, right-aligned to its right edge) ── */
     #timer-label {
       position: absolute;
-      top: 34px; right: 44px;
+      top: 50px; right: 15vmax;
       font-size: 1rem;
       font-weight: 700;
       color: #fff;
@@ -303,10 +316,10 @@
     }
 
 
-    /* ── Robot callsign ── */
+    /* ── Robot callsign (under the HP bar, mirroring the timer on the left) ── */
     #robot-label {
       position: absolute;
-      top: 34px; left: 10px;
+      top: 50px; left: 15vmax;
       font-size: 0.85rem;
       font-weight: 600;
       color: rgba(255,255,255,0.75);
@@ -347,9 +360,9 @@
     #joystick-base {
       position: absolute;
       left: 5vmax;
-      bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
-      width: 260px;
-      height: 260px;
+      bottom: var(--ctrl-bottom);
+      width: 221px;
+      height: 221px;
       border-radius: 50%;
       background: rgba(255,255,255,0.12);
       border: 2px solid rgba(255,255,255,0.3);
@@ -358,8 +371,8 @@
     }
     #joystick-thumb {
       position: absolute;
-      width: 52px;
-      height: 52px;
+      width: 44px;
+      height: 44px;
       border-radius: 50%;
       background: rgba(255,255,255,0.55);
       top: 50%; left: 50%;
@@ -368,42 +381,49 @@
       transition: background 0.1s;
     }
 
-    /* ── Turret buttons (bottom-right, 5% inset) ── */
+    /* ── Turret slider (bottom-right, 5% inset) — drag left/right, springs to centre on release ──
+       Track is shaded into 5 zones matching turretSpeedForOffset's thresholds (±0.15 / ±0.6 of
+       radius) so the slow/fast/dead zones are visible without needing to look at the thumb. */
     #turret-buttons {
       position: absolute;
-      right: 5vmax;
-      bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
-      display: flex;
-      gap: 8px;
-      touch-action: none;
-    }
-    .turret-btn {
-      width: 73px;
-      height: 73px;
-      border-radius: 14px;
-      border: 2px solid rgba(255,255,255,0.35);
-      background: rgba(255,255,255,0.12);
-      color: #fff;
-      font-size: 29px;
-      line-height: 1;
-      cursor: pointer;
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-touch-callout: none;
+      right: var(--ctrl-right);
+      bottom: var(--ctrl-bottom);
+      width: 346px;
+      height: 70px;
+      border-radius: 35px;
+      background: linear-gradient(to right,
+        rgba(255,255,255,0.22)  0%,    rgba(255,255,255,0.22)  20%,
+        rgba(255,255,255,0.11)  20%,   rgba(255,255,255,0.11)  42.5%,
+        rgba(0,0,0,0.30)        42.5%, rgba(0,0,0,0.30)        57.5%,
+        rgba(255,255,255,0.11)  57.5%, rgba(255,255,255,0.11)  80%,
+        rgba(255,255,255,0.22)  80%,   rgba(255,255,255,0.22)  100%
+      );
+      border: 2px solid rgba(255,255,255,0.3);
       pointer-events: all;
+      touch-action: none;
     }
-    .turret-btn:active {
-      background: rgba(255,255,255,0.30);
+    #turret-thumb {
+      position: absolute;
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      background: #c4c4cc;
+      border: 2px solid rgba(0,0,0,0.35);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: background 0.1s;
     }
+    #turret-thumb.zone-slow { background: #e4e4ea; }
+    #turret-thumb.zone-fast { background: #ffffff; }
 
 
     /* ── Fire button ── */
     #fire-btn {
       position: absolute;
-      left: 50%;
-      bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
-      transform: translateX(-50%);
+      right: calc(var(--ctrl-right) + 40px);
+      bottom: calc(var(--ctrl-bottom) + 89px);
       width: 88px;
       height: 88px;
       border-radius: 50%;
@@ -420,13 +440,51 @@
       -webkit-user-select: none;
       transition: opacity 0.15s, transform 0.08s;
     }
-    #fire-btn:active       { transform: translateX(-50%) scale(0.92); }
+    #fire-btn:active       { transform: scale(0.92); }
     #fire-btn.cooldown     { opacity: 0.4; pointer-events: none; }
     #fire-btn-text         { color: #fff; font-size: 0.75rem; font-weight: 900; letter-spacing: 0.05em; text-align: center; pointer-events: none; }
     #fire-countdown        { display: none; font-size: 1.1rem; font-weight: 900; }
     #fire-countdown.active { display: block; }
     #fire-word             { display: block; }
     #fire-word.hidden      { display: none; }
+
+    /* ── Target reticle (centred on video, z-index 8 = above stream/hit, below HUD) ── */
+    #reticle {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 100px; height: 100px;
+      pointer-events: none;
+      z-index: 8;
+    }
+    #reticle::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: 0; right: 0; height: 1.5px;
+      background: rgba(255,255,255,0.5);
+      transform: translateY(-50%);
+    }
+    #reticle::after {
+      content: '';
+      position: absolute;
+      left: 50%; top: 0; bottom: 0; width: 1.5px;
+      background: rgba(255,255,255,0.5);
+      transform: translateX(-50%);
+    }
+    #reticle-circle {
+      position: absolute;
+      inset: 20px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,0.5);
+    }
+    #reticle-dot {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.9);
+      transform: translate(-50%, -50%);
+    }
 
     /* ═══════════════════════════════════════════════════
        GAME PAUSED overlay (sits above controls, below dead)
@@ -973,6 +1031,12 @@
     <div id="hit-rear"  class="hit-effect"></div>
   </div>
 
+  <!-- Target reticle: crosshair + circle + dot, centred on video -->
+  <div id="reticle">
+    <div id="reticle-circle"></div>
+    <div id="reticle-dot"></div>
+  </div>
+
   <!-- Hit-by label: capsule toast, z-index 25, sits above hit-overlay stacking context -->
   <div id="hit-by-label"></div>
 
@@ -988,24 +1052,14 @@
   <div id="role-label"></div>
   <div id="partner-label"></div>
 
-  <!-- Fullscreen button -->
-  <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"
-    style="position:absolute;top:34px;right:10px;z-index:15;background:rgba(0,0,0,0.45);
-           border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 7px;
-           color:rgba(255,255,255,0.8);font-size:0.75rem;cursor:pointer;line-height:1;">⛶</button>
-
-  <!-- Input hints (keyboard + gamepad, stacked; each shown when that input is detected) -->
-  <div id="input-hints" style="position:absolute;top:58px;right:10px;z-index:15;display:flex;flex-direction:column;gap:4px;pointer-events:none;">
-    <div id="kb-hint" style="display:none;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.18);border-radius:6px;padding:5px 8px;font-size:0.62rem;color:rgba(255,255,255,0.65);font-family:monospace;line-height:1.6;text-align:right;">
-      WASD drive<br>
-      , . turret<br>
-      SPC fire
-    </div>
-    <div id="gp-hint" style="display:none;background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.18);border-radius:6px;padding:5px 8px;font-size:0.62rem;color:rgba(255,255,255,0.65);font-family:monospace;line-height:1.6;text-align:right;">
-      L-stick drive<br>
-      R-stick turret<br>
-      A/&#10005; fire
-    </div>
+  <!-- Fullscreen button (hidden automatically once fullscreen is active — see updateFullscreenBtnVisibility) -->
+  <div id="fullscreen-control" style="position:absolute;top:12px;left:2vmax;z-index:15;display:flex;flex-direction:column;align-items:center;gap:4px;">
+    <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"
+      style="width:84px;height:84px;display:flex;align-items:center;justify-content:center;
+             background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);
+             border-radius:18px;color:rgba(255,255,255,0.8);font-size:2.4rem;
+             cursor:pointer;line-height:1;">⛶</button>
+    <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.05em;color:rgba(255,255,255,0.7);text-shadow:0 1px 3px rgba(0,0,0,0.8);">FULLSCREEN</div>
   </div>
 
   <!-- Controls -->
@@ -1023,12 +1077,9 @@
       </div>
     </div>
 
-    <!-- Turret buttons -->
+    <!-- Turret slider -->
     <div id="turret-buttons">
-      <button class="turret-btn" id="tbtn-fl" data-speed="1">&#171;</button>
-      <button class="turret-btn" id="tbtn-sl" data-speed="slow-pos">&#8249;</button>
-      <button class="turret-btn" id="tbtn-sr" data-speed="slow-neg">&#8250;</button>
-      <button class="turret-btn" id="tbtn-fr" data-speed="-1">&#187;</button>
+      <div id="turret-thumb"></div>
     </div>
   </div>
 
@@ -1111,6 +1162,11 @@
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+// Firefox's <img> can no-op a same-URL reassignment to /api/robot-stream (e.g.
+// the same robot reused on a match restart), leaving a dead MJPEG connection
+// frozen on screen — route it through the WS frame decoder instead, same as iOS.
+const IS_FIREFOX = /Firefox/.test(navigator.userAgent);
+
 // ════════════════════════════════════════════════════════
 // State
 // ════════════════════════════════════════════════════════
@@ -1137,7 +1193,7 @@ let currentHp   = 100;
 let joystickActive = false;
 let joyOriginX  = 0, joyOriginY = 0;
 let joyL = 0, joyR = 0;
-const JOY_RADIUS = 104; // max thumb travel in px (joystick base radius - thumb radius/2)
+const JOY_RADIUS = 88.5; // max thumb travel in px (joystick base radius - thumb radius/2)
 const DRIVE_HZ   = 20;  // max sends per second
 let lastDriveSend = 0;
 
@@ -1316,8 +1372,8 @@ function startGameStream(url) {
   // streaming client regardless of how many viewers (phone + display) are watching.
   const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url);
   dbg('proxyUrl=' + proxyUrl);
-  if (IS_IOS) {
-    dbg('iOS path: WS video decoder');
+  if (IS_IOS || IS_FIREFOX) {
+    dbg('WS video decoder path (iOS=' + IS_IOS + ' firefox=' + IS_FIREFOX + ')');
     document.getElementById('stream').style.display = 'none';
     // Show a placeholder until the first frame arrives
     const ph = document.getElementById('stream-placeholder');
@@ -1327,7 +1383,7 @@ function startGameStream(url) {
     canvas.style.display = 'none';
     startWsVideoDecoder(url);
   } else {
-    dbg('non-iOS path: img src');
+    dbg('img src path');
     document.getElementById('stream-canvas').style.display = 'none';
     const img = document.getElementById('stream');
     img.style.display = '';
@@ -1414,6 +1470,7 @@ function returnToJoin(message) {
   document.getElementById('joystick-base').style.display  = '';
   document.getElementById('fire-btn').style.display       = '';
   document.getElementById('turret-buttons').style.display = '';
+  document.getElementById('reticle').style.display        = '';
   const roleEl    = document.getElementById('role-label');
   const partnerEl = document.getElementById('partner-label');
   if (roleEl)    { roleEl.style.display    = ''; roleEl.textContent    = ''; }
@@ -1800,6 +1857,28 @@ function toggleFullscreen() {
   }
 }
 
+// iOS reserves the real Fullscreen API for iPad — on iPhone, requestFullscreen()
+// silently rejects (see enterFullscreenLandscape's dbg log), so the button would
+// just be dead weight. iPad/Mac/desktop Safari aren't caught by this UA check
+// (Apple doesn't spoof the iPhone UA the way it does iPad's desktop-Safari one).
+function isIPhone() {
+  return /iPhone|iPod/.test(navigator.userAgent);
+}
+
+// Hide the fullscreen button+label once fullscreen is actually active (e.g. after
+// the auto-enter on game start, or iPad where requestFullscreen works) — no point
+// offering a button for a state we're already in.
+function updateFullscreenBtnVisibility() {
+  const el = document.getElementById('fullscreen-control');
+  if (!el) return;
+  if (isIPhone()) { el.style.display = 'none'; return; }
+  const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  el.style.display = inFullscreen ? 'none' : 'flex';
+}
+document.addEventListener('fullscreenchange', updateFullscreenBtnVisibility);
+document.addEventListener('webkitfullscreenchange', updateFullscreenBtnVisibility);
+updateFullscreenBtnVisibility();
+
 // ════════════════════════════════════════════════════════
 // Countdown overlay
 // ════════════════════════════════════════════════════════
@@ -1848,6 +1927,9 @@ function onGameStarted(data) {
   document.getElementById('joystick-base').style.display  = isGunner ? 'none' : '';
   document.getElementById('fire-btn').style.display       = isDriver ? 'none' : '';
   document.getElementById('turret-buttons').style.display = isDriver ? 'none' : '';
+  // Driver only loses the reticle when there's an actual gunner aiming for them —
+  // a driver with no partner (e.g. gunner hasn't joined) still needs it themselves.
+  document.getElementById('reticle').style.display        = (isDriver && partnerName) ? 'none' : '';
 
   const roleEl    = document.getElementById('role-label');
   const partnerEl = document.getElementById('partner-label');
@@ -2491,22 +2573,80 @@ function updateJoy(cx, cy) {
 }
 
 // ════════════════════════════════════════════════════════
-// Turret buttons
+// Turret slider — drag left/right, springs to centre on release.
+// Four zones per side (mirroring the old four-button layout): centre dead
+// zone (stop), slow zone, then fast zone past a wider threshold.
 // ════════════════════════════════════════════════════════
-document.querySelectorAll('.turret-btn').forEach(btn => {
-  btn.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    btn.setPointerCapture(e.pointerId);
-    const raw = btn.dataset.speed;
-    const spd = raw === 'slow-neg' ? -slowTurretSpeed
-              : raw === 'slow-pos' ?  slowTurretSpeed
-              : parseFloat(raw);
-    if (connection) connection.invoke('SendTurret', spd).catch(() => {});
-  });
-  const stop = () => { if (connection) connection.invoke('SendTurret', 0).catch(() => {}); };
-  btn.addEventListener('pointerup',     stop);
-  btn.addEventListener('pointercancel', stop);
+const turretBase  = document.getElementById('turret-buttons');
+const turretThumb = document.getElementById('turret-thumb');
+const TURRET_RADIUS = 144; // max thumb travel in px (track radius - thumb radius/2)
+
+let turretActive  = false;
+let turretOriginX = 0, turretOriginY = 0;
+let turretSentSpeed = 0;
+
+function turretSpeedForOffset(jdx) {
+  const nx = jdx / TURRET_RADIUS; // -1..1, negative = thumb left, positive = thumb right
+  if (nx <= -0.6) return 1;
+  if (nx <= -0.15) return slowTurretSpeed;
+  if (nx < 0.15) return 0;
+  if (nx < 0.6) return -slowTurretSpeed;
+  return -1;
+}
+
+function updateTurretSlider(cx, cy) {
+  let dx = cx - turretOriginX;
+  let dy = cy - turretOriginY;
+
+  // Same rotated-viewport correction as the joystick (see updateJoy above):
+  // landscape-right = viewport-down when the body is CSS-rotated 90°.
+  let jdx;
+  if (document.body.classList.contains('game-active') && window.innerWidth < window.innerHeight) {
+    jdx = dy;
+  } else {
+    jdx = dx;
+  }
+  jdx = clamp(jdx, -TURRET_RADIUS, TURRET_RADIUS);
+
+  turretThumb.style.transform = `translate(calc(-50% + ${jdx}px), -50%)`;
+
+  const speed = turretSpeedForOffset(jdx);
+  turretThumb.classList.toggle('zone-fast', Math.abs(speed) === 1);
+  turretThumb.classList.toggle('zone-slow', speed !== 0 && Math.abs(speed) !== 1);
+
+  if (speed !== turretSentSpeed) {
+    turretSentSpeed = speed;
+    if (connection) connection.invoke('SendTurret', speed).catch(() => {});
+  }
+}
+
+function releaseTurretSlider() {
+  turretActive = false;
+  turretThumb.style.transform = 'translate(-50%, -50%)';
+  turretThumb.classList.remove('zone-fast', 'zone-slow');
+  if (turretSentSpeed !== 0) {
+    turretSentSpeed = 0;
+    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+  }
+}
+
+turretBase.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  turretBase.setPointerCapture(e.pointerId);
+  const rect    = turretBase.getBoundingClientRect();
+  turretOriginX = rect.left + rect.width  / 2;
+  turretOriginY = rect.top  + rect.height / 2;
+  turretActive  = true;
+  updateTurretSlider(e.clientX, e.clientY);
 });
+
+turretBase.addEventListener('pointermove', e => {
+  if (!turretActive) return;
+  updateTurretSlider(e.clientX, e.clientY);
+});
+
+turretBase.addEventListener('pointerup',     releaseTurretSlider);
+turretBase.addEventListener('pointercancel', releaseTurretSlider);
 
 // Suppress browser context menu everywhere (prevents Android long-press
 // "save image / open in new tab" popup on any element during gameplay).
@@ -2662,8 +2802,6 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     if (!_kbMode) {
       _kbMode = true;
-      const hint = document.getElementById('kb-hint');
-      if (hint) hint.style.display = 'block';
       dbg('keyboard mode detected');
     }
     if (!isDead) _updateKbDrive();
@@ -2759,14 +2897,10 @@ function _gpPoll(now) {
 
 window.addEventListener('gamepadconnected', e => {
   dbg('gamepad connected: ' + e.gamepad.id);
-  const hint = document.getElementById('gp-hint');
-  if (hint) hint.style.display = 'block';
 });
 
 window.addEventListener('gamepaddisconnected', e => {
   dbg('gamepad disconnected: ' + e.gamepad.id);
-  const hint = document.getElementById('gp-hint');
-  if (hint) hint.style.display = 'none';
   _gpFireWasPressed = false;
   _gpTurretActive   = false;
   if (_kbGameActive()) {
@@ -2903,7 +3037,7 @@ function toggleDbgPanel() {
 // ── Log startup info immediately ─────────────────────────────────────────────
 dbg('page load v22');
 dbg('UA: ' + navigator.userAgent.slice(0, 80));
-dbg('IS_IOS=' + IS_IOS);
+dbg('IS_IOS=' + IS_IOS + ' IS_FIREFOX=' + IS_FIREFOX);
 dbg('signalR type: ' + typeof signalR);
 if (typeof signalR !== 'undefined') dbg('signalR OK');
 else dbg('ERROR: signalR not loaded!');
