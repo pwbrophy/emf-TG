@@ -225,19 +225,16 @@ EventSystem                  — InputSystemUIInputModule (new Input System)
 
 ### Editor scripts (`Assets/Editor/`)
 
-These are utility scripts for scene setup — not part of the game build:
+**There is no Thundergeddon editor menu. Do not create menu items. Do not run menu items. Make all changes directly in code.**
 
-| Script | Purpose |
-|--------|---------|
-| `LayoutPanels.cs` | Re-run to reposition all UI elements. Activates panels temporarily so TMP initialises on inactive panels. Also calls `FixAllFonts` to assign `LiberationSans SDF` to all TMP components. |
-| `WirePhase2UI.cs` | Added GameSettingsPanel, MatchTimerDisplay, RobotHpPanel, EndedPanelPresenter to scene |
-| `WirePlayersPanel.cs` | **Run after any PlayerRow prefab or PlayersEditorPanel change.** Creates `Assets/Prefabs/PlayerRow.prefab` (TMP_InputField + 2× TMP_Dropdown + Button + `PlayerRowUI`), creates `PlayersScrollView` under LobbyPanel, wires `PlayersEditorPanel.rowContainer/rowPrefab/addButton` via reflection. Menu: **Thundergeddon → 4 Wire Players Panel**. |
-| `WirePlayerServer.cs` | Adds `PlayerWebSocketServer` to the `Servers` GameObject. Menu: **Thundergeddon → 5 Wire Player Server**. |
-| `WireInputMonitor.cs` | Removes old operator tank controls (JoystickBase, TurretSlider, ShootButton, etc.) from PlayingPanel. Adds `InputsScrollView` and `PlayerInputMonitor` component. Menu: **Thundergeddon → 6 Wire Input Monitor**. |
-| `WirePingButton.cs` | Adds `PingRow` (HorizontalLayoutGroup) to PlayingPanel containing a Ping button + result label. Adds `RobotPingButton` component and wires refs. Menu: **Thundergeddon → 7 Wire Ping Button**. |
-| `RebuildRobotRowPrefab.cs` | Recreates `Assets/Prefabs/RobotRow.prefab` with Name/Ip/Player/EditButton children |
-| `ImportTMPResources.cs` | One-time: imports TMP Essential Resources from the ugui package |
-| `CleanBadTMPLabels.cs` | Removes TMP labels that have no font assigned (created with broken multi-type constructor pattern) |
+Layout and scene wiring is handled automatically by `[ExecuteAlways]` builder components:
+
+| Builder | Attached to | What it does |
+|---------|-------------|--------------|
+| `PlayingPanelBuilder.cs` | `Canvas/PlayingPanel` | Rebuilds PlayingPanel hierarchy on recompile. Bump `BUILT_SENTINEL` constant to force a re-run. |
+| `LobbyLayoutBuilder.cs` | `Canvas/LobbyPanel` | Repositions LobbyPanel children to 3-column layout on recompile. Bump `SENTINEL` constant to force a re-run. |
+
+The only file in `Assets/Editor/` is `LobbyAutoSetup.cs` — an `[InitializeOnLoad]` class that auto-attaches `LobbyLayoutBuilder` to `LobbyPanel` on the first compile after a fresh clone. It is a no-op once the component exists in the scene.
 
 **TMP in editor scripts:** Always create text GameObjects by adding components sequentially, not with the multi-type `new GameObject(name, typeof(A), typeof(B))` constructor — TMP's internal `m_canvasRenderer` won't wire correctly that way. Use:
 ```csharp
