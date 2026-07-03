@@ -606,6 +606,10 @@ public class PlayingPanelBuilder : MonoBehaviour
         topHLG.childControlWidth = topHLG.childControlHeight = true;
         topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
 
+        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+                           new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
+        lbl.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+
         var cbGo = MakeRect(topRow.transform, "Toggle");
         var cbLE = cbGo.AddComponent<LayoutElement>();
         cbLE.preferredWidth = cbLE.preferredHeight = 24f; cbLE.flexibleWidth = 0f;
@@ -622,10 +626,6 @@ public class PlayingPanelBuilder : MonoBehaviour
         var checkImg = checkGo.AddComponent<Image>();
         checkImg.color = new Color(0.000f, 0.835f, 1.000f);
         toggle.graphic = checkImg;
-
-        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
-                           new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
-        lbl.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
 
         var desc = MakeTmp(row.transform, "Desc", description,
                             new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);

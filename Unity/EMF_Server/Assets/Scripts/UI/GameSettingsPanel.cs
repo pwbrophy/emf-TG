@@ -321,6 +321,13 @@ public class GameSettingsPanel : MonoBehaviour
         hlg.childForceExpandHeight = true;
         hlg.spacing = 6f; hlg.padding = new RectOffset(8, 0, 0, 0);
 
+        var lgo = new GameObject("Lbl");
+        lgo.transform.SetParent(row.transform, false);
+        var ltmp = lgo.AddComponent<TextMeshProUGUI>();
+        if (_font) ltmp.font = _font;
+        ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
+        ltmp.alignment = TextAlignmentOptions.Left;
+
         var tgo = new GameObject("Toggle");
         var trt = tgo.AddComponent<RectTransform>();
         trt.sizeDelta = new Vector2(20, 20);
@@ -337,13 +344,6 @@ public class GameSettingsPanel : MonoBehaviour
         cimg.color = new Color(0.2f, 0.8f, 0.3f);
         tog.graphic = cimg;
         tog.targetGraphic = tgo.GetComponent<Image>();
-
-        var lgo = new GameObject("Lbl");
-        lgo.transform.SetParent(row.transform, false);
-        var ltmp = lgo.AddComponent<TextMeshProUGUI>();
-        if (_font) ltmp.font = _font;
-        ltmp.text = label; ltmp.fontSize = 12; ltmp.color = Color.white;
-        ltmp.alignment = TextAlignmentOptions.Left;
 
         return tog;
     }
