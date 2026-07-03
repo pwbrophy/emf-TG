@@ -317,8 +317,15 @@ public class GameSettingsPanel : MonoBehaviour
         rowRT.sizeDelta = new Vector2(0, 26f);
         row.AddComponent<LayoutElement>().preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
-        hlg.childControlHeight = true; hlg.childControlWidth = false;
-        hlg.childForceExpandHeight = true;
+        // childControlWidth = true: without it the Lbl keeps Unity's default 100px
+        // RectTransform width regardless of column size, pushing Toggle past the
+        // row's right edge (and out of the visible column) whenever it narrows.
+        // With it, Lbl sizes to its own text (TMP reports its preferred width) and
+        // Toggle keeps the fixed size below, so it always sits directly left of any
+        // leftover space instead of drifting off-screen.
+        hlg.childControlHeight = true; hlg.childControlWidth = true;
+        hlg.childForceExpandHeight = true; hlg.childForceExpandWidth = false;
+        hlg.childAlignment = TextAnchor.MiddleLeft;
         hlg.spacing = 6f; hlg.padding = new RectOffset(8, 0, 0, 0);
 
         var lgo = new GameObject("Lbl");
@@ -330,8 +337,9 @@ public class GameSettingsPanel : MonoBehaviour
 
         var tgo = new GameObject("Toggle");
         var trt = tgo.AddComponent<RectTransform>();
-        trt.sizeDelta = new Vector2(20, 20);
         tgo.transform.SetParent(row.transform, false);
+        var tLE = tgo.AddComponent<LayoutElement>();
+        tLE.preferredWidth = tLE.preferredHeight = 20f; tLE.flexibleWidth = 0f;
         tgo.AddComponent<Image>().color = new Color(0.2f, 0.2f, 0.3f);
         var tog = tgo.AddComponent<Toggle>();
 
