@@ -921,6 +921,7 @@ static void onWsClose()
     ir.stopEmit();
     mjpeg.setEnabled(false);
     if (cam.isStarted()) cam.stop();
+    leds.resetToIdle(); // clear any dead-blink/death-explosion effect so boot animation can show
     leds.setStatus(StatusPattern::SearchingFast);
     leds.setBootPhase(BootPhase::ServerConnecting);
     g_wsUrl.clear();
