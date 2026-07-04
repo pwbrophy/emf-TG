@@ -54,6 +54,9 @@ public class AppBootstrap : MonoBehaviour
         ServiceLocator.CapturePoints = new CapturePointService();
         Debug.Log("[AppBootstrap] CapturePointService ready");
 
+        ServiceLocator.BeaconDirectory = new CapturePointBeaconDirectory();
+        Debug.Log("[AppBootstrap] CapturePointBeaconDirectory ready");
+
         ServiceLocator.Countdown = GetComponent<CountdownController>()
                                 ?? gameObject.AddComponent<CountdownController>();
         Debug.Log("[AppBootstrap] CountdownController ready");

@@ -3,6 +3,7 @@
 // three-column layout (Robots | Players | Settings) on recompile in Edit mode.
 // Bump SENTINEL to force a one-time re-apply after layout changes.
 
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -14,7 +15,7 @@ using UnityEditor.SceneManagement;
 [ExecuteAlways]
 public class LobbyLayoutBuilder : MonoBehaviour
 {
-    const string SENTINEL = "__llb_v1";
+    const string SENTINEL = "__llb_v2";
 
     void Awake()
     {
@@ -53,6 +54,8 @@ public class LobbyLayoutBuilder : MonoBehaviour
 
     void ApplyLayout()
     {
+        EnsureBeaconsUI();
+
         const float cL = 0.33f;  // left | middle column boundary
         const float cR = 0.67f;  // middle | right column boundary
 
@@ -77,7 +80,9 @@ public class LobbyLayoutBuilder : MonoBehaviour
         // ── LEFT — Robots ──────────────────────────────────────────────────────
         Stretch("RobotsLabel",           0f,         0.88f, cL * 0.72f, 0.93f, 10f, 1f, 2f, 1f);
         Stretch("NumRobotsText",         cL * 0.72f, 0.88f, cL,         0.93f, 0f,  1f, 6f, 1f);
-        Stretch("RobotsScrollView",      0f,         0.12f, cL,         0.88f, 10f, 2f, 4f, 2f);
+        Stretch("RobotsScrollView",      0f,         0.28f, cL,         0.88f, 10f, 2f, 4f, 2f);
+        Stretch("BeaconsLabel",          0f,         0.24f, cL,         0.28f, 10f, 1f, 4f, 1f);
+        Stretch("BeaconsScrollView",     0f,         0.12f, cL,         0.24f, 10f, 2f, 4f, 2f);
         Stretch("AddFakeRobotButton",    0f,         0.06f, cL * 0.5f,  0.12f, 10f, 2f, 2f, 2f);
         Stretch("RemoveLastRobotButton", cL * 0.5f,  0.06f, cL,         0.12f, 2f,  2f, 4f, 2f);
 
@@ -92,5 +97,51 @@ public class LobbyLayoutBuilder : MonoBehaviour
 
         // Back button sits below Start Game if present
         Stretch("LobbyBackButton",   cR + 0.01f,  0.14f, 0.99f, 0.22f, 4f, 2f, 4f, 2f);
+    }
+
+    // Builds the Beacons list the first time this layout runs, by cloning the
+    // already-wired RobotsScrollView (ScrollRect + Viewport + Content with
+    // VerticalLayoutGroup/ContentSizeFitter) rather than hand-building a new
+    // ScrollRect hierarchy. Also attaches BeaconsPanelPresenter and wires its
+    // private 'content' field via reflection, matching PlayingPanelBuilder's
+    // approach for runtime-built UI with no prefab/Inspector wiring available.
+    void EnsureBeaconsUI()
+    {
+#if UNITY_EDITOR
+        if (transform.Find("BeaconsScrollView") == null)
+        {
+            var robotsScrollView = transform.Find("RobotsScrollView");
+            if (robotsScrollView != null)
+            {
+                var clone = Instantiate(robotsScrollView.gameObject, transform);
+                clone.name = "BeaconsScrollView";
+
+                var content = clone.transform.Find("Viewport/Content");
+                if (content != null)
+                    for (int i = content.childCount - 1; i >= 0; i--)
+                        DestroyImmediate(content.GetChild(i).gameObject);
+
+                var presenter = GetComponent<BeaconsPanelPresenter>();
+                if (presenter == null) presenter = gameObject.AddComponent<BeaconsPanelPresenter>();
+
+                var field = typeof(BeaconsPanelPresenter).GetField("content",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null) field.SetValue(presenter, content);
+                else Debug.LogWarning("[LobbyLayoutBuilder] BeaconsPanelPresenter.content field not found");
+            }
+        }
+
+        if (transform.Find("BeaconsLabel") == null)
+        {
+            var robotsLabel = transform.Find("RobotsLabel");
+            if (robotsLabel != null)
+            {
+                var labelClone = Instantiate(robotsLabel.gameObject, transform);
+                labelClone.name = "BeaconsLabel";
+                var tmp = labelClone.GetComponent<TextMeshProUGUI>();
+                if (tmp != null) tmp.text = "BEACONS";
+            }
+        }
+#endif
     }
 }

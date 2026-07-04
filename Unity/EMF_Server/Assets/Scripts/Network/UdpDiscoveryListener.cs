@@ -21,7 +21,15 @@ public class UdpDiscoveryListener : MonoBehaviour
              "between wireless devices (e.g. home Google/Nest WiFi).")]
     [SerializeField] private string[] _knownRobotIps = new string[0];
 
+    [Header("Beacon settings")]
+    [SerializeField] private int beaconWebsocketPort = 8082;
+    [SerializeField] private string beaconWebsocketPath = "/beacon";
+    [Tooltip("Known beacon IPs to push the beacon WS URL to directly every 2s. " +
+             "Same AP-isolation bypass as _knownRobotIps, but for the 3 fixed beacons.")]
+    [SerializeField] private string[] _knownBeaconIps = new string[0];
+
     private IRobotDirectory _dir;
+    private CapturePointBeaconDirectory _beaconDir;
     private GameFlow _flow;
 
     private UdpClient _udp;
@@ -46,6 +54,7 @@ public class UdpDiscoveryListener : MonoBehaviour
     public void StartUDPServer()
     {
         _dir = ServiceLocator.RobotDirectory;
+        _beaconDir = ServiceLocator.BeaconDirectory;
         _flow = ServiceLocator.GameFlow;
 
         if (_dir == null || _flow == null)
@@ -82,41 +91,44 @@ public class UdpDiscoveryListener : MonoBehaviour
             catch (Exception ex) { Debug.LogException(ex); }
         }
 
-        // AP-isolation bypass: push WS URL directly to known robot IPs every 2s.
-        if (_running && _knownRobotIps != null && _knownRobotIps.Length > 0)
+        // AP-isolation bypass: push WS URL directly to known robot/beacon IPs every 2s.
+        if (_running && ((_knownRobotIps != null && _knownRobotIps.Length > 0) ||
+                         (_knownBeaconIps != null && _knownBeaconIps.Length > 0)))
         {
             if (_pushTimer < 0f || Time.time - _pushTimer >= 2f)
             {
                 _pushTimer = Time.time;
-                PushDiscoveryToKnownIps();
+                string ip = PetersUtils.GetLocalIPAddress().ToString();
+                PushDiscoveryToKnownIps(_knownRobotIps, "ws://" + ip + ":" + websocketPort + websocketPath);
+                PushDiscoveryToKnownIps(_knownBeaconIps, "ws://" + ip + ":" + beaconWebsocketPort + beaconWebsocketPath);
             }
         }
     }
 
-    // Sends {"ws":"..."} unicast to each configured robot IP.
+    // Sends {"ws":"..."} unicast to each configured IP.
     // Called on the main thread; uses a short-lived UdpClient so it doesn't
     // interfere with the background receive socket.
-    private void PushDiscoveryToKnownIps()
+    private void PushDiscoveryToKnownIps(string[] ips, string wsUrl)
     {
-        string ip = PetersUtils.GetLocalIPAddress().ToString();
-        string wsUrl = "ws://" + ip + ":" + websocketPort + websocketPath;
+        if (ips == null || ips.Length == 0) return;
+
         string reply = "{\"ws\":\"" + wsUrl + "\"}";
         byte[] outBytes = Encoding.UTF8.GetBytes(reply);
 
-        foreach (string robotIp in _knownRobotIps)
+        foreach (string targetIp in ips)
         {
-            if (string.IsNullOrWhiteSpace(robotIp)) continue;
+            if (string.IsNullOrWhiteSpace(targetIp)) continue;
             try
             {
                 using (var sender = new UdpClient())
                 {
-                    var ep = new IPEndPoint(IPAddress.Parse(robotIp), discoveryPort);
+                    var ep = new IPEndPoint(IPAddress.Parse(targetIp), discoveryPort);
                     sender.Send(outBytes, outBytes.Length, ep);
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogWarning("[UDP] Push to " + robotIp + " failed: " + ex.Message);
+                Debug.LogWarning("[UDP] Push to " + targetIp + " failed: " + ex.Message);
             }
         }
     }
@@ -199,10 +211,36 @@ public class UdpDiscoveryListener : MonoBehaviour
                 string text = Encoding.UTF8.GetString(data);
 
                 string robotId = ExtractJsonString(text, "robotId");
-                string callsign = ExtractJsonString(text, "callsign");
+                string kind    = ExtractJsonString(text, "kind");
 
-                if (!string.IsNullOrEmpty(robotId))
+                if (!string.IsNullOrEmpty(robotId) && kind == "beacon")
                 {
+                    string senderIp  = remote.Address.ToString();
+                    int    point     = ExtractJsonInt(text, "point");
+
+                    if (point >= 0 && point <= 2)
+                    {
+                        PostMain(() =>
+                        {
+                            _beaconDir?.Upsert(point, robotId, senderIp, Time.time);
+                        });
+
+                        string ip = PetersUtils.GetLocalIPAddress().ToString();
+                        string wsUrl = "ws://" + ip + ":" + beaconWebsocketPort + beaconWebsocketPath;
+                        string reply = "{\"ws\":\"" + wsUrl + "\"}";
+                        byte[] outBytes = Encoding.UTF8.GetBytes(reply);
+
+                        _udp.Send(outBytes, outBytes.Length, remote);
+
+                        bool firstBeaconReply;
+                        lock (_mtx) firstBeaconReply = _repliedTo.Add(robotId);
+                        if (firstBeaconReply)
+                            Debug.Log("[UDP] Replied to beacon " + robotId + " (point=" + point + ") at " + senderIp + " with " + wsUrl);
+                    }
+                }
+                else if (!string.IsNullOrEmpty(robotId))
+                {
+                    string callsign = ExtractJsonString(text, "callsign");
                     string senderIp = remote.Address.ToString();
 
                     PostMain(() =>
@@ -258,5 +296,26 @@ public class UdpDiscoveryListener : MonoBehaviour
             return s.Substring(q1 + 1, q2 - (q1 + 1));
         }
         catch { return null; }
+    }
+
+    private static int ExtractJsonInt(string s, string key)
+    {
+        try
+        {
+            string needle = "\"" + key + "\"";
+            int k = s.IndexOf(needle, StringComparison.Ordinal);
+            if (k < 0) return -1;
+            int colon = s.IndexOf(':', k);
+            if (colon < 0) return -1;
+            int i = colon + 1;
+            while (i < s.Length && (s[i] == ' ' || s[i] == '\t')) i++;
+            int start = i;
+            if (i < s.Length && s[i] == '-') i++;
+            while (i < s.Length && char.IsDigit(s[i])) i++;
+            if (i == start) return -1;
+            if (int.TryParse(s.Substring(start, i - start), out int val)) return val;
+            return -1;
+        }
+        catch { return -1; }
     }
 }

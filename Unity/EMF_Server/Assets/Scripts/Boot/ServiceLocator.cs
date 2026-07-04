@@ -13,4 +13,6 @@ public static class ServiceLocator
     public static MatchTimer           MatchTimer;     // Set by AppBootstrap
     public static CapturePointService  CapturePoints;  // Set by AppBootstrap
     public static CountdownController  Countdown;      // Set by AppBootstrap
+    public static CapturePointBeaconDirectory BeaconDirectory; // Set by AppBootstrap
+    public static CapturePointBeaconServer    BeaconServer;    // Set by CapturePointBeaconServer on Awake
 }
