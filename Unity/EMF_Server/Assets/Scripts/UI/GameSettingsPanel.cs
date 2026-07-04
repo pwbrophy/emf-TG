@@ -20,6 +20,7 @@ public class GameSettingsPanel : MonoBehaviour
     private TMP_InputField _rearMultField;
     private TMP_InputField _killPointsField;
     private TMP_InputField _cooldownField;
+    private TMP_InputField _explosionDurationField;
     private TMP_InputField _invulnField;
     private Toggle         _buzzerToggle;
     private TMP_InputField _slowTurretField;
@@ -85,6 +86,7 @@ public class GameSettingsPanel : MonoBehaviour
         _rearMultField    = AddInputRow("Rear Multi:");
         _killPointsField  = AddInputRow("Kill Points:");
         _cooldownField    = AddInputRow("Cooldown (s):");
+        _explosionDurationField = AddInputRow("Dead Time (s):");
         _invulnField      = AddInputRow("Invuln (s):");
         _buzzerToggle     = AddToggleRow("Buzzer SFX");
         _slowTurretField  = AddInputRow("Slow Turret:");
@@ -109,6 +111,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_rearMultField)      _rearMultField.SetTextWithoutNotify(_settings.RearMultiplier.ToString("F1"));
         if (_killPointsField)    _killPointsField.SetTextWithoutNotify(_settings.TeamPointsPerKill.ToString());
         if (_cooldownField)      _cooldownField.SetTextWithoutNotify(_settings.FireCooldownSeconds.ToString("F1"));
+        if (_explosionDurationField) _explosionDurationField.SetTextWithoutNotify(_settings.ExplosionDurationSeconds.ToString("F1"));
         if (_invulnField)        _invulnField.SetTextWithoutNotify(_settings.InvulnerabilitySeconds.ToString("F1"));
         if (_buzzerToggle)       _buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
         if (_slowTurretField)    _slowTurretField.SetTextWithoutNotify(_settings.SlowTurretSpeed.ToString("F2"));
@@ -131,6 +134,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_rearMultField)      _rearMultField.onValueChanged.AddListener(OnRearMult);
         if (_killPointsField)    _killPointsField.onValueChanged.AddListener(OnKillPoints);
         if (_cooldownField)      _cooldownField.onValueChanged.AddListener(OnCooldown);
+        if (_explosionDurationField) _explosionDurationField.onValueChanged.AddListener(OnExplosionDuration);
         if (_invulnField)        _invulnField.onValueChanged.AddListener(OnInvuln);
         if (_buzzerToggle)       _buzzerToggle.onValueChanged.AddListener(OnBuzzer);
         if (_slowTurretField)    _slowTurretField.onValueChanged.AddListener(OnSlowTurret);
@@ -149,6 +153,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_rearMultField)      _rearMultField.onValueChanged.RemoveListener(OnRearMult);
         if (_killPointsField)    _killPointsField.onValueChanged.RemoveListener(OnKillPoints);
         if (_cooldownField)      _cooldownField.onValueChanged.RemoveListener(OnCooldown);
+        if (_explosionDurationField) _explosionDurationField.onValueChanged.RemoveListener(OnExplosionDuration);
         if (_invulnField)        _invulnField.onValueChanged.RemoveListener(OnInvuln);
         if (_buzzerToggle)       _buzzerToggle.onValueChanged.RemoveListener(OnBuzzer);
         if (_slowTurretField)    _slowTurretField.onValueChanged.RemoveListener(OnSlowTurret);
@@ -167,6 +172,7 @@ public class GameSettingsPanel : MonoBehaviour
     void OnRearMult(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.RearMultiplier = n; _settings.SaveToDisk(); } }
     void OnKillPoints(string v)    { if (_settings != null && int.TryParse(v, out int n) && n >= 0) { _settings.TeamPointsPerKill = n; _settings.SaveToDisk(); } }
     void OnCooldown(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.FireCooldownSeconds = n; _settings.SaveToDisk(); } }
+    void OnExplosionDuration(string v) { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.ExplosionDurationSeconds = n; _settings.SaveToDisk(); } }
     void OnInvuln(string v)        { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.InvulnerabilitySeconds = n; _settings.SaveToDisk(); } }
     void OnBuzzer(bool on)         { if (_settings != null) { _settings.BuzzerEnabled = on; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastBuzzerToAll(on); } }
     void OnSlowTurret(string v)    { if (_settings != null && float.TryParse(v, out float n) && n > 0f && n <= 1f) { _settings.SlowTurretSpeed = n; _settings.SaveToDisk(); } }

@@ -119,6 +119,9 @@ public class GameSettings : MonoBehaviour
     public int VideoJpegQuality = 10;
 
     [Header("Respawn")]
+    [Tooltip("Seconds a destroyed robot sits fully disabled (explosion phase) before entering dead-walk, where it can drive back to base to respawn. Default 5.")]
+    public float ExplosionDurationSeconds = 5f;
+
     [Tooltip("Seconds of invulnerability granted after respawn or base heal. Also debounces the RFID tag.")]
     public float InvulnerabilitySeconds = 5f;
 
@@ -167,6 +170,7 @@ public class GameSettings : MonoBehaviour
                 driveDeceleration        = DriveDeceleration,
                 turretAcceleration       = TurretAcceleration,
                 turretDeceleration       = TurretDeceleration,
+                explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
                 handshakeWindowMs        = HandshakeWindowMs,
@@ -210,6 +214,7 @@ public class GameSettings : MonoBehaviour
             DriveDeceleration  = data.driveDeceleration;
             TurretAcceleration = data.turretAcceleration;
             TurretDeceleration = data.turretDeceleration;
+            if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
             if (data.handshakeWindowMs        > 0) HandshakeWindowMs        = data.handshakeWindowMs;
@@ -248,6 +253,7 @@ public class GameSettings : MonoBehaviour
         public float driveDeceleration;
         public float turretAcceleration;
         public float turretDeceleration;
+        public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;
         public int   handshakeWindowMs;

@@ -1269,18 +1269,21 @@ public class PlayerWebSocketServer : MonoBehaviour
             BroadcastDisplayEvent($"{respawnName} have returned to battle!");
     }
 
-    // Called every Update — moves robots from DeadRobots → RespawningRobots after 5 s,
-    // re-enables motors so the player can drive back to base.
+    // Called every Update — moves robots from DeadRobots → RespawningRobots after the
+    // configured explosion duration, re-enables motors so the player can drive back to base.
     void CheckDeathTransitions()
     {
         if (_deathTimes.Count == 0) return;
         var game = ServiceLocator.Game;
         if (game?.State == null) return;
 
+        float explosionDuration = ServiceLocator.GameSettings != null
+            ? ServiceLocator.GameSettings.ExplosionDurationSeconds : 5f;
+
         List<string> toTransition = null;
         foreach (var kvp in _deathTimes)
         {
-            if (Time.time - kvp.Value >= 5f)
+            if (Time.time - kvp.Value >= explosionDuration)
             {
                 if (toTransition == null) toTransition = new List<string>();
                 toTransition.Add(kvp.Key);
