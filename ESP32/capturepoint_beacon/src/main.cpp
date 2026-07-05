@@ -178,11 +178,22 @@ static void handleWsText(const String& s)
     const char* cmd = doc["cmd"] | "";
 
     if (strcmp(cmd, "set_color") == 0) {
+        // Instant, no animation — used for hello-resync and "unlit" at match start.
         uint8_t r = doc["r"] | 0;
         uint8_t g = doc["g"] | 0;
         uint8_t b = doc["b"] | 0;
         if (r == 0 && g == 0 && b == 0) leds.setState(BeaconState::Unlit);
         else                            leds.setCaptured(r, g, b);
+    } else if (strcmp(cmd, "capture_ripple") == 0) {
+        // ~1s animated transition for a live capture: white ripples closing
+        // in from both ends, settling into the capture colour.
+        uint8_t r = doc["r"] | 0;
+        uint8_t g = doc["g"] | 0;
+        uint8_t b = doc["b"] | 0;
+        leds.startCaptureRipple(r, g, b);
+    } else if (strcmp(cmd, "vp_ripple") == 0) {
+        // Brief single white ripple, mirrors the spectator display's score-tick flash.
+        leds.startVpRipple();
     } else if (strcmp(cmd, "beacon_idle") == 0) {
         leds.setState(BeaconState::Idle);
     }

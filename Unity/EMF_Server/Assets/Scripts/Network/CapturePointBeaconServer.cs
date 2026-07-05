@@ -42,6 +42,12 @@ public class CapturePointBeaconServer : MonoBehaviour
 
     private float _nextSweepTime = 0f;
 
+    // Mirrors display.html's round-robin per-tick flash selection exactly
+    // (same algorithm, same reset-on-Playing timing) so the physical beacon
+    // and the spectator display flash the same capture point in sync.
+    private readonly int[] _cpFlashCounter = new int[2];
+    private readonly int[] _prevTeamPoints = new int[2];
+
     private void Awake()
     {
         ServiceLocator.BeaconServer = this;
@@ -54,7 +60,11 @@ public class CapturePointBeaconServer : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (_cp != null) _cp.OnPointCaptured -= OnPointCaptured;
+        if (_cp != null)
+        {
+            _cp.OnPointCaptured -= OnPointCaptured;
+            _cp.OnTeamPointsChanged -= OnTeamPointsChangedHandler;
+        }
         if (_flow != null) _flow.OnPhaseChanged -= OnPhaseChanged;
         if (ServiceLocator.BeaconServer == this) ServiceLocator.BeaconServer = null;
         StopServer();
@@ -91,6 +101,7 @@ public class CapturePointBeaconServer : MonoBehaviour
         ServiceLocator.BeaconServer = this;
 
         _cp.OnPointCaptured += OnPointCaptured;
+        _cp.OnTeamPointsChanged += OnTeamPointsChangedHandler;
         _flow.OnPhaseChanged += OnPhaseChanged;
     }
 
@@ -136,17 +147,24 @@ public class CapturePointBeaconServer : MonoBehaviour
 
     // ===== Game event handlers =====
 
-    // Alliance 0 = Desert Squad (orange), 1 = Jungle Squad (olive-teal), -1 = neutral/off.
-    private void OnPointCaptured(int pointIndex, int allianceIndex, string pointName)
+    // Alliance 0 = Desert Squad (orange), 1 = Jungle Squad (green), -1 = neutral/off.
+    private static void AllianceColor(int allianceIndex, out byte r, out byte g, out byte b)
     {
-        byte r, g, b;
         switch (allianceIndex)
         {
             case 0:  r = 255; g = 110; b = 0;   break; // Desert — deeper orange, less yellow
             case 1:  r = 30;  g = 160; b = 15;  break; // Jungle — green, blue nearly zeroed (WS2812 blue reads strong even at low values)
             default: r = 0;   g = 0;   b = 0;   break; // neutral -> unlit
         }
-        SendColor(pointIndex, r, g, b);
+    }
+
+    // Live capture (ownership actually changed) — animate the transition.
+    // A force-clear to neutral (-1) just snaps to unlit; there's nothing being "captured".
+    private void OnPointCaptured(int pointIndex, int allianceIndex, string pointName)
+    {
+        AllianceColor(allianceIndex, out byte r, out byte g, out byte b);
+        if (allianceIndex == 0 || allianceIndex == 1) SendCaptureRipple(pointIndex, r, g, b);
+        else                                          SendColor(pointIndex, r, g, b);
     }
 
     private void OnPhaseChanged(GamePhase phase)
@@ -155,12 +173,44 @@ public class CapturePointBeaconServer : MonoBehaviour
         {
             // Match just started — all points are neutral until captured.
             for (int i = 0; i < 3; i++) SendColor(i, 0, 0, 0);
+            _cpFlashCounter[0] = _cpFlashCounter[1] = 0;
+            _prevTeamPoints[0] = _prevTeamPoints[1] = 0;
         }
         else
         {
             // Lobby / MainMenu / Ended — back to the idle bounce.
             for (int i = 0; i < 3; i++) SendIdle(i);
         }
+    }
+
+    // Mirrors display.html's applyDisplayUpdate: a gain of 1-3 points is a
+    // normal capture-tick (kill bonuses are configured higher and skipped),
+    // and the flashed point is chosen round-robin among the team's owned
+    // points — same algorithm, same counters reset at the same moment, so
+    // the beacon and the display always agree on which point flashes.
+    private void OnTeamPointsChangedHandler()
+    {
+        var gs = ServiceLocator.Game?.State;
+        if (gs?.TeamPoints == null) return;
+
+        for (int team = 0; team < gs.TeamPoints.Length && team < 2; team++)
+        {
+            int gained = gs.TeamPoints[team] - _prevTeamPoints[team];
+            if (gained >= 1 && gained <= 3) TriggerCpFlash(team, gs);
+            _prevTeamPoints[team] = gs.TeamPoints[team];
+        }
+    }
+
+    private void TriggerCpFlash(int team, GameState gs)
+    {
+        var owned = new List<int>();
+        for (int i = 0; i < gs.CapturePointOwners.Length; i++)
+            if (gs.CapturePointOwners[i] == team) owned.Add(i);
+        if (owned.Count == 0) return;
+
+        int pointIndex = owned[_cpFlashCounter[team] % owned.Count];
+        _cpFlashCounter[team]++;
+        SendVpRipple(pointIndex);
     }
 
     // ===== WebSocket plumbing =====
@@ -261,6 +311,9 @@ public class CapturePointBeaconServer : MonoBehaviour
         }
     }
 
+    // A reconnecting beacon should snap straight to the correct state, not
+    // replay the capture-ripple animation — so this calls SendColor directly
+    // rather than going through OnPointCaptured.
     private void ResyncBeacon(int pointIndex)
     {
         if (_flow?.Phase == GamePhase.Playing)
@@ -268,7 +321,8 @@ public class CapturePointBeaconServer : MonoBehaviour
             var gs = ServiceLocator.Game?.State;
             int owner = (gs != null && pointIndex < gs.CapturePointOwners.Length)
                 ? gs.CapturePointOwners[pointIndex] : -1;
-            OnPointCaptured(pointIndex, owner, "");
+            AllianceColor(owner, out byte r, out byte g, out byte b);
+            SendColor(pointIndex, r, g, b);
         }
         else
         {
@@ -337,6 +391,27 @@ public class CapturePointBeaconServer : MonoBehaviour
         Debug.Log(ok
             ? $"[BeaconWS] beacon_idle -> point {pointIndex}"
             : $"[BeaconWS] FAILED beacon_idle -> point {pointIndex} (not connected)");
+        return ok;
+    }
+
+    // ~1s animated capture transition (white ripples closing in, settling into the colour).
+    public bool SendCaptureRipple(int pointIndex, byte r, byte g, byte b)
+    {
+        string json = $"{{\"cmd\":\"capture_ripple\",\"r\":{r},\"g\":{g},\"b\":{b}}}";
+        bool ok = SendJsonToBeacon(pointIndex, json);
+        Debug.Log(ok
+            ? $"[BeaconWS] capture_ripple r={r} g={g} b={b} -> point {pointIndex}"
+            : $"[BeaconWS] FAILED capture_ripple -> point {pointIndex} (not connected)");
+        return ok;
+    }
+
+    // Brief single white ripple mirroring the spectator display's score-tick flash.
+    public bool SendVpRipple(int pointIndex)
+    {
+        bool ok = SendJsonToBeacon(pointIndex, "{\"cmd\":\"vp_ripple\"}");
+        Debug.Log(ok
+            ? $"[BeaconWS] vp_ripple -> point {pointIndex}"
+            : $"[BeaconWS] FAILED vp_ripple -> point {pointIndex} (not connected)");
         return ok;
     }
 

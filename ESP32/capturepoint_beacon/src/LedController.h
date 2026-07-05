@@ -11,6 +11,12 @@
 //   Idle                       — strip: bouncing white dot; onboard: flashing white
 //   Unlit                      — everything off (match started, point uncaptured)
 //   Captured                   — solid fill in the capturing alliance's colour
+//   CaptureRipple              — ~1s animated transition into Captured: white
+//                                 ripples close in from both ends to the centre,
+//                                 the target colour brightening in behind each pass
+//   VpRipple                   — ~0.5s single white ripple, outside->centre, then
+//                                 restores whatever was showing beforehand (used
+//                                 to mirror the spectator display's score-tick flash)
 
 #pragma once
 #include <Arduino.h>
@@ -23,7 +29,14 @@ static constexpr int ONBOARD_PIN   = 48;  // dev board's built-in WS2812 pixel
 static constexpr int ONBOARD_COUNT = 1;
 static constexpr uint8_t DIM_BRIGHTNESS = 26; // ~10% of 255 — matches robot firmware
 
-enum class BeaconState : uint8_t { BootHw, BootWifi, BootServer, Idle, Unlit, Captured };
+static constexpr uint32_t CAPTURE_RIPPLE_MS    = 1000;
+static constexpr int      CAPTURE_RIPPLE_WAVES = 3;
+static constexpr uint32_t VP_RIPPLE_MS         = 500;
+
+enum class BeaconState : uint8_t
+{
+    BootHw, BootWifi, BootServer, Idle, Unlit, Captured, CaptureRipple, VpRipple
+};
 
 class LedController
 {
@@ -40,11 +53,17 @@ public:
         setState(BeaconState::BootHw);
     }
 
-    // Must be called every loop tick — only the Idle animation needs it,
-    // other states are static and only redraw on setState()/setCaptured().
+    // Must be called every loop tick — Idle and the two ripple animations
+    // need it; other states are static and only redraw on setState().
     void update(uint32_t now)
     {
-        if (_state == BeaconState::Idle) _updateIdle(now);
+        switch (_state)
+        {
+        case BeaconState::Idle:          _updateIdle(now);          break;
+        case BeaconState::CaptureRipple: _updateCaptureRipple(now); break;
+        case BeaconState::VpRipple:      _updateVpRipple(now);      break;
+        default: break;
+        }
     }
 
     void setState(BeaconState s)
@@ -58,11 +77,35 @@ public:
         _draw();
     }
 
-    // Sets the capture colour and switches to the Captured state in one call.
+    // Instantly sets the capture colour and switches to the Captured state,
+    // no animation. Used for hello-resync (a beacon reconnecting mid-match
+    // shouldn't replay the capture animation) and as the CaptureRipple's
+    // settle-to-final-colour step.
     void setCaptured(uint8_t r, uint8_t g, uint8_t b)
     {
         _capR = r; _capG = g; _capB = b;
         setState(BeaconState::Captured);
+    }
+
+    // Starts the ~1s capture animation: white ripples close in from both
+    // ends to the centre (several passes), the target colour brightening in
+    // behind each pass until the strip settles solid in that colour.
+    void startCaptureRipple(uint8_t r, uint8_t g, uint8_t b)
+    {
+        _capR = r; _capG = g; _capB = b;
+        _animStart = millis();
+        _state     = BeaconState::CaptureRipple;
+    }
+
+    // Starts a brief single white ripple (outside->centre) on top of
+    // whatever is currently showing, then restores it. Used to mirror the
+    // spectator display's per-tick score flash on the physical beacon.
+    void startVpRipple()
+    {
+        if (_state == BeaconState::CaptureRipple) return; // don't interrupt the capture animation
+        _priorState = _state;
+        _animStart  = millis();
+        _state      = BeaconState::VpRipple;
     }
 
     // OTA progress bar — bypasses the state machine (update() may not run
@@ -87,6 +130,8 @@ public:
     }
 
 private:
+    static inline float _fabs(float x) { return x < 0.0f ? -x : x; }
+
     void _draw()
     {
         switch (_state)
@@ -97,9 +142,12 @@ private:
         case BeaconState::Unlit:      _fillBoth(0, 0, 0); break;
         case BeaconState::Captured:   _fillBoth(_capR, _capG, _capB); break;
         case BeaconState::Idle:
-            // Left blank; update() draws the first bounce/flash frame within
-            // one loop tick (sub-millisecond), same "force redraw" approach
-            // the robot firmware uses for its boot-phase transitions.
+        case BeaconState::CaptureRipple:
+        case BeaconState::VpRipple:
+            // Animated states — left blank here; update() draws the first
+            // frame within one loop tick (sub-millisecond), same "force
+            // redraw" approach the robot firmware uses for boot-phase
+            // transitions.
             _strip.clear();   _strip.show();
             _onboard.clear(); _onboard.show();
             break;
@@ -152,11 +200,91 @@ private:
         }
     }
 
+    // Several (CAPTURE_RIPPLE_WAVES) white wavefronts sweep from both ends
+    // (distance 0) to the centre (distance 4) in turn. Behind each pass the
+    // target colour brightens up a further 1/N step, so by the final wave
+    // the strip is fully in the capture colour with no more white.
+    void _updateCaptureRipple(uint32_t now)
+    {
+        uint32_t elapsed = now - _animStart;
+        if (elapsed >= CAPTURE_RIPPLE_MS)
+        {
+            setCaptured(_capR, _capG, _capB);
+            return;
+        }
+
+        const float waveDur = (float)CAPTURE_RIPPLE_MS / (float)CAPTURE_RIPPLE_WAVES;
+        int   waveIdx = (int)((float)elapsed / waveDur);
+        if (waveIdx >= CAPTURE_RIPPLE_WAVES) waveIdx = CAPTURE_RIPPLE_WAVES - 1;
+        float waveT   = ((float)elapsed - (float)waveIdx * waveDur) / waveDur; // 0..1 within this wave
+        float front   = waveT * 4.0f;                                          // 0 (ends) .. 4 (centre)
+        float mix     = (float)(waveIdx + 1) / (float)CAPTURE_RIPPLE_WAVES;    // 1/3, 2/3, 1
+
+        for (int i = 0; i < STRIP_COUNT; i++)
+        {
+            float d = (float)((i < STRIP_COUNT - 1 - i) ? i : (STRIP_COUNT - 1 - i)); // dist from nearest end
+            uint8_t r = (uint8_t)((float)_capR * mix);
+            uint8_t g = (uint8_t)((float)_capG * mix);
+            uint8_t b = (uint8_t)((float)_capB * mix);
+            if (_fabs(d - front) < 0.8f) { r = g = b = 255; } // white wavefront overrides
+            _strip.setPixelColor(i, _strip.Color(r, g, b));
+        }
+        _strip.show();
+
+        // Onboard: flash near the start of each wave (the "ripple launching"
+        // moment), otherwise show the same brightening blend.
+        if (waveT < 0.3f)
+        {
+            _onboard.setPixelColor(0, _onboard.Color(150, 150, 150)); // dimmer than the strip's flash — close-range pixel
+        }
+        else
+        {
+            _onboard.setPixelColor(0, _onboard.Color(
+                (uint8_t)((float)_capR * mix), (uint8_t)((float)_capG * mix), (uint8_t)((float)_capB * mix)));
+        }
+        _onboard.show();
+    }
+
+    // Single white wavefront, outside->centre, over the current background
+    // colour (the stored capture colour if we were Captured; black/off
+    // otherwise), then restores whatever state was active before.
+    void _updateVpRipple(uint32_t now)
+    {
+        uint32_t elapsed = now - _animStart;
+        if (elapsed >= VP_RIPPLE_MS)
+        {
+            setState(_priorState);
+            return;
+        }
+
+        float t     = (float)elapsed / (float)VP_RIPPLE_MS;
+        float front = t * 4.0f;
+
+        uint8_t baseR = 0, baseG = 0, baseB = 0;
+        if (_priorState == BeaconState::Captured) { baseR = _capR; baseG = _capG; baseB = _capB; }
+
+        for (int i = 0; i < STRIP_COUNT; i++)
+        {
+            float d = (float)((i < STRIP_COUNT - 1 - i) ? i : (STRIP_COUNT - 1 - i));
+            uint8_t r = baseR, g = baseG, b = baseB;
+            if (_fabs(d - front) < 0.8f) { r = g = b = 255; }
+            _strip.setPixelColor(i, _strip.Color(r, g, b));
+        }
+        _strip.show();
+
+        if (front < 3.0f) _onboard.setPixelColor(0, _onboard.Color(150, 150, 150));
+        else               _onboard.setPixelColor(0, _onboard.Color(baseR, baseG, baseB));
+        _onboard.show();
+    }
+
     Adafruit_NeoPixel _strip;
     Adafruit_NeoPixel _onboard;
-    BeaconState       _state = BeaconState::BootHw;
+    BeaconState       _state      = BeaconState::BootHw;
+    BeaconState       _priorState = BeaconState::Idle; // what VpRipple restores when done
 
     uint8_t _capR = 0, _capG = 0, _capB = 0;
+
+    uint32_t _animStart = 0; // shared start time for CaptureRipple / VpRipple
 
     int      _bouncePos  = 0;
     int      _bounceDir  = 1;
