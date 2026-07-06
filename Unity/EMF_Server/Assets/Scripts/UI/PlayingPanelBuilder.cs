@@ -36,7 +36,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v15";
+    const string BUILT_SENTINEL = "__ppb_v16";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -109,9 +109,6 @@ public class PlayingPanelBuilder : MonoBehaviour
         RemoveIfPresent<ToggleCameraButton>(pp);
         RemoveIfPresent<FlipVideoButtons>(pp);
         RemoveIfPresent<EventLogPanelUI>(pp); // event log panel removed — strip stale component from older scenes
-        // SpectateButtonController intentionally NOT removed here — Destroy() is deferred
-        // in play mode, causing GetOrAdd to return the same component which then gets
-        // destroyed after Start() wires the listener, silently breaking Button.onClick.
 
         var bgImg = pp.GetComponent<Image>() ?? pp.AddComponent<Image>();
         bgImg.color = C_BG;
@@ -262,13 +259,6 @@ public class PlayingPanelBuilder : MonoBehaviour
         var capSouthBtn  = MakeButton(capRow.transform, "CaptureSouthBtn",  "SOUTH\n—",  C_CAPNTR, C_TEXT, 8f);
         SetRowHeights(24f, capNorthBtn, capCentreBtn, capSouthBtn);
 
-        // FPV spectate buttons (side by side in one row)
-        var fpvRow  = MakeActionRow(leftCol.transform, "FpvRow");
-        var fpv1Btn = MakeButton(fpvRow.transform, "Fpv1Button", "FPV×1", C_DKBLU2, C_TEXT, 12f);
-        fpv1Btn.AddComponent<LayoutElement>().preferredHeight = 24f;
-        var fpv6Btn = MakeButton(fpvRow.transform, "Fpv6Button", "FPV×6", C_DKBLU2, C_TEXT, 12f);
-        fpv6Btn.AddComponent<LayoutElement>().preferredHeight = 24f;
-
         // Roster scroll
         RectTransform rosterContent;
         var rosterScroll = CreateScrollCard(leftCol.transform, "RosterScroll", out rosterContent);
@@ -278,13 +268,6 @@ public class PlayingPanelBuilder : MonoBehaviour
         RemoveIfPresent<TeamRosterPanel>(pp);
         var rlp = GetOrAdd<RobotListPanel>(pp);
         Wire(rlp, "rowContainer", rosterContent);
-
-        var sbc = GetOrAdd<SpectateButtonController>(pp);
-        Wire(sbc, "_fpv1Button",    fpv1Btn.GetComponent<Button>());
-        Wire(sbc, "_fpv1Label",     fpv1Btn.GetComponentInChildren<TextMeshProUGUI>());
-        Wire(sbc, "_fpv6Button",    fpv6Btn.GetComponent<Button>());
-        Wire(sbc, "_fpv6Label",     fpv6Btn.GetComponentInChildren<TextMeshProUGUI>());
-        Wire(sbc, "_robotListPanel", rlp);
 
         // ── Game settings sidebar ──────────────────────────────────────────────
         // Full-height strip along the right edge of the screen (not confined between
