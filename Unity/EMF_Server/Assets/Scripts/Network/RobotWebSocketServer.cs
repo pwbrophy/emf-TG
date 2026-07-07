@@ -28,6 +28,16 @@ public class RobotWebSocketServer : MonoBehaviour
     private IRobotDirectory _dir;
     private GameFlow _flow;
 
+    // Shared secret robots must include as "tok" in hello. Loaded from ws_token.txt
+    // (Unity project root, gitignored — must match WS_HELLO_TOKEN in the firmware's
+    // secrets.h). Port 8080 is open to the whole venue LAN; without this, anyone can
+    // register fake robots or spoof ir_window_result. Empty = gate disabled.
+    private string _helloToken = "";
+
+    // Robots only send small flat JSON; anything larger is a stranger poking the
+    // open port. Cap before parsing so a junk flood can't burn CPU or memory.
+    private const int MaxInboundTextChars = 4096;
+
     // Per-session data
     private class SessionInfo
     {
@@ -102,6 +112,8 @@ public class RobotWebSocketServer : MonoBehaviour
             return;
         }
 
+        LoadHelloToken();
+
         string ip = PetersUtils.GetLocalIPAddress().ToString();
 
         // Bind to all interfaces (0.0.0.0) so robots on any subnet can connect.
@@ -123,6 +135,34 @@ public class RobotWebSocketServer : MonoBehaviour
         ServiceLocator.RobotServer = this;
 
         _flow.OnPhaseChanged += OnPhaseChanged;
+    }
+
+    // Loads the shared hello token from ws_token.txt in the Unity project root
+    // (next to Assets/, gitignored — must match WS_HELLO_TOKEN in firmware secrets.h).
+    // Missing file = token gate disabled with a warning, so a fresh clone still
+    // works against un-tokened firmware.
+    private void LoadHelloToken()
+    {
+        try
+        {
+            string tokenPath = System.IO.Path.Combine(Application.dataPath, "..", "ws_token.txt");
+            if (System.IO.File.Exists(tokenPath))
+            {
+                _helloToken = System.IO.File.ReadAllText(tokenPath).Trim();
+                Debug.Log("[WS] hello token loaded — robot registration is gated");
+            }
+            else
+            {
+                _helloToken = "";
+                Debug.LogWarning("[WS] ws_token.txt not found next to Assets/ — accepting ANY robot hello (no auth). " +
+                                 "Create it containing the WS_HELLO_TOKEN value from firmware secrets.h.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _helloToken = "";
+            Debug.LogWarning("[WS] failed to load ws_token.txt: " + ex.Message);
+        }
     }
 
     public void StopServer()
@@ -246,12 +286,27 @@ public class RobotWebSocketServer : MonoBehaviour
     public void HandleText(string sid, string json)
     {
         if (string.IsNullOrEmpty(json)) return;
+        if (json.Length > MaxInboundTextChars)
+        {
+            Debug.LogWarning($"[WS] dropped oversized message ({json.Length} chars) from session {sid}");
+            return;
+        }
 
         string cmd = ExtractString(json, "cmd");
         if (string.IsNullOrEmpty(cmd)) return;
 
         if (cmd == "hello")
         {
+            if (!string.IsNullOrEmpty(_helloToken))
+            {
+                string tok = ExtractString(json, "tok");
+                if (tok != _helloToken)
+                {
+                    Debug.LogWarning($"[WS] hello rejected — missing/bad token from session {sid} (id={ExtractString(json, "id")})");
+                    return;
+                }
+            }
+
             // Accept registrations in Lobby (new robot joining) or Playing (mid-game
             // reconnect after a brief Wi-Fi drop). Reject in MainMenu and Ended so
             // robots can't join a finished match or before setup has started.

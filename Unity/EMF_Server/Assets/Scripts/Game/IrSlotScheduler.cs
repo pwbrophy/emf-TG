@@ -9,9 +9,21 @@ using UnityEngine;
 // adapts to actual Wi-Fi latency. No clock sync required.
 public class IrSlotScheduler : MonoBehaviour
 {
-    private readonly Queue<string> _queue = new Queue<string>();
+    private readonly Queue<(string shooterId, float queuedAt)> _queue = new Queue<(string, float)>();
     private bool _busy;
     private int  _nextSlotId = 1;
+
+    // Shots older than this are dropped instead of executed. On congested Wi-Fi the
+    // serialized handshake (one shot at a time, each bounded by ack/window timeouts)
+    // can fall behind the fire rate; without a cap the queue grows and shots resolve
+    // seconds after the trigger pull.
+    private const float MaxQueueAgeSeconds = 2f;
+
+    // Unsubscribes the in-flight shot's event handlers and stops its IR emit.
+    // ExecuteShot sets this; OnPhaseChanged invokes it before StopAllCoroutines(),
+    // because a killed coroutine never reaches its own unsubscribe lines and the
+    // leaked handlers would otherwise accumulate every match.
+    private Action _abortActiveShot;
 
     private void Awake()
     {
@@ -38,26 +50,37 @@ public class IrSlotScheduler : MonoBehaviour
 
     private void OnPhaseChanged(GamePhase phase)
     {
-        if (phase == GamePhase.Lobby || phase == GamePhase.Playing)
-        {
-            StopAllCoroutines();
-            _queue.Clear();
-            _busy = false;
-            Debug.Log($"[IrHs] Reset on phase → {phase}");
-        }
+        // Reset on every transition — including Ended, so an in-flight shot can't
+        // apply damage after the match is over.
+        _abortActiveShot?.Invoke();
+        _abortActiveShot = null;
+        StopAllCoroutines();
+        _queue.Clear();
+        _busy = false;
+        Debug.Log($"[IrHs] Reset on phase → {phase}");
     }
 
     public void EnqueueFire(string shooterId)
     {
         if (string.IsNullOrEmpty(shooterId)) return;
-        _queue.Enqueue(shooterId);
+        _queue.Enqueue((shooterId, Time.time));
         Debug.Log($"[IrHs] >>> FIRE REQUEST queued for {shooterId} (queue depth: {_queue.Count})");
     }
 
     private void Update()
     {
         if (_busy || _queue.Count == 0) return;
-        StartCoroutine(ExecuteShot(_queue.Dequeue()));
+
+        var (shooterId, queuedAt) = _queue.Dequeue();
+        float age = Time.time - queuedAt;
+        if (age > MaxQueueAgeSeconds)
+        {
+            Debug.LogWarning($"[IrHs] Dropped stale shot for {shooterId} (queued {age:F1}s ago)");
+            ServiceLocator.PlayerServer?.SendFireResult(shooterId, "Miss (lag)");
+            return; // next Update pulls the next entry
+        }
+
+        StartCoroutine(ExecuteShot(shooterId));
     }
 
     // ACK-driven handshake shot.
@@ -170,6 +193,12 @@ public class IrSlotScheduler : MonoBehaviour
 
         server.OnIrEmitAck      += OnAck;
         server.OnIrWindowResult += OnWindow;
+        _abortActiveShot = () =>
+        {
+            server.OnIrEmitAck      -= OnAck;
+            server.OnIrWindowResult -= OnWindow;
+            server.SendIrEmitStop(shooterId);
+        };
 
         bool aborted = false;
 
@@ -292,6 +321,7 @@ public class IrSlotScheduler : MonoBehaviour
 
         server.OnIrEmitAck      -= OnAck;
         server.OnIrWindowResult -= OnWindow;
+        _abortActiveShot = null;
         _busy = false;
     }
 

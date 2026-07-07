@@ -1,4 +1,4 @@
-# ── Unity generated / cache folders ─────────────────────
+﻿# â”€â”€ Unity generated / cache folders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
@@ -9,7 +9,7 @@
 MemoryCaptures/
 Recordings/
 
-# ── Unity auto-generated VS solution / project files ────
+# â”€â”€ Unity auto-generated VS solution / project files â”€â”€â”€â”€
 *.csproj
 *.sln
 *.suo
@@ -17,13 +17,16 @@ Recordings/
 *.user
 *.userprefs
 
-# ── JetBrains Rider ──────────────────────────────────────
+# â”€â”€ JetBrains Rider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 .idea/
 *.sln.iml
 
-# ── Asset Store / imported packages (bulky, regenerable) ─
+# â”€â”€ Asset Store / imported packages (bulky, regenerable) â”€
 # Assets/AssetStoreTools*      # uncomment if you use the Asset Store uploader
 
-# ── Crash / profiler output ──────────────────────────────
+# â”€â”€ Crash / profiler output â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 crashlytics-build.properties
 sysinfo.txt
+
+# Shared robot hello token (must match WS_HELLO_TOKEN in firmware secrets.h)
+ws_token.txt*

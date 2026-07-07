@@ -43,8 +43,15 @@ pio run -e thundergeddon_ota --target upload
 The robot must be powered on and connected to Wi-Fi for OTA to work. The `platformio.ini` `[env:thundergeddon_ota]` section is configured with:
 - `upload_protocol = espota`
 - `upload_port = thunder-9CF218697090.local` (mDNS hostname — may need replacing with the robot's IP if mDNS doesn't resolve on Windows; check Unity's robot list or serial output for the IP)
-- `--auth=thunder123`
+- `--auth=${secrets.ota_password}` (from `secrets.ini` — see **Secrets** below; NEVER commit the actual password, this repo is public)
 - `--port=3232`
+
+**Secrets (never commit):** three gitignored files hold the shared credentials and must exist on every machine (desktop + laptop) — copy from their `.template` siblings on a fresh clone:
+- `ESP32/thundergeddon/src/secrets.h` — Wi-Fi creds, `OTA_PASSWORD`, `WS_HELLO_TOKEN` (baked into firmware)
+- `ESP32/thundergeddon/secrets.ini` — `ota_password` used by `pio run --target upload` and `flash_all.ps1`; must equal `OTA_PASSWORD` in secrets.h
+- `Unity/EMF_Server/ws_token.txt` — must equal `WS_HELLO_TOKEN` in secrets.h; Unity rejects robot `hello` messages without the matching `tok` field (warns and accepts everything if the file is missing)
+
+To rotate the OTA password: change it in `secrets.h`, flash the fleet with the OLD password via `.\flash_all.ps1 -Auth <old-password>`, then update `secrets.ini` to the new value.
 
 A successful upload ends with `Result: OK` / `Success`. If the hostname doesn't resolve, substitute the robot's current IP directly, e.g. `pio run -e thundergeddon_ota --target upload --upload-port 192.168.x.x`.
 
@@ -288,8 +295,8 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 
 | Message | Fields | Meaning |
 |---------|--------|---------|
-| `hello` | `id`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret` | Robot registers itself. `name` is the human-readable name saved in NVS (empty string if never set). |
-| `hb` | `t` | Heartbeat (millis timestamp) |
+| `hello` | `id`, `tok`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret` | Robot registers itself. `tok` is `WS_HELLO_TOKEN` from `secrets.h` — Unity rejects the hello if it doesn't match `ws_token.txt` (auth gate for the open port 8080; disabled if the file is absent). `name` is the human-readable name saved in NVS (empty string if never set). |
+| `hb` | `t`, `heap` | Heartbeat (millis timestamp + free heap bytes, for monitoring robot memory health over long sessions) |
 | `pong` | — | Reply to `ping`; used by `RobotPingButton` to display RTT |
 | `ir_emit_ack` | — | Shooter acknowledges `ir_emit_left` or `ir_emit_right` |
 | `ir_window_result` | `mask` (uint8) | 8-bit bitmask of triggered IR receivers: bit 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW |
@@ -492,12 +499,12 @@ DRV8833 INx truth table:
 | `LedController.h` | 6× WS2812B on GPIO38; HP bar in blue, fire flash white, hit flash red. |
 | `CameraController.h` | PCLK=8, XCLK=16 (corrected from old code); MJPEG frames sent over WebSocket. |
 | `MjpegServer.h` | esp_http_server MJPEG stream on port 81 (`http://<robot-ip>:81/stream`). Phones connect directly. |
-| `OtaSupport.h` | ArduinoOTA. Hostname `thunder-<MAC12>`, password `thunder123`, port 3232. Stops camera + disables motors before update. |
+| `OtaSupport.h` | ArduinoOTA. Hostname `thunder-<MAC12>`, password `OTA_PASSWORD` from `secrets.h`, port 3232. Stops camera + disables motors before update. |
 | `main.cpp` | Wires all modules. Handles `drive`, `turret`, `motors_on/off`, `stream_on/off`, `flash_fire`, `flash_hit`, `set_hp`, `ir_emit_left`, `ir_emit_right`, `ir_emit_stop`, `ir_listen_window`, `ping`. Sends `hello`, `hb`, `pong`, `ir_emit_ack`, `ir_window_result`. |
 
 ### OTA
 - Hostname: `thunder-<MAC12>` (this robot: `thunder-9CF218697090`)
-- Password: `thunder123`
+- Password: `OTA_PASSWORD` in `src/secrets.h` / `ota_password` in `secrets.ini` (gitignored — never commit)
 - Port: 3232
 - Safe: stops camera and disables motors before update
 - PlatformIO env: `thundergeddon_ota` — see **Working with Claude Code** section at the top of this file for the exact upload command and troubleshooting notes.

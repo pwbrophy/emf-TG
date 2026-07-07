@@ -266,7 +266,7 @@ void setup()
     leds.setState(BeaconState::BootServer);
 
     String otaHost = String("beacon-") + g_beaconId;
-    OtaSupport::begin(otaHost.c_str(), "thunder123", otaPauseCb, nullptr, otaProgressCb, nullptr);
+    OtaSupport::begin(otaHost.c_str(), OTA_PASSWORD, otaPauseCb, nullptr, otaProgressCb, nullptr);
 
     startDiscovery();
 }

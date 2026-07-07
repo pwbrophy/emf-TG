@@ -187,7 +187,11 @@ public class UdpDiscoveryListener : MonoBehaviour
         {
             if (_rxThread != null)
             {
-                _rxThread.Join(200);
+                // Closing _udp above unblocks the Receive() call, so 200 ms is normally
+                // plenty. If it isn't, the leaked thread is background (dies with the
+                // process) but repeated lobby toggles would accumulate them — worth a log.
+                if (!_rxThread.Join(200))
+                    Debug.LogWarning("[UDP] RX thread did not exit within 200 ms — leaked until process exit");
                 _rxThread = null;
             }
         }

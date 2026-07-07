@@ -1254,9 +1254,24 @@ function releaseWakeLock() {
 document.addEventListener('visibilitychange', () => {
   // Only re-acquire while actually playing (playing screen is active).
   if (document.visibilityState === 'visible'
-      && document.getElementById('screen-playing').classList.contains('active'))
+      && document.getElementById('screen-playing').classList.contains('active')) {
     acquireWakeLock();
+  } else if (document.visibilityState === 'hidden') {
+    dropControls();
+  }
 });
+// iOS Safari can skip visibilitychange on some navigations; pagehide is the backstop.
+window.addEventListener('pagehide', dropControls);
+
+// Zero and release all held controls. Called when the page is backgrounded
+// (lock screen, notification shade, app switch): a pointerup that fires while
+// hidden never reaches us, so without this the joystick resumes streaming its
+// stale value when the page returns — the tank drives itself with no finger
+// on the screen. releaseJoy/releaseTurretSlider are hoisted function
+// declarations, so referencing them from here is safe.
+function dropControls() {
+  try { releaseJoy(); releaseTurretSlider(); } catch (_) {}
+}
 
 // ── Join-button state helpers ──────────────────────────────────────────────
 // Tracks whether the lobby is currently open (Lobby phase). Updated by SignalR
@@ -1983,6 +1998,9 @@ function onStateUpdate(data) {
 function onYouAreDead() {
   isDead     = true;
   isDeadWalk = false;
+  // Release held controls so the joystick value from the moment of death can't
+  // resume when dead-walk re-enables driving 5s from now.
+  dropControls();
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
 
   const overlay   = document.getElementById('screen-dead');

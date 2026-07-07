@@ -837,7 +837,24 @@ function videoWsUrl(robotUrl) {
 
 // ── Tank grid — always-on multi-tank spectator view during Playing ────────
 const _gridWs = {};   // index → WebSocket
+const _gridLastFrame = {};   // index → Date.now() of last decoded frame
 let _gridBuilt = false;
+
+// Dead-camera watchdog: a crashed robot camera leaves its WebSocket open but
+// silent, so the canvas freezes on the last frame and spectators can't tell the
+// feed is stale. Flag any open stream with no frame for 5s.
+setInterval(() => {
+  Object.keys(_gridWs).forEach(k => {
+    const noVid = document.getElementById(`grid-nolvideo-${k}`);
+    const cell  = document.getElementById(`grid-cell-${k}`);
+    if (!noVid || (cell && cell.classList.contains('dead'))) return;
+    const last = _gridLastFrame[k] || 0;
+    if (last && Date.now() - last > 5000) {
+      noVid.textContent = 'CAMERA DOWN';
+      noVid.style.display = '';
+    }
+  });
+}, 2000);
 
 function buildGridCell(r, i, footerCls) {
   const isDead   = r.dead || r.hp === 0;
@@ -947,8 +964,10 @@ function startGridStream(index, robotUrl) {
   ws.binaryType = 'arraybuffer';
   _gridWs[index] = ws;
 
-  ws.onopen  = () => { if (noVid) noVid.style.display = 'none'; };
+  ws.onopen  = () => { _gridLastFrame[index] = Date.now(); if (noVid) noVid.style.display = 'none'; };
   ws.onmessage = (e) => {
+    _gridLastFrame[index] = Date.now();
+    if (noVid && noVid.style.display !== 'none') noVid.style.display = 'none';
     const blob    = new Blob([e.data], { type: 'image/jpeg' });
     const blobUrl = URL.createObjectURL(blob);
     const img     = new Image();
@@ -963,7 +982,18 @@ function startGridStream(index, robotUrl) {
     img.src = blobUrl;
   };
   ws.onerror = () => { if (noVid) { noVid.textContent = 'no stream'; noVid.style.display = ''; } };
-  ws.onclose = () => { if (_gridWs[index] === ws) delete _gridWs[index]; };
+  ws.onclose = () => {
+    if (_gridWs[index] === ws) {
+      delete _gridWs[index];
+      delete _gridLastFrame[index];
+      // Unexpected close (not the intentional close on robot death) — tell spectators.
+      const cell = document.getElementById(`grid-cell-${index}`);
+      if (noVid && !(cell && cell.classList.contains('dead'))) {
+        noVid.textContent = 'no stream';
+        noVid.style.display = '';
+      }
+    }
+  };
 }
 
 function updateGrid() {

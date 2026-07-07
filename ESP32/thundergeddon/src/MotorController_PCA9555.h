@@ -95,6 +95,15 @@ public:
 
     bool isEnabled() const { return _enabled; }
 
+    // True when all channels are at rest (targets and ramped currents at zero).
+    // Used to pick a safe moment for blocking work like NVS flash writes.
+    bool isIdle() const
+    {
+        return _leftTarget  == 0.0f && _leftCurrent  == 0.0f &&
+               _rightTarget == 0.0f && _rightCurrent == 0.0f &&
+               _turretTarget == 0.0f && _turretCurrent == 0.0f;
+    }
+
     // Set acceleration/deceleration ramp times (seconds, 0 = instant).
     // driveAccel/driveDecel apply to both tracks; turretAccel/turretDecel to the turret.
     // "Accel" governs ramp-up when a non-zero target is commanded.

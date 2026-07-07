@@ -120,6 +120,62 @@ static framesize_t videoIdxToFrameSize(int idx)
 // volatile so the compiler never caches it across loop iterations.
 volatile bool   g_pca9555IntFired = false;
 
+// ---- Deferred NVS persistence ----
+// Preferences.put* blocks loop() for tens of ms (SPI flash write), which stalls the
+// 1 ms motor PWM tick and can push an IR window read past the receiver pulse.
+// Command handlers apply settings in RAM and set a dirty flag; flushPrefsIfIdle()
+// commits once the robot is idle, or after NVS_FLUSH_MAX_MS regardless so settings
+// survive a power cycle even during continuous driving.
+static constexpr uint32_t NVS_FLUSH_MAX_MS = 10000;
+static bool     g_camPrefsDirty   = false;
+static bool     g_drvPrefsDirty   = false;
+static bool     g_namePrefsDirty  = false;
+static uint32_t g_prefsDirtySince = 0;
+
+static void markPrefsDirty(bool& flag)
+{
+    if (!g_camPrefsDirty && !g_drvPrefsDirty && !g_namePrefsDirty)
+        g_prefsDirtySince = millis();
+    flag = true;
+}
+
+static void flushPrefsIfIdle(uint32_t now)
+{
+    if (!g_camPrefsDirty && !g_drvPrefsDirty && !g_namePrefsDirty) return;
+
+    bool idle = motors.isIdle() && !ir.inWindow() && !ir.isEmitting();
+    if (!idle && (now - g_prefsDirtySince) < NVS_FLUSH_MAX_MS) return;
+
+    if (g_camPrefsDirty) {
+        Preferences prefs;
+        prefs.begin("tg_cam", false);
+        prefs.putInt("hflip",    g_hflip);
+        prefs.putInt("vflip",    g_vflip);
+        prefs.putInt("fps",      g_videoFps);
+        prefs.putInt("fsize",    g_videoFrameSizeIdx);
+        prefs.putInt("fquality", g_videoQuality);
+        prefs.end();
+        g_camPrefsDirty = false;
+    }
+    if (g_drvPrefsDirty) {
+        Preferences prefs;
+        prefs.begin("tg_drv", false);
+        prefs.putInt("inv_throttle", g_inv_throttle);
+        prefs.putInt("inv_steer",    g_inv_steer);
+        prefs.putInt("inv_turret",   g_inv_turret);
+        prefs.end();
+        g_drvPrefsDirty = false;
+    }
+    if (g_namePrefsDirty) {
+        Preferences prefs;
+        prefs.begin("tg_id", false);
+        prefs.putString("name", g_robotName);
+        prefs.end();
+        g_namePrefsDirty = false;
+    }
+    Serial.println("[NVS] deferred prefs flushed");
+}
+
 static uint32_t g_lastAnnounce   = 0;
 static uint32_t g_lastHeartbeat  = 0;
 static uint32_t g_lastMotorTick  = 0;
@@ -861,12 +917,14 @@ static void maybeAnnounce()
     if (now - g_lastAnnounce < ANNOUNCE_MS) return;
     g_lastAnnounce = now;
 
-    // Include IP so the server has it immediately without a separate lookup
-    String payload = String("{\"robotId\":\"") + g_robotId +
-                     "\",\"callsign\":\"\",\"ip\":\"" +
-                     WiFi.localIP().toString() + "\"}";
+    // Include IP so the server has it immediately without a separate lookup.
+    // Stack buffer instead of String concat — repeats every 2s during discovery.
+    char payload[160];
+    int len = snprintf(payload, sizeof(payload),
+                       "{\"robotId\":\"%s\",\"callsign\":\"\",\"ip\":\"%s\"}",
+                       g_robotId.c_str(), WiFi.localIP().toString().c_str());
     udp.beginPacket(IPAddress(255,255,255,255), DISCOVERY_PORT);
-    udp.write((const uint8_t*)payload.c_str(), payload.length());
+    udp.write((const uint8_t*)payload, len);
     udp.endPacket();
     Serial.println("[DISCOVERY] announce");
 }
@@ -999,11 +1057,7 @@ static void handleWsText(const String& s)
         g_hflip = doc["h"] | g_hflip;
         g_vflip = doc["v"] | g_vflip;
         cam.applyFlip(g_vflip != 0, g_hflip != 0);
-        Preferences prefs;
-        prefs.begin("tg_cam", false); // read-write
-        prefs.putInt("hflip", g_hflip);
-        prefs.putInt("vflip", g_vflip);
-        prefs.end();
+        markPrefsDirty(g_camPrefsDirty); // NVS write deferred until motors/IR idle
         Serial.printf("[CAM] flip set hflip=%d vflip=%d\n", g_hflip, g_vflip);
         return;
     }
@@ -1015,12 +1069,7 @@ static void handleWsText(const String& s)
         mjpeg.setMaxFps(g_videoFps);
         cam.setFrameSize(videoIdxToFrameSize(g_videoFrameSizeIdx));
         cam.setQuality(g_videoQuality);
-        Preferences prefs;
-        prefs.begin("tg_cam", false); // read-write
-        prefs.putInt("fps",      g_videoFps);
-        prefs.putInt("fsize",    g_videoFrameSizeIdx);
-        prefs.putInt("fquality", g_videoQuality);
-        prefs.end();
+        markPrefsDirty(g_camPrefsDirty); // NVS write deferred until motors/IR idle
         Serial.printf("[CAM] set_video fps=%d fsize=%d quality=%d\n",
                       g_videoFps, g_videoFrameSizeIdx, g_videoQuality);
         return;
@@ -1030,12 +1079,7 @@ static void handleWsText(const String& s)
         g_inv_throttle = doc["inv_throttle"] | g_inv_throttle;
         g_inv_steer    = doc["inv_steer"]    | g_inv_steer;
         g_inv_turret   = doc["inv_turret"]   | g_inv_turret;
-        Preferences prefs;
-        prefs.begin("tg_drv", false);
-        prefs.putInt("inv_throttle", g_inv_throttle);
-        prefs.putInt("inv_steer",    g_inv_steer);
-        prefs.putInt("inv_turret",   g_inv_turret);
-        prefs.end();
+        markPrefsDirty(g_drvPrefsDirty); // NVS write deferred until motors/IR idle
         Serial.printf("[DRV] config set inv_throttle=%d inv_steer=%d inv_turret=%d\n",
                       g_inv_throttle, g_inv_steer, g_inv_turret);
         return;
@@ -1054,10 +1098,7 @@ static void handleWsText(const String& s)
     if (strcmp(cmd, "set_name") == 0) {
         const char* newName = doc["name"] | "";
         g_robotName = String(newName);
-        Preferences prefs;
-        prefs.begin("tg_id", false);
-        prefs.putString("name", g_robotName);
-        prefs.end();
+        markPrefsDirty(g_namePrefsDirty); // NVS write deferred until motors/IR idle
         Serial.printf("[ID] Name set to: %s\n", g_robotName.c_str());
         return;
     }
@@ -1249,8 +1290,12 @@ static void connectWebSocket()
             g_wsOpen        = true;
             g_lastHeartbeat = 0; // trigger immediate heartbeat next tick
 
-            // hello includes IP, name, and config so the server can sync its UI
+            // hello includes IP, name, and config so the server can sync its UI.
+            // tok authenticates the robot: Unity drops hello messages with a
+            // missing/wrong token so strangers on the venue LAN can't register
+            // fake robots or spoof IR results.
             String hello = String("{\"cmd\":\"hello\",\"id\":\"") + g_robotId +
+                           "\",\"tok\":\""       + WS_HELLO_TOKEN +
                            "\",\"name\":\""      + g_robotName +
                            "\",\"ip\":\""        + WiFi.localIP().toString() +
                            "\",\"hflip\":"       + String(g_hflip) +
@@ -1400,7 +1445,7 @@ void setup()
     String otaHost = String("thunder-") + g_robotId;
     OtaSupport::begin(
         otaHost.c_str(),
-        "thunder123",
+        OTA_PASSWORD,   // from secrets.h — must match secrets.ini used for uploads
         []() {
             // Pause: stop everything that could cause problems during OTA.
             // mjpeg.stop() blocks until the HTTP server task exits, so it is
@@ -1464,6 +1509,9 @@ void loop()
         Serial.println("[WD] drive watchdog fired — coasting to stop");
     }
 
+    // ---- Deferred NVS writes (see flushPrefsIfIdle) ----
+    flushPrefsIfIdle(now);
+
     // ---- LED effects and status blink ----
     leds.update(now);
 
@@ -1497,8 +1545,9 @@ void loop()
     if (ir.isWindowDone()) {
         uint8_t mask = ir.takeWindowMask();
         if (g_wsOpen) {
-            String resp = String("{\"cmd\":\"ir_window_result\",\"mask\":") +
-                          String(mask) + "}";
+            char resp[64];
+            snprintf(resp, sizeof(resp),
+                     "{\"cmd\":\"ir_window_result\",\"mask\":%u}", (unsigned)mask);
             ws.send(resp);
             Serial.printf("[IR] window result mask=0x%02X\n", mask);
         }
@@ -1533,7 +1582,12 @@ void loop()
         // Periodic heartbeat
         if (now - g_lastHeartbeat >= HEARTBEAT_MS) {
             g_lastHeartbeat = now;
-            String hb = String("{\"cmd\":\"hb\",\"t\":") + String(now) + "}";
+            // Stack buffer instead of String concat — this runs every 2s for hours,
+            // and repeated small heap allocs fragment the ESP32 heap over a long
+            // event day. heap field lets the server monitor robot memory health.
+            char hb[96];
+            snprintf(hb, sizeof(hb), "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u}",
+                     (unsigned long)now, (unsigned)ESP.getFreeHeap());
             ws.send(hb);
         }
     } else {

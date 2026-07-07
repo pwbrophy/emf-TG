@@ -2,7 +2,9 @@
 param(
     [int[]]$Only = @(),          # e.g. .\flash_all.ps1 1,2,7,8  -- omit to flash all
     [ValidateSet("BFG","TG")]
-    [string]$Network = "BFG"     # BFG = desktop (192.168.86.x), TG = laptop (192.168.8.x)
+    [string]$Network = "BFG",    # BFG = desktop (192.168.86.x), TG = laptop (192.168.8.x)
+    [string]$Auth = ""           # OTA auth override (e.g. transition flash after a password change);
+                                 # default reads ota_password from secrets.ini
 )
 
 Set-StrictMode -Version Latest
@@ -48,7 +50,17 @@ $Robots = @(if ($Only.Count -gt 0) {
 
 if ($Robots.Count -eq 0) { Write-Error "No robots matched: $Only" }
 
-$Auth     = "thunder123"
+# OTA password lives in secrets.ini (gitignored) — same value the new firmware bakes
+# in from src/secrets.h. Use -Auth to override when the fleet still runs an older password.
+if (-not $Auth) {
+    $secretsIni = Join-Path $PSScriptRoot "secrets.ini"
+    if (-not (Test-Path $secretsIni)) {
+        Write-Error "secrets.ini not found — copy secrets.ini.template and set ota_password."
+    }
+    $match = Select-String -Path $secretsIni -Pattern '^\s*ota_password\s*=\s*(.+?)\s*$' | Select-Object -First 1
+    if (-not $match) { Write-Error "ota_password not found in secrets.ini" }
+    $Auth = $match.Matches[0].Groups[1].Value
+}
 $OtaPort  = 3232
 $BuildEnv = "thundergeddon_ota"
 # -----------------------------------------------------------------------------
