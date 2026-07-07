@@ -108,6 +108,21 @@
     #join-btn.btn-waiting { background: var(--muted); }
     #join-btn.btn-waiting:disabled { opacity: 1; }
 
+    .btn-secondary {
+      width: 100%;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      transition: opacity 0.15s;
+    }
+    .btn-secondary:active { opacity: 0.8; }
+
     .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
     .status.error { color: #e05050; }
 
@@ -973,6 +988,7 @@
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="20" autocomplete="off" spellcheck="false" />
     <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
+    <button class="btn-secondary" onclick="stayInTouch()">STAY IN TOUCH</button>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -2174,8 +2190,7 @@ function goToStats() {
 }
 
 function stayInTouch() {
-  // Placeholder — will link to a stay-in-touch page when ready
-  window.open('about:blank', '_blank');
+  window.open('https://www.youtube.com/@Thundergeddon', '_blank');
 }
 
 function resetGoOverlay() {
