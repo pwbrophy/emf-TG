@@ -305,7 +305,14 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         BridgeMsg msg;
         try { msg = JsonUtility.FromJson<BridgeMsg>(json); }
-        catch { return; }
+        catch (Exception ex)
+        {
+            // Never silent — a malformed message from the bridge is something the
+            // operator needs to see when debugging phone input problems at the event.
+            int len = json?.Length ?? 0;
+            Debug.LogWarning($"[PlayerWS] Malformed bridge JSON ({len} chars): {ex.Message} — prefix: {json?.Substring(0, Mathf.Min(len, 120))}");
+            return;
+        }
         if (msg == null || string.IsNullOrWhiteSpace(msg.cmd)) return;
 
         switch (msg.cmd)
@@ -759,6 +766,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
         _connToPlayer.Remove(connId);
+        _lastTurretByConn.Remove(connId);
 
         // Player already rejoined with a new connection — don't evict them.
         foreach (var v in _connToPlayer.Values)
@@ -816,8 +824,6 @@ public class PlayerWebSocketServer : MonoBehaviour
             OnPlayerInput?.Invoke(playerName, l, r, GetLastTurret(playerName));
             _statGround[playerName] = _statGround.GetValueOrDefault(playerName) + Mathf.Abs(l) + Mathf.Abs(r);
         }
-
-        _lastTurret[connId] = GetLastTurret(_connToPlayer.TryGetValue(connId, out var nm) ? nm : "");
     }
 
     // Returns the robot a player may use for turret/fire: their gunner robot, or their
@@ -882,9 +888,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         shooting.RequestFire(robotId);
     }
 
-    // Track last turret value per connection for the OnPlayerInput event
+    // Track last turret value per connection for the OnPlayerInput event.
+    // Entries are removed in HandleLeave so a reused connection id can't inherit
+    // a previous player's turret value.
     private readonly Dictionary<string, float> _lastTurretByConn = new Dictionary<string, float>();
-    private readonly Dictionary<string, float> _lastTurret        = new Dictionary<string, float>();
 
     float GetLastTurret(string playerName)
     {
@@ -1937,43 +1944,6 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         string json = "{\"cmd\":\"display_event\",\"text\":\"" + EscapeJson(text) + "\"}";
         BroadcastRaw(json);
-    }
-
-    public void SendSpectateUpdate(string robotId, bool enabled)
-    {
-        if (!enabled)
-        {
-            BroadcastRaw("{\"cmd\":\"spectate_update\",\"enabled\":false}");
-            return;
-        }
-
-        var dir = ServiceLocator.RobotDirectory;
-        if (dir == null || string.IsNullOrEmpty(robotId) || !dir.TryGet(robotId, out var rInfo)) return;
-
-        string ip         = rInfo.Ip ?? "";
-        string playerName = rInfo.AssignedPlayer ?? "";
-        string videoUrl   = string.IsNullOrEmpty(ip) ? "" : "http://" + ip + ":81/stream";
-        int    maxHp      = ServiceLocator.GameSettings?.MaxHp ?? 100;
-        var    state      = ServiceLocator.Game?.State;
-        int    hp         = (state != null && state.RobotHp.TryGetValue(robotId, out int v)) ? v : maxHp;
-
-        string json =
-            "{\"cmd\":\"spectate_update\"" +
-            ",\"enabled\":true" +
-            ",\"mode\":\"single\"" +
-            ",\"videoUrl\":\""    + EscapeJson(videoUrl)    + "\"" +
-            ",\"playerName\":\"" + EscapeJson(playerName)  + "\"" +
-            ",\"hp\":"           + hp                             +
-            ",\"maxHp\":"        + maxHp                          +
-            "}";
-        BroadcastRaw(json);
-        Debug.Log("[PlayerWS] spectate_update single → player=" + playerName + " url=" + videoUrl);
-    }
-
-    public void SendSpectateUpdateGrid()
-    {
-        BroadcastRaw("{\"cmd\":\"spectate_update\",\"enabled\":true,\"mode\":\"grid\"}");
-        Debug.Log("[PlayerWS] spectate_update grid");
     }
 
     public void BroadcastTwoPlayerModeChanged(bool enabled)

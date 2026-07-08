@@ -142,6 +142,7 @@ public:
     }
 
     bool    isWindowDone()  const { return _winDone; }
+    bool    inWindow()      const { return _inWin; }
     uint8_t takeWindowMask()      { _winDone = false; return _winMask; }
 
 private:

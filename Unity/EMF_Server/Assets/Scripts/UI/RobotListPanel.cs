@@ -25,6 +25,7 @@ public class RobotListPanel : MonoBehaviour
     static readonly Color C_BLUE    = new Color(0.29f, 0.62f, 1.00f);
     static readonly Color C_RED     = new Color(1.00f, 0.42f, 0.21f);
     static readonly Color C_DIM     = new Color(0.40f, 0.40f, 0.40f);
+    static readonly Color C_TANK    = new Color(0.55f, 0.55f, 0.55f); // tank callsign — dim but lighter than C_DIM
     static readonly Color C_DEAD    = new Color(0.27f, 0.27f, 0.27f);
     static readonly Color C_CAM_ON  = new Color(0.15f, 0.85f, 0.35f, 1f);
     static readonly Color C_CAM_OFF = new Color(0.30f, 0.30f, 0.30f, 1f);
@@ -253,7 +254,7 @@ public class RobotListPanel : MonoBehaviour
         bool camOn = !_cameraStreaming.TryGetValue(r.RobotId, out bool cs) || cs;
         camDotImg.color = camOn ? C_CAM_ON : C_CAM_OFF;
 
-        // ── Callsign label ────────────────────────────────────────────────────
+        // ── Callsign label (tank name — secondary, dim) ───────────────────────
         string name = string.IsNullOrEmpty(r.Callsign)
             ? r.RobotId.Substring(0, Mathf.Min(8, r.RobotId.Length))
             : r.Callsign;
@@ -264,23 +265,23 @@ public class RobotListPanel : MonoBehaviour
         var nameTmp = nameGO.AddComponent<TextMeshProUGUI>();
         nameTmp.text      = name;
         nameTmp.font      = font;
-        nameTmp.fontSize  = 12f;
-        nameTmp.fontStyle = FontStyles.Bold;
-        nameTmp.color     = dead ? C_DIM : Color.white;
+        nameTmp.fontSize  = 10f;
+        nameTmp.color     = dead ? C_DIM : C_TANK;
         nameTmp.alignment = TextAlignmentOptions.MidlineLeft;
-        nameGO.AddComponent<LayoutElement>().preferredWidth = 80f;
+        nameGO.AddComponent<LayoutElement>().preferredWidth = 60f;
 
-        // ── Player label ──────────────────────────────────────────────────────
+        // ── Player label (primary — large/bold) ───────────────────────────────
         var playerGO = new GameObject("Player");
         playerGO.AddComponent<RectTransform>();
         playerGO.transform.SetParent(row.transform, false);
         var playerTmp = playerGO.AddComponent<TextMeshProUGUI>();
         playerTmp.text      = r.AssignedPlayer ?? string.Empty;
         playerTmp.font      = font;
-        playerTmp.fontSize  = 10f;
-        playerTmp.color     = C_DIM;
+        playerTmp.fontSize  = 13f;
+        playerTmp.fontStyle = FontStyles.Bold;
+        playerTmp.color     = dead ? C_DIM : Color.white;
         playerTmp.alignment = TextAlignmentOptions.MidlineLeft;
-        playerGO.AddComponent<LayoutElement>().preferredWidth = 60f;
+        playerGO.AddComponent<LayoutElement>().preferredWidth = 90f;
 
         // ── HP bar ────────────────────────────────────────────────────────────
         var barBG = new GameObject("BarBG");

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 using ThundergeddonWeb.Services;
 
@@ -7,9 +8,37 @@ public class GameHub : Hub
 {
     private readonly UnityBridgeService _bridge;
 
+    // Port 5000 is open to the whole venue LAN, so hub methods must assume hostile
+    // callers. Names are length/character capped, and each connection gets a simple
+    // per-second message budget. Legit peak is ~25 msg/s (20 Hz drive + turret + fire);
+    // 60 leaves headroom while stopping floods from reaching Unity.
+    private const int MaxNameLength    = 20;
+    private const int MaxMsgsPerSecond = 60;
+
+    // Static: hubs are transient per-invocation. Keyed by connectionId, cleaned on disconnect.
+    private static readonly ConcurrentDictionary<string, (long Window, int Count)> _rate = new();
+
     public GameHub(UnityBridgeService bridge)
     {
         _bridge = bridge;
+    }
+
+    /// <summary>Sliding 1-second message budget for the calling connection.</summary>
+    private bool AllowMessage()
+    {
+        long window = Environment.TickCount64 / 1000;
+        var entry = _rate.AddOrUpdate(Context.ConnectionId,
+            _ => (window, 1),
+            (_, e) => e.Window == window ? (e.Window, e.Count + 1) : (window, 1));
+        return entry.Count <= MaxMsgsPerSecond;
+    }
+
+    private static bool IsValidName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxNameLength) return false;
+        foreach (char c in name)
+            if (char.IsControl(c)) return false;
+        return true;
     }
 
     // ── Lobby ────────────────────────────────────────────────────────────────────
@@ -22,7 +51,9 @@ public class GameHub : Hub
     /// </summary>
     public async Task<bool> JoinLobby(string name)
     {
-        if (string.IsNullOrWhiteSpace(name)) return false;
+        if (!AllowMessage()) return false;
+        name = (name ?? "").Trim();
+        if (!IsValidName(name)) return false;
 
         if (!_bridge.IsConnectedToUnity)
         {
@@ -111,6 +142,7 @@ public class GameHub : Hub
 
     public async Task SendDrive(float left, float right)
     {
+        if (!AllowMessage()) return;
         await _bridge.SendToUnity(new
         {
             cmd          = "drive",
@@ -122,6 +154,7 @@ public class GameHub : Hub
 
     public async Task SendTurret(float speed)
     {
+        if (!AllowMessage()) return;
         await _bridge.SendToUnity(new
         {
             cmd          = "turret",
@@ -132,6 +165,7 @@ public class GameHub : Hub
 
     public async Task Fire()
     {
+        if (!AllowMessage()) return;
         await _bridge.SendToUnity(new
         {
             cmd          = "fire",
@@ -155,15 +189,13 @@ public class GameHub : Hub
         // Replay last display state so the display page can resume mid-game on refresh
         if (_bridge.LastDisplayUpdate != null)
             await Clients.Caller.SendAsync("DisplayUpdate", _bridge.LastDisplayUpdate);
-        // Replay last spectate state so the display page can resume FPV on refresh
-        if (_bridge.LastSpectateUpdate != null)
-            await Clients.Caller.SendAsync("SpectateUpdate", _bridge.LastSpectateUpdate);
 
         await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        _rate.TryRemove(Context.ConnectionId, out _);
         await _bridge.SendToUnity(new
         {
             cmd          = "leave",

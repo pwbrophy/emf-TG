@@ -1,6 +1,6 @@
 // OtaSupport.h — ArduinoOTA wrapper with pause/resume callbacks.
 // Hostname format: beacon-<MAC12>  (e.g. beacon-A1B2C3D4E5F6)
-// Password: thunder123
+// Password: OTA_PASSWORD in secrets.h (must match secrets.ini used for uploads)
 // Port: 3232 (default ArduinoOTA port)
 
 #pragma once

@@ -108,6 +108,21 @@
     #join-btn.btn-waiting { background: var(--muted); }
     #join-btn.btn-waiting:disabled { opacity: 1; }
 
+    .btn-secondary {
+      width: 100%;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      transition: opacity 0.15s;
+    }
+    .btn-secondary:active { opacity: 0.8; }
+
     .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
     .status.error { color: #e05050; }
 
@@ -973,6 +988,7 @@
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="20" autocomplete="off" spellcheck="false" />
     <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
+    <button class="btn-secondary" onclick="stayInTouch()">STAY IN TOUCH</button>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -1238,9 +1254,24 @@ function releaseWakeLock() {
 document.addEventListener('visibilitychange', () => {
   // Only re-acquire while actually playing (playing screen is active).
   if (document.visibilityState === 'visible'
-      && document.getElementById('screen-playing').classList.contains('active'))
+      && document.getElementById('screen-playing').classList.contains('active')) {
     acquireWakeLock();
+  } else if (document.visibilityState === 'hidden') {
+    dropControls();
+  }
 });
+// iOS Safari can skip visibilitychange on some navigations; pagehide is the backstop.
+window.addEventListener('pagehide', dropControls);
+
+// Zero and release all held controls. Called when the page is backgrounded
+// (lock screen, notification shade, app switch): a pointerup that fires while
+// hidden never reaches us, so without this the joystick resumes streaming its
+// stale value when the page returns — the tank drives itself with no finger
+// on the screen. releaseJoy/releaseTurretSlider are hoisted function
+// declarations, so referencing them from here is safe.
+function dropControls() {
+  try { releaseJoy(); releaseTurretSlider(); } catch (_) {}
+}
 
 // ── Join-button state helpers ──────────────────────────────────────────────
 // Tracks whether the lobby is currently open (Lobby phase). Updated by SignalR
@@ -1967,6 +1998,9 @@ function onStateUpdate(data) {
 function onYouAreDead() {
   isDead     = true;
   isDeadWalk = false;
+  // Release held controls so the joystick value from the moment of death can't
+  // resume when dead-walk re-enables driving 5s from now.
+  dropControls();
   if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
 
   const overlay   = document.getElementById('screen-dead');
@@ -2174,8 +2208,7 @@ function goToStats() {
 }
 
 function stayInTouch() {
-  // Placeholder — will link to a stay-in-touch page when ready
-  window.open('about:blank', '_blank');
+  window.open('https://www.youtube.com/@Thundergeddon', '_blank');
 }
 
 function resetGoOverlay() {

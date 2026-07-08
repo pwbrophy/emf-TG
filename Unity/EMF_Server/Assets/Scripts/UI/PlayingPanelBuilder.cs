@@ -31,10 +31,12 @@ public class PlayingPanelBuilder : MonoBehaviour
     static readonly Color C_DKBLU2 = new Color(0.100f, 0.180f, 0.280f);
     static readonly Color C_CAPNTR = new Color(0.200f, 0.200f, 0.200f);
 
+    const float SIDEBAR_WIDTH = 210f;
+
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v14";
+    const string BUILT_SENTINEL = "__ppb_v16";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -106,16 +108,15 @@ public class PlayingPanelBuilder : MonoBehaviour
         RemoveIfPresent<RobotPingButton>(pp);
         RemoveIfPresent<ToggleCameraButton>(pp);
         RemoveIfPresent<FlipVideoButtons>(pp);
-        // SpectateButtonController intentionally NOT removed here — Destroy() is deferred
-        // in play mode, causing GetOrAdd to return the same component which then gets
-        // destroyed after Start() wires the listener, silently breaking Button.onClick.
+        RemoveIfPresent<EventLogPanelUI>(pp); // event log panel removed — strip stale component from older scenes
 
         var bgImg = pp.GetComponent<Image>() ?? pp.AddComponent<Image>();
         bgImg.color = C_BG;
 
         // ── Header ────────────────────────────────────────────────────────────
+        // Right edge stops short of the full-height settings sidebar (built last, below).
         var header = MakeRect(pp.transform, "Header");
-        Anchor(header, 0, 1, 1, 1, 0, -58, 0, 0);
+        Anchor(header, 0, 1, 1, 1, 0, -58, -SIDEBAR_WIDTH, 0);
         header.AddComponent<Image>().color = C_PANEL;
 
         var titleLbl = MakeTmp(header.transform, "TitleLabel", "THUNDERGEDDON",
@@ -129,8 +130,9 @@ public class PlayingPanelBuilder : MonoBehaviour
         Anchor(timerLbl.gameObject, 0.55f, 0, 1, 1, 0, 0, -18, 0);
 
         // ── Footer ────────────────────────────────────────────────────────────
+        // Right edge stops short of the full-height settings sidebar, same as Header.
         var footer = MakeRect(pp.transform, "Footer");
-        Anchor(footer, 0, 0, 1, 0, 0, 0, 0, 54);
+        Anchor(footer, 0, 0, 1, 0, 0, 0, -SIDEBAR_WIDTH, 54);
         footer.AddComponent<Image>().color = C_PANEL;
 
         var sep = MakeRect(footer.transform, "Sep");
@@ -144,8 +146,9 @@ public class PlayingPanelBuilder : MonoBehaviour
         Anchor(endGameBtn, 0.75f, 0, 0.75f, 1, -90, 7, 90, -7);
 
         // ── Body ──────────────────────────────────────────────────────────────
+        // Right edge stops short of the full-height settings sidebar (8px gap, same as its other margins).
         var body = MakeRect(pp.transform, "Body");
-        Anchor(body, 0, 0, 1, 1, 8, 58, -8, -62);
+        Anchor(body, 0, 0, 1, 1, 8, 58, -(SIDEBAR_WIDTH + 8), -62);
 
         var bodyVLG = body.AddComponent<VerticalLayoutGroup>();
         bodyVLG.spacing             = 6f;
@@ -194,23 +197,6 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(tpBarUI, "label0", tpLabel0);
         Wire(tpBarUI, "label1", tpLabel1);
 
-        // ── Event log (full width) ────────────────────────────────────────────
-        var evtGo = MakeRect(body.transform, "EventLog");
-        evtGo.AddComponent<Image>().color = C_PANEL;
-        evtGo.AddComponent<LayoutElement>().preferredHeight = 82f;
-
-        var evtContainer = MakeRect(evtGo.transform, "Container");
-        Anchor(evtContainer, 0, 0, 1, 1, 10, 6, -10, -6);
-        var evtVLG = evtContainer.AddComponent<VerticalLayoutGroup>();
-        evtVLG.spacing = 2f;
-        evtVLG.childForceExpandWidth  = true;
-        evtVLG.childForceExpandHeight = false;
-        evtVLG.childControlWidth = evtVLG.childControlHeight = true;
-        evtVLG.childAlignment = TextAnchor.UpperLeft;
-
-        var evtPanel = GetOrAdd<EventLogPanelUI>(pp);
-        Wire(evtPanel, "container", evtContainer.GetComponent<RectTransform>());
-
         // ── Columns area ──────────────────────────────────────────────────────
         var columns = MakeRect(body.transform, "Columns");
         columns.AddComponent<LayoutElement>().flexibleHeight = 1f;
@@ -228,7 +214,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         leftLE.flexibleWidth = leftLE.flexibleHeight = 1f;
 
         var leftVLG = leftCol.AddComponent<VerticalLayoutGroup>();
-        leftVLG.spacing = 4f;
+        leftVLG.spacing = 3f;
         leftVLG.childForceExpandWidth  = true;
         leftVLG.childForceExpandHeight = false;
         leftVLG.childControlWidth = leftVLG.childControlHeight = true;
@@ -241,9 +227,9 @@ public class PlayingPanelBuilder : MonoBehaviour
 
         // Action buttons — 3 rows
         var actionPanel = MakeRect(leftCol.transform, "ActionButtonsPanel");
-        actionPanel.AddComponent<LayoutElement>().preferredHeight = 114f;
+        actionPanel.AddComponent<LayoutElement>().preferredHeight = 78f;
         var apVLG = actionPanel.AddComponent<VerticalLayoutGroup>();
-        apVLG.spacing = 4f;
+        apVLG.spacing = 3f;
         apVLG.childForceExpandWidth  = true;
         apVLG.childForceExpandHeight = false;
         apVLG.childControlWidth = apVLG.childControlHeight = true;
@@ -254,7 +240,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var hitSideBtn  = MakeButton(dmgRow.transform, "HitSideBtn",  "HIT S",   C_DKRED,  C_TEXT, 11f);
         var hitRearBtn  = MakeButton(dmgRow.transform, "HitRearBtn",  "HIT R×3", new Color(0.7f, 0.05f, 0.05f), C_TEXT, 11f);
         var healBtn     = MakeButton(dmgRow.transform, "HealBtn",     "HEAL",    C_DKGRN,  C_TEXT, 11f);
-        SetRowHeights(34f, hitFrontBtn, hitSideBtn, hitRearBtn, healBtn);
+        SetRowHeights(24f, hitFrontBtn, hitSideBtn, hitRearBtn, healBtn);
 
         // Row 2: Drive + Camera
         var drvRow = MakeActionRow(actionPanel.transform, "DriveCamRow");
@@ -264,21 +250,14 @@ public class PlayingPanelBuilder : MonoBehaviour
         var flipHBtn  = MakeButton(drvRow.transform, "FlipHBtn",       "FLIP H",            C_DKPUR,  C_TEXT, 10f);
         var flipVBtn  = MakeButton(drvRow.transform, "FlipVBtn",       "FLIP V",            C_DKPUR,  C_TEXT, 10f);
         var camTogBtn = MakeButton(drvRow.transform, "CamToggleBtn",   "CAM ON/OFF",        new Color(0.10f, 0.25f, 0.35f), C_TEXT, 10f);
-        SetRowHeights(34f, revThBtn, revStBtn, revTuBtn, flipHBtn, flipVBtn, camTogBtn);
+        SetRowHeights(24f, revThBtn, revStBtn, revTuBtn, flipHBtn, flipVBtn, camTogBtn);
 
         // Row 3: Capture
         var capRow = MakeActionRow(actionPanel.transform, "CaptureRow");
-        var capNorthBtn  = MakeButton(capRow.transform, "CaptureNorthBtn",  "NORTH\n—",  C_CAPNTR, C_TEXT, 9f);
-        var capCentreBtn = MakeButton(capRow.transform, "CaptureCentreBtn", "CENTRE\n—", C_CAPNTR, C_TEXT, 9f);
-        var capSouthBtn  = MakeButton(capRow.transform, "CaptureSouthBtn",  "SOUTH\n—",  C_CAPNTR, C_TEXT, 9f);
-        SetRowHeights(34f, capNorthBtn, capCentreBtn, capSouthBtn);
-
-        // FPV spectate buttons (side by side in one row)
-        var fpvRow  = MakeActionRow(leftCol.transform, "FpvRow");
-        var fpv1Btn = MakeButton(fpvRow.transform, "Fpv1Button", "FPV×1", C_DKBLU2, C_TEXT, 12f);
-        fpv1Btn.AddComponent<LayoutElement>().preferredHeight = 34f;
-        var fpv6Btn = MakeButton(fpvRow.transform, "Fpv6Button", "FPV×6", C_DKBLU2, C_TEXT, 12f);
-        fpv6Btn.AddComponent<LayoutElement>().preferredHeight = 34f;
+        var capNorthBtn  = MakeButton(capRow.transform, "CaptureNorthBtn",  "NORTH\n—",  C_CAPNTR, C_TEXT, 8f);
+        var capCentreBtn = MakeButton(capRow.transform, "CaptureCentreBtn", "CENTRE\n—", C_CAPNTR, C_TEXT, 8f);
+        var capSouthBtn  = MakeButton(capRow.transform, "CaptureSouthBtn",  "SOUTH\n—",  C_CAPNTR, C_TEXT, 8f);
+        SetRowHeights(24f, capNorthBtn, capCentreBtn, capSouthBtn);
 
         // Roster scroll
         RectTransform rosterContent;
@@ -290,31 +269,40 @@ public class PlayingPanelBuilder : MonoBehaviour
         var rlp = GetOrAdd<RobotListPanel>(pp);
         Wire(rlp, "rowContainer", rosterContent);
 
-        var sbc = GetOrAdd<SpectateButtonController>(pp);
-        Wire(sbc, "_fpv1Button",    fpv1Btn.GetComponent<Button>());
-        Wire(sbc, "_fpv1Label",     fpv1Btn.GetComponentInChildren<TextMeshProUGUI>());
-        Wire(sbc, "_fpv6Button",    fpv6Btn.GetComponent<Button>());
-        Wire(sbc, "_fpv6Label",     fpv6Btn.GetComponentInChildren<TextMeshProUGUI>());
-        Wire(sbc, "_robotListPanel", rlp);
+        // ── Game settings sidebar ──────────────────────────────────────────────
+        // Full-height strip along the right edge of the screen (not confined between
+        // Header/Footer like Body) — a permanent sidebar, not just another column.
+        var gameSettingsCol = MakeRect(pp.transform, "GameSettingsSidebar");
+        Anchor(gameSettingsCol, 1, 0, 1, 1, -SIDEBAR_WIDTH, 0, 0, 0);
+        gameSettingsCol.AddComponent<Image>().color = C_PANEL;
+        var gsVLG = gameSettingsCol.AddComponent<VerticalLayoutGroup>();
+        gsVLG.spacing = 4f;
+        gsVLG.padding = new RectOffset(8, 8, 8, 8);
+        gsVLG.childForceExpandWidth = true; gsVLG.childForceExpandHeight = false;
+        gsVLG.childControlWidth = gsVLG.childControlHeight = true;
+        gsVLG.childAlignment = TextAnchor.UpperLeft;
 
-        // ── Game settings column ──────────────────────────────────────────────
-        var gameSettingsCol = MakeSettingsColumn(columns.transform, "GameSettingsColumn", "GAME SETTINGS");
+        var gsLbl = MakeTmp(gameSettingsCol.transform, "LblSettings", "GAME SETTINGS",
+                             C_CYAN, 10f, TextAlignmentOptions.MidlineLeft, bold: true);
+        gsLbl.characterSpacing = 1.5f;
+        gsLbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 22f;
+
         RectTransform gameSettingsContent;
         var gameSettingsScroll = CreateScrollCard(gameSettingsCol.transform, "GameSettingsScroll", out gameSettingsContent);
         gameSettingsScroll.AddComponent<LayoutElement>().flexibleHeight = 1f;
         gameSettingsScroll.GetComponent<Image>().color = new Color(0.08f, 0.08f, 0.08f);
 
-        var f_damage      = MakeSettingsRow(gameSettingsContent,    "Dmg/Hit",     "Base damage per IR hit.");
-        var f_sideMult    = MakeSettingsRow(gameSettingsContent,    "Side Mult",   "Damage multiplier for E/W hits.");
-        var f_rearMult    = MakeSettingsRow(gameSettingsContent,    "Rear Mult",   "Damage multiplier for S hits (rear).");
-        var f_killPoints  = MakeSettingsRow(gameSettingsContent,    "Kill Pts",    "Team points awarded per robot destroyed.");
-        var f_cooldown    = MakeSettingsRow(gameSettingsContent,    "Cooldown s",  "Minimum seconds between shots.");
-        var f_invuln      = MakeSettingsRow(gameSettingsContent,    "Invuln s",    "Seconds of invulnerability after respawn or base heal.");
-        var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX",  "Enable / disable buzzer sound effects.");
-        var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret", "Turret speed fraction 0–1 (e.g. 0.4 = 40% speed).");
-        var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution", "Camera resolution — tap to cycle QVGA / CIF / HVGA / VGA.");
-        var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap",    "Camera frame-rate cap 1–30. Lower = less Wi-Fi bandwidth.");
-        var f_videoQuality = MakeSettingsRow(gameSettingsContent,    "JPEG Qual",  "JPEG quality 8 (best) to 40 (smallest).");
+        var f_damage      = MakeSettingsRow(gameSettingsContent,    "Dmg/Hit");
+        var f_sideMult    = MakeSettingsRow(gameSettingsContent,    "Side Mult");
+        var f_rearMult    = MakeSettingsRow(gameSettingsContent,    "Rear Mult");
+        var f_killPoints  = MakeSettingsRow(gameSettingsContent,    "Kill Pts");
+        var f_cooldown    = MakeSettingsRow(gameSettingsContent,    "Cooldown s");
+        var f_invuln      = MakeSettingsRow(gameSettingsContent,    "Invuln s");
+        var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX");
+        var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret");
+        var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
+        var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
+        var f_videoQuality = MakeSettingsRow(gameSettingsContent,    "JPEG Qual");
 
         // ── Wire components ───────────────────────────────────────────────────
 
@@ -429,7 +417,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     static GameObject MakeActionRow(Transform parent, string name)
     {
         var go = MakeRect(parent, name);
-        go.AddComponent<LayoutElement>().preferredHeight = 34f;
+        go.AddComponent<LayoutElement>().preferredHeight = 24f;
         var hlg = go.AddComponent<HorizontalLayoutGroup>();
         hlg.spacing = 4f;
         hlg.childForceExpandWidth  = true;
@@ -510,47 +498,21 @@ public class PlayingPanelBuilder : MonoBehaviour
         enabled = false; // run once
     }
 
-    static GameObject MakeSettingsColumn(Transform parent, string name, string header)
-    {
-        var col = MakeRect(parent, name);
-        col.AddComponent<Image>().color = new Color(0.102f, 0.102f, 0.102f);
-        var le = col.AddComponent<LayoutElement>();
-        le.preferredWidth = 210f; le.flexibleHeight = 1f; le.flexibleWidth = 0f;
-        var vlg = col.AddComponent<VerticalLayoutGroup>();
-        vlg.spacing = 4f;
-        vlg.padding = new RectOffset(8, 8, 8, 8);
-        vlg.childForceExpandWidth = true; vlg.childForceExpandHeight = false;
-        vlg.childControlWidth = vlg.childControlHeight = true;
-        vlg.childAlignment = TextAnchor.UpperLeft;
-        return col;
-    }
-
-    TMP_InputField MakeSettingsRow(RectTransform parent, string labelText, string description)
+    TMP_InputField MakeSettingsRow(RectTransform parent, string labelText)
     {
         var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
-        var rowVLG = row.AddComponent<VerticalLayoutGroup>();
-        rowVLG.spacing = 1f;
-        rowVLG.childForceExpandWidth = true; rowVLG.childForceExpandHeight = false;
-        rowVLG.childControlWidth = rowVLG.childControlHeight = true;
-        row.AddComponent<LayoutElement>().preferredHeight = 50f;
+        row.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var topRow = MakeRect(row.transform, "TopRow");
-        var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
+        var topHLG = row.AddComponent<HorizontalLayoutGroup>();
         topHLG.spacing = 4f;
         topHLG.childForceExpandWidth = false; topHLG.childForceExpandHeight = true;
         topHLG.childControlWidth = topHLG.childControlHeight = true;
-        topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+        var lbl = MakeTmp(row.transform, "Lbl", labelText,
                            new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
         lbl.gameObject.AddComponent<LayoutElement>().preferredWidth = 96f;
 
-        var field = MakeInputField(topRow.transform, "Field");
-
-        var desc = MakeTmp(row.transform, "Desc", description,
-                            new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
-        desc.enableWordWrapping = true;
-        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
+        var field = MakeInputField(row.transform, "Field");
 
         return field;
     }
@@ -590,27 +552,21 @@ public class PlayingPanelBuilder : MonoBehaviour
         return field;
     }
 
-    Toggle MakeSettingsToggle(RectTransform parent, string labelText, string description)
+    Toggle MakeSettingsToggle(RectTransform parent, string labelText)
     {
         var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
-        var rowVLG = row.AddComponent<VerticalLayoutGroup>();
-        rowVLG.spacing = 1f;
-        rowVLG.childForceExpandWidth = true; rowVLG.childForceExpandHeight = false;
-        rowVLG.childControlWidth = rowVLG.childControlHeight = true;
-        row.AddComponent<LayoutElement>().preferredHeight = 50f;
+        row.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var topRow = MakeRect(row.transform, "TopRow");
-        var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
+        var topHLG = row.AddComponent<HorizontalLayoutGroup>();
         topHLG.spacing = 6f;
         topHLG.childForceExpandWidth = false; topHLG.childForceExpandHeight = true;
         topHLG.childControlWidth = topHLG.childControlHeight = true;
-        topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+        var lbl = MakeTmp(row.transform, "Lbl", labelText,
                            new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
         lbl.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
 
-        var cbGo = MakeRect(topRow.transform, "Toggle");
+        var cbGo = MakeRect(row.transform, "Toggle");
         var cbLE = cbGo.AddComponent<LayoutElement>();
         cbLE.preferredWidth = cbLE.preferredHeight = 24f; cbLE.flexibleWidth = 0f;
         var bgImg = cbGo.AddComponent<Image>();
@@ -627,37 +583,26 @@ public class PlayingPanelBuilder : MonoBehaviour
         checkImg.color = new Color(0.000f, 0.835f, 1.000f);
         toggle.graphic = checkImg;
 
-        var desc = MakeTmp(row.transform, "Desc", description,
-                            new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
-        desc.enableWordWrapping = true;
-        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
-
         return toggle;
     }
 
     // A settings row whose value is a tappable button (used for cycling video
     // resolution). Returns the button GameObject; its child TMP shows the value.
-    GameObject MakeSettingsButton(RectTransform parent, string labelText, string description)
+    GameObject MakeSettingsButton(RectTransform parent, string labelText)
     {
         var row = MakeRect(parent.transform, "Row_" + labelText.Replace(" ", ""));
-        var rowVLG = row.AddComponent<VerticalLayoutGroup>();
-        rowVLG.spacing = 1f;
-        rowVLG.childForceExpandWidth = true; rowVLG.childForceExpandHeight = false;
-        rowVLG.childControlWidth = rowVLG.childControlHeight = true;
-        row.AddComponent<LayoutElement>().preferredHeight = 50f;
+        row.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var topRow = MakeRect(row.transform, "TopRow");
-        var topHLG = topRow.AddComponent<HorizontalLayoutGroup>();
+        var topHLG = row.AddComponent<HorizontalLayoutGroup>();
         topHLG.spacing = 4f;
         topHLG.childForceExpandWidth = false; topHLG.childForceExpandHeight = true;
         topHLG.childControlWidth = topHLG.childControlHeight = true;
-        topRow.AddComponent<LayoutElement>().preferredHeight = 28f;
 
-        var lbl = MakeTmp(topRow.transform, "Lbl", labelText,
+        var lbl = MakeTmp(row.transform, "Lbl", labelText,
                            new Color(0.75f, 0.75f, 0.75f), 12f, TextAlignmentOptions.MidlineLeft);
         lbl.gameObject.AddComponent<LayoutElement>().preferredWidth = 96f;
 
-        var btnGo = MakeRect(topRow.transform, "Btn");
+        var btnGo = MakeRect(row.transform, "Btn");
         var btnImg = btnGo.AddComponent<Image>();
         btnImg.color = new Color(0.18f, 0.18f, 0.24f);
         var btn = btnGo.AddComponent<Button>();
@@ -666,11 +611,6 @@ public class PlayingPanelBuilder : MonoBehaviour
 
         MakeTmp(btnGo.transform, "Text", "HVGA 480x320",
                 new Color(0.91f, 0.91f, 0.91f), 12f, TextAlignmentOptions.Center);
-
-        var desc = MakeTmp(row.transform, "Desc", description,
-                            new Color(0.38f, 0.38f, 0.38f), 9f, TextAlignmentOptions.MidlineLeft);
-        desc.enableWordWrapping = true;
-        desc.gameObject.AddComponent<LayoutElement>().preferredHeight = 18f;
 
         return btnGo;
     }

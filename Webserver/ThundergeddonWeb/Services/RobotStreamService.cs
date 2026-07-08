@@ -156,6 +156,16 @@ internal class StreamBroadcaster
         {
             await foreach (var chunk in ch.Reader.ReadAllAsync(ct))
             {
+                // A corrupt stream that never delivers an EOI marker would otherwise
+                // grow this buffer forever. Frames are <100 KB even at VGA, so at
+                // 512 KB the accumulated data is garbage — drop it and resync on the
+                // next SOI marker.
+                if (buf.Length > 512 * 1024)
+                {
+                    _log.LogWarning("[VideoWs] frame buffer overflow ({len} bytes) — resyncing", buf.Length);
+                    buf = Array.Empty<byte>();
+                }
+
                 // Append chunk to running buffer
                 var merged = new byte[buf.Length + chunk.Length];
                 buf.CopyTo(merged, 0);

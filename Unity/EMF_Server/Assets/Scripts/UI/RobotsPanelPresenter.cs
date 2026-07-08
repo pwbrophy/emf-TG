@@ -93,16 +93,17 @@ public class RobotsPanelPresenter : MonoBehaviour
             Destroy(row.gameObject);
     }
 
-    private static readonly Color AllianceColorDesert = new Color(0.72f, 0.56f, 0.35f); // tan
-    private static readonly Color AllianceColorJungle = new Color(0.29f, 0.48f, 0.29f); // green
+    private static readonly Color AllianceColorDesert = new Color(1.000f, 0.835f, 0.580f); // Desert Squad #FFD594
+    private static readonly Color AllianceColorJungle = new Color(0.200f, 0.549f, 0.184f); // Jungle Squad #338C2F
     private static readonly Color AllianceColorNone   = new Color(0.35f, 0.35f, 0.35f); // grey
+    private static readonly Color AllianceTextOnDesert = new Color(0.25f, 0.16f, 0.06f); // dark text for contrast on the light Desert bg
 
     private static void RefreshAllianceButton(Button btn, int alliance)
     {
         var img = btn.GetComponent<UnityEngine.UI.Image>();
         var tmp = btn.GetComponentInChildren<TMPro.TextMeshProUGUI>();
-        if (alliance == 0)      { if (img) img.color = AllianceColorDesert; if (tmp) { tmp.text = "D"; tmp.color = Color.white; } }
-        else if (alliance == 1) { if (img) img.color = AllianceColorJungle; if (tmp) { tmp.text = "J"; tmp.color = Color.white; } }
+        if (alliance == 0)      { if (img) img.color = AllianceColorDesert; if (tmp) { tmp.text = "Desert Squad"; tmp.color = AllianceTextOnDesert; } }
+        else if (alliance == 1) { if (img) img.color = AllianceColorJungle; if (tmp) { tmp.text = "Jungle Squad"; tmp.color = Color.white; } }
         else                    { if (img) img.color = AllianceColorNone;   if (tmp) { tmp.text = "?"; tmp.color = new Color(0.7f,0.7f,0.7f); } }
     }
 
@@ -136,7 +137,7 @@ public class RobotsPanelPresenter : MonoBehaviour
         ipText.text     = string.IsNullOrEmpty(r.Ip) ? "IP: ?" : $"IP: {r.Ip}";
         playerText.text = string.IsNullOrEmpty(r.AssignedPlayer) ? "Unassigned" : r.AssignedPlayer;
 
-        // Alliance cycle button: ? → Desert (D) → Jungle (J) → ?
+        // Alliance cycle button: ? → Desert Squad → Jungle Squad → ?
         if (allianceButton != null)
         {
             RefreshAllianceButton(allianceButton, r.PreferredAlliance);
