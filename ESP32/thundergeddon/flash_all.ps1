@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param(
     [int[]]$Only = @(),          # e.g. .\flash_all.ps1 1,2,7,8  -- omit to flash all
     [ValidateSet("BFG","TG")]
