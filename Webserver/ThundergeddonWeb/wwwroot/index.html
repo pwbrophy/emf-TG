@@ -2985,7 +2985,7 @@ function _gpPoll(now) {
     if (tx !== 0 && now - _gpTurretSendLast >= 1000 / GP_TURRET_HZ) {
       _gpTurretSendLast = now;
       _gpTurretActive   = true;
-      if (connection) connection.invoke('SendTurret', roundF(tx)).catch(() => {});
+      if (connection) connection.invoke('SendTurret', roundF(-tx)).catch(() => {});
     } else if (tx === 0 && _gpTurretActive) {
       _gpTurretActive = false;
       if (connection) connection.invoke('SendTurret', 0).catch(() => {});
