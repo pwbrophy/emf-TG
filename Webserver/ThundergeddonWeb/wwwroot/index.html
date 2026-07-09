@@ -1293,9 +1293,18 @@ function setJoinWaiting() {
 }
 function setJoinGameInProgress() {
   const btn = document.getElementById('join-btn');
-  btn.textContent = 'GAME IN PROGRESS';
-  btn.disabled = true;
-  btn.classList.add('btn-waiting');
+  // A player with a saved name may be mid-game after a refresh — the button
+  // must stay tappable so they can rejoin manually if the auto-rejoin failed.
+  const savedName = document.getElementById('name-input').value.trim();
+  if (savedName) {
+    btn.textContent = 'REJOIN GAME';
+    btn.disabled = false;
+    btn.classList.remove('btn-waiting');
+  } else {
+    btn.textContent = 'GAME IN PROGRESS';
+    btn.disabled = true;
+    btn.classList.add('btn-waiting');
+  }
 }
 
 // ── Pre-join server-status poll ────────────────────────────────────────────
@@ -1372,6 +1381,18 @@ function startWsVideoDecoder(robotUrl) {
       ph.textContent   = 'No video stream';
       ph.style.display = 'flex';
     }
+    // Unintentional close while still in-game (stopVideoWs nulls onclose first,
+    // so this never fires on deliberate teardown): the robot camera may just be
+    // restarting between games — keep retrying until we leave the playing screen.
+    _videoWs = null;
+    if (document.body.classList.contains('game-active')) {
+      ph.textContent   = 'Reconnecting camera…';
+      ph.style.display = 'flex';
+      setTimeout(() => {
+        if (!_videoWs && document.body.classList.contains('game-active'))
+          startWsVideoDecoder(robotUrl);
+      }, 1500);
+    }
   };
   _videoWs.onmessage = e => {
     const blob    = new Blob([e.data], { type: 'image/jpeg' });
@@ -1418,7 +1439,17 @@ function startGameStream(url) {
     document.getElementById('stream-canvas').style.display = 'none';
     const img = document.getElementById('stream');
     img.style.display = '';
-    img.src = proxyUrl;
+    // Retry on load failure while in-game (e.g. camera still restarting at the
+    // start of a second game). Cache-buster forces a fresh proxy request —
+    // reassigning an identical src can be a no-op in some browsers.
+    img.onerror = () => {
+      dbg('img stream error — retrying in 1.5s');
+      setTimeout(() => {
+        if (document.body.classList.contains('game-active') && img.src)
+          img.src = proxyUrl + '&t=' + Date.now();
+      }, 1500);
+    };
+    img.src = proxyUrl + '&t=' + Date.now();
     document.getElementById('stream-placeholder').style.display = 'none';
   }
 }
@@ -1676,6 +1707,10 @@ async function joinLobby() {
     dbg('JOIN FAILED: ' + err.message);
     setStatus('Could not connect: ' + err.message, true);
     setJoinReady();
+    // Connection-level failure (not a server rejection) — let the server-status
+    // poll trigger another auto-rejoin, otherwise a single transient SignalR
+    // failure after a mid-game refresh leaves the player stranded.
+    _rejoinAttempted = false;
   }
 }
 
@@ -2699,6 +2734,41 @@ document.addEventListener('touchstart', e => {
   if (e.touches.length > 1) e.preventDefault();
 }, { passive: false });
 
+// Double-tap zoom is NOT a gesture event, so the guards above never see it —
+// two quick taps anywhere (e.g. mashing near the fire button) zoom the page on
+// iOS Safari. During gameplay all controls use pointer events (pointerdown),
+// which have already fired by touchend, so suppressing the second tap's
+// touchend costs nothing. Scoped to game-active so lobby buttons (onclick,
+// which needs the synthetic click after touchend) keep working.
+let _lastTouchEnd = 0;
+document.addEventListener('touchend', e => {
+  if (!document.body.classList.contains('game-active')) return;
+  const now = Date.now();
+  if (now - _lastTouchEnd < 400) e.preventDefault();
+  _lastTouchEnd = now;
+}, { passive: false });
+
+// Recovery watchdog: if the page still ends up pinch/double-tap zoomed
+// (visualViewport.scale > 1), rewriting the viewport meta tag makes iOS
+// re-clamp to maximum-scale and snap back to 1.0. Debounced so it doesn't
+// fight an in-progress gesture.
+const _vpMeta = document.querySelector('meta[name="viewport"]');
+const _vpBase = _vpMeta.getAttribute('content');
+let _zoomResetTimer = null;
+function forceZoomReset() {
+  dbg('zoom watchdog: scale=' + window.visualViewport.scale.toFixed(2) + ' — forcing reset');
+  _vpMeta.setAttribute('content', _vpBase + ', minimum-scale=1.0');
+  setTimeout(() => _vpMeta.setAttribute('content', _vpBase), 100);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    if (window.visualViewport.scale > 1.02) {
+      clearTimeout(_zoomResetTimer);
+      _zoomResetTimer = setTimeout(forceZoomReset, 300);
+    }
+  });
+}
+
 // ════════════════════════════════════════════════════════
 // Fire button
 // ════════════════════════════════════════════════════════
@@ -2966,7 +3036,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v25</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v26</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

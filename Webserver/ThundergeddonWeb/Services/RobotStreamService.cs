@@ -24,15 +24,31 @@ public class RobotStreamService
 
     public async Task StreamToSubscriber(string robotUrl, HttpResponse response, CancellationToken ct)
     {
-        var broadcaster = GetOrCreate(robotUrl);
-        try
+        if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
+            bodyFeature.DisableBuffering();
+
+        response.ContentType                  = "multipart/x-mixed-replace; boundary=frame";
+        response.Headers["Cache-Control"]     = "no-cache";
+        response.Headers["X-Accel-Buffering"] = "no";
+
+        // Keep the client's response open across robot-side drops: if the robot's
+        // camera restarts (e.g. stream_off/stream_on between games) the broadcaster
+        // dies, but a phone's <img> element has no reconnect logic — so reconnect
+        // here and keep appending frames to the same multipart response.
+        while (!ct.IsCancellationRequested)
         {
-            await broadcaster.Subscribe(response, ct);
-        }
-        finally
-        {
-            broadcaster.Unsubscribe(response);
-            lock (_lock) { if (!broadcaster.HasSubscribers) _active.Remove(robotUrl); }
+            var broadcaster = GetOrCreate(robotUrl);
+            try
+            {
+                await broadcaster.Subscribe(response, ct);
+            }
+            finally
+            {
+                broadcaster.Unsubscribe(response);
+                Release(robotUrl, broadcaster);
+            }
+            if (ct.IsCancellationRequested) break;
+            try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
         }
     }
 
@@ -41,17 +57,23 @@ public class RobotStreamService
     /// are parsed server-side from the MJPEG multipart stream and sent as binary
     /// WebSocket messages.  This bypasses iOS Safari's inability to stream-read
     /// fetch response bodies (multipart/x-mixed-replace).
+    /// Like the HTTP path, reconnects to the robot while the client stays open.
     /// </summary>
     public async Task StreamFramesToWebSocket(string robotUrl, WebSocket ws, CancellationToken ct)
     {
-        var broadcaster = GetOrCreate(robotUrl);
-        try
+        while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
         {
-            await broadcaster.SubscribeWs(ws, ct);
-        }
-        finally
-        {
-            lock (_lock) { if (!broadcaster.HasSubscribers) _active.Remove(robotUrl); }
+            var broadcaster = GetOrCreate(robotUrl);
+            try
+            {
+                await broadcaster.SubscribeWs(ws, ct);
+            }
+            finally
+            {
+                Release(robotUrl, broadcaster);
+            }
+            if (ct.IsCancellationRequested || ws.State != WebSocketState.Open) break;
+            try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
         }
     }
 
@@ -59,12 +81,27 @@ public class RobotStreamService
     {
         lock (_lock)
         {
-            if (!_active.TryGetValue(robotUrl, out var b))
+            // A dead broadcaster (robot connection already ended) is never
+            // restarted — replace it so new subscribers get a fresh connection
+            // instead of a channel that completes with zero frames.
+            if (!_active.TryGetValue(robotUrl, out var b) || b.IsDead)
             {
                 b = new StreamBroadcaster(robotUrl, _factory, _log);
                 _active[robotUrl] = b;
             }
             return b;
+        }
+    }
+
+    private void Release(string robotUrl, StreamBroadcaster broadcaster)
+    {
+        lock (_lock)
+        {
+            // Only remove the exact broadcaster we used — a replacement for the
+            // same URL may already be registered and serving other subscribers.
+            if (_active.TryGetValue(robotUrl, out var cur) && cur == broadcaster
+                && !broadcaster.HasSubscribers)
+                _active.Remove(robotUrl);
         }
     }
 }
@@ -85,10 +122,16 @@ internal class StreamBroadcaster
     private readonly Dictionary<Guid, Channel<byte[]>>         _wsChannels = new();
     private Task? _readTask;
     private CancellationTokenSource? _readCts;
+    private bool _dead; // read loop finished — this broadcaster never streams again
 
     public bool HasSubscribers
     {
         get { lock (_subLock) return _channels.Count > 0 || _wsChannels.Count > 0; }
+    }
+
+    public bool IsDead
+    {
+        get { lock (_subLock) return _dead; }
     }
 
     public StreamBroadcaster(string url, IHttpClientFactory factory, ILogger log)
@@ -102,16 +145,10 @@ internal class StreamBroadcaster
 
     public async Task Subscribe(HttpResponse response, CancellationToken clientCt)
     {
-        if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
-            bodyFeature.DisableBuffering();
-
-        response.ContentType                  = "multipart/x-mixed-replace; boundary=frame";
-        response.Headers["Cache-Control"]     = "no-cache";
-        response.Headers["X-Accel-Buffering"] = "no";
-
         var ch = MakeChannel();
         lock (_subLock)
         {
+            if (_dead) return; // caller retries with a fresh broadcaster
             _channels[response] = ch;
             EnsureReadLoop();
         }
@@ -145,6 +182,7 @@ internal class StreamBroadcaster
         var ch = MakeChannel();
         lock (_subLock)
         {
+            if (_dead) return; // caller retries with a fresh broadcaster
             _wsChannels[id] = ch;
             EnsureReadLoop();
         }
@@ -200,7 +238,10 @@ internal class StreamBroadcaster
 
     private void EnsureReadLoop()
     {
-        if (_readTask == null || _readTask.IsCompleted)
+        // One read loop per broadcaster lifetime: when it exits, the broadcaster
+        // is marked dead and RobotStreamService creates a replacement. Restarting
+        // the loop here would race with the dying loop's channel-complete sweep.
+        if (_readTask == null)
         {
             _readCts  = new CancellationTokenSource();
             _readTask = Task.Run(() => ReadLoop(_readCts.Token));
@@ -275,9 +316,12 @@ internal class StreamBroadcaster
 
         _log.LogInformation("[Stream] Disconnected from {url}", _url);
 
-        // Complete all subscriber channels so their await-foreach loops exit cleanly.
+        // Complete all subscriber channels so their await-foreach loops exit
+        // cleanly, and mark the broadcaster dead in the same locked section so
+        // no new channel can slip in after the sweep and hang forever.
         lock (_subLock)
         {
+            _dead = true;
             foreach (var ch in _channels.Values)  ch.Writer.TryComplete();
             foreach (var ch in _wsChannels.Values) ch.Writer.TryComplete();
         }
