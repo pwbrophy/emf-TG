@@ -813,12 +813,15 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Fire flash overlay: additive laser-blast frame sequence blended into the
-       video itself. Sits above the stream but below the hit overlay / HUD. ── */
+       video itself. Sits above the stream but below the hit overlay / HUD.
+       IMPORTANT: no z-index here — a z-index would create a stacking context that
+       isolates the img's mix-blend-mode from the video underneath (the blend would
+       then composite against nothing and render the frame's black background).
+       Painting order relies on DOM position: after #stream, before #hit-overlay. ── */
     #fire-fx {
       position: absolute;
       inset: 0;
       pointer-events: none;
-      z-index: 4;
       overflow: hidden;
     }
     #fire-fx-img {
