@@ -1627,7 +1627,12 @@ function buildConnection() {
   conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; pauseFireCooldown(); document.getElementById('game-paused-overlay').classList.add('active'); });
   conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; resumeFireCooldown(); document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
-  conn.on('FireEvent',    data    => { if (data && data.robotId && data.robotId === myRobotId) playFireFx(); });
+  // Note: myRobotId usually holds the robot's CALLSIGN (player_list's "robot"
+  // field sends callsign, falling back to robotId only when unset) — match both.
+  conn.on('FireEvent',    data    => {
+    if (!data || !myRobotId) return;
+    if (data.robotId === myRobotId || data.callsign === myRobotId) { dbg('FireEvent match — playing fx'); playFireFx(); }
+  });
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
   // Rejected join (name taken, or game in progress for kicked players).
