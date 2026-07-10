@@ -812,6 +812,25 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Fire flash overlay: additive laser-blast frame sequence blended into the
+       video itself. Sits above the stream but below the hit overlay / HUD. ── */
+    #fire-fx {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 4;
+      overflow: hidden;
+    }
+    #fire-fx-img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      mix-blend-mode: screen;
+      opacity: 0;
+    }
+
     /* ── Hit direction overlay ── */
     #hit-overlay {
       position: absolute;
@@ -1038,6 +1057,11 @@
   <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
   <canvas id="stream-canvas" style="display:none"></canvas>
   <div id="stream-placeholder" style="display:none">No video stream</div>
+
+  <!-- Fire flash overlay: laser-blast frame sequence, additively blended into the video -->
+  <div id="fire-fx">
+    <img id="fire-fx-img" src="" alt="" />
+  </div>
 
   <!-- Hit direction overlay (above video, below HP bar / controls) -->
   <div id="hit-overlay">
@@ -1517,6 +1541,7 @@ function returnToJoin(message) {
   if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
   document.getElementById('fire-toast').classList.remove('visible');
   clearHitOverlay();
+  stopFireFx();
   myAlliance  = -1;
   myRobotId   = '';
   myTankColor = '';
@@ -1602,6 +1627,7 @@ function buildConnection() {
   conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; pauseFireCooldown(); document.getElementById('game-paused-overlay').classList.add('active'); });
   conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; resumeFireCooldown(); document.getElementById('game-paused-overlay').classList.remove('active'); });
   conn.on('FireResult',    text    => showFireToast(text));
+  conn.on('FireEvent',    data    => { if (data && data.robotId && data.robotId === myRobotId) playFireFx(); });
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
   // Rejected join (name taken, or game in progress for kicked players).
@@ -2767,6 +2793,48 @@ if (window.visualViewport) {
       _zoomResetTimer = setTimeout(forceZoomReset, 300);
     }
   });
+}
+
+// ════════════════════════════════════════════════════════
+// Fire flash overlay — laser-blast frame sequence, additively blended into the
+// FPV video. Triggered by the server-broadcast FireEvent (not locally on button
+// press) so the driver's screen also sees it in two-player mode, and so it can't
+// desync from the shot the operator/robot actually fired.
+// ════════════════════════════════════════════════════════
+const FIRE_FX_FRAMES = [
+  '/images/firefx/fx1.png', '/images/firefx/fx2.png', '/images/firefx/fx3.png', '/images/firefx/fx4.png',
+  '/images/firefx/fx5.png', '/images/firefx/fx6.png', '/images/firefx/fx7.png', '/images/firefx/fx8.png'
+];
+// Matches the MJPEG stream's ~20fps cap (MjpegServer default) so the overlay steps
+// frame-by-frame in lockstep with the video instead of looking like a smooth CSS animation.
+const FIRE_FX_FRAME_MS = 50;
+FIRE_FX_FRAMES.forEach(src => { const img = new Image(); img.src = src; }); // preload
+let _fireFxTimer = null;
+
+function playFireFx() {
+  const el = document.getElementById('fire-fx-img');
+  if (!el) return;
+  clearInterval(_fireFxTimer);
+  let i = 0;
+  el.src = FIRE_FX_FRAMES[0];
+  el.style.opacity = '1';
+  _fireFxTimer = setInterval(() => {
+    i++;
+    if (i >= FIRE_FX_FRAMES.length) {
+      clearInterval(_fireFxTimer);
+      _fireFxTimer = null;
+      el.style.opacity = '0';
+      return;
+    }
+    el.src = FIRE_FX_FRAMES[i];
+  }, FIRE_FX_FRAME_MS);
+}
+
+function stopFireFx() {
+  clearInterval(_fireFxTimer);
+  _fireFxTimer = null;
+  const el = document.getElementById('fire-fx-img');
+  if (el) el.style.opacity = '0';
 }
 
 // ════════════════════════════════════════════════════════

@@ -116,6 +116,8 @@ public class ShootingController : MonoBehaviour
         var server = ServiceLocator.RobotServer;
         if (server != null) server.SendFlashFire(robotId);
 
+        ServiceLocator.PlayerServer?.BroadcastFireEvent(robotId);
+
         var scheduler = ServiceLocator.IrSlotScheduler;
         if (scheduler != null)
             scheduler.EnqueueFire(robotId);

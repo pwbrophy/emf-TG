@@ -1233,6 +1233,26 @@ public class PlayerWebSocketServer : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Broadcasts an immediate fire notification to every connected client so the
+    /// phone (driver + gunner) and display page can play the muzzle-flash video
+    /// overlay in sync with the shot. Sent at RequestFire time, not after IR hit
+    /// resolution (which SendFireResult reports later, once the hit/miss is known).
+    /// </summary>
+    public void BroadcastFireEvent(string shooterRobotId)
+    {
+        if (string.IsNullOrEmpty(shooterRobotId)) return;
+
+        string callsign = "";
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir != null && dir.TryGet(shooterRobotId, out var info))
+            callsign = info.Callsign ?? "";
+
+        string json = "{\"cmd\":\"fire_event\",\"robotId\":\"" + EscapeJson(shooterRobotId) +
+                      "\",\"callsign\":\"" + EscapeJson(callsign) + "\"}";
+        BroadcastRaw(json);
+    }
+
     public void SendFireResult(string shooterRobotId, string resultText)
     {
         foreach (var kvp in _connToPlayer)

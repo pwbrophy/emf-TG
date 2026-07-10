@@ -196,6 +196,15 @@ public class UnityBridgeService : BackgroundService
                     await HandleFireResult(doc.RootElement);
                     break;
 
+                case "fire_event":
+                {
+                    string? robotId  = GetString(doc.RootElement, "robotId");
+                    string? callsign = GetString(doc.RootElement, "callsign");
+                    await _hub.Clients.All.SendAsync("FireEvent",
+                        new { robotId = robotId ?? "", callsign = callsign ?? "" });
+                    break;
+                }
+
                 case "hit_taken":
                     await HandleHitTaken(doc.RootElement);
                     break;
