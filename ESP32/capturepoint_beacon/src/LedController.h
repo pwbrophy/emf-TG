@@ -5,6 +5,11 @@
 // Both outputs always render the same logical state, so the onboard pixel
 // lets you validate all beacon lighting behaviour before soldering the strip.
 //
+// Build with -D NO_ONBOARD_PIXEL for boards without an addressable onboard
+// RGB (e.g. the Freenove ESP32-WROVER, classic ESP32 — GPIO48 doesn't exist
+// there). All onboard mirroring compiles out; the external strip behaves
+// identically.
+//
 // States:
 //   BootHw/BootWifi/BootServer — centre strip pixel + onboard pixel, dim
 //                                 red/green/blue (~10% brightness)
@@ -25,8 +30,10 @@
 static constexpr int STRIP_PIN     = 4;   // external WS2812 strip data line
 static constexpr int STRIP_COUNT   = 9;
 static constexpr int STRIP_CENTRE  = 4;   // middle LED, index 0..8
-static constexpr int ONBOARD_PIN   = 48;  // dev board's built-in WS2812 pixel
+#ifndef NO_ONBOARD_PIXEL
+static constexpr int ONBOARD_PIN   = 48;  // dev board's built-in WS2812 pixel (S3 boards)
 static constexpr int ONBOARD_COUNT = 1;
+#endif
 static constexpr uint8_t DIM_BRIGHTNESS = 26; // ~10% of 255 — matches robot firmware
 
 static constexpr uint32_t CAPTURE_RIPPLE_MS    = 1000;
@@ -43,13 +50,17 @@ class LedController
 public:
     LedController()
       : _strip(STRIP_COUNT, STRIP_PIN, NEO_GRB + NEO_KHZ800)
+#ifndef NO_ONBOARD_PIXEL
       , _onboard(ONBOARD_COUNT, ONBOARD_PIN, NEO_GRB + NEO_KHZ800)
+#endif
     {}
 
     void begin()
     {
         _strip.begin();   _strip.clear();   _strip.show();
+#ifndef NO_ONBOARD_PIXEL
         _onboard.begin(); _onboard.clear(); _onboard.show();
+#endif
         setState(BeaconState::BootHw);
     }
 
@@ -125,12 +136,24 @@ public:
         _strip.show();
 
         uint8_t b = (uint8_t)((uint32_t)pct * 255u / 100u);
-        _onboard.setPixelColor(0, _onboard.Color(b, 0, b));
-        _onboard.show();
+        _setOnboard(b, 0, b);
     }
 
 private:
     static inline float _fabs(float x) { return x < 0.0f ? -x : x; }
+
+    // Single write point for the onboard pixel — compiles to nothing on
+    // boards built with NO_ONBOARD_PIXEL, so every caller stays identical
+    // across board variants.
+    void _setOnboard(uint8_t r, uint8_t g, uint8_t b)
+    {
+#ifndef NO_ONBOARD_PIXEL
+        _onboard.setPixelColor(0, _onboard.Color(r, g, b));
+        _onboard.show();
+#else
+        (void)r; (void)g; (void)b;
+#endif
+    }
 
     void _draw()
     {
@@ -149,7 +172,7 @@ private:
             // redraw" approach the robot firmware uses for boot-phase
             // transitions.
             _strip.clear();   _strip.show();
-            _onboard.clear(); _onboard.show();
+            _setOnboard(0, 0, 0);
             break;
         }
     }
@@ -159,8 +182,7 @@ private:
         _strip.clear();
         _strip.setPixelColor(STRIP_CENTRE, _strip.Color(r, g, b));
         _strip.show();
-        _onboard.setPixelColor(0, _onboard.Color(r, g, b));
-        _onboard.show();
+        _setOnboard(r, g, b);
     }
 
     void _fillBoth(uint8_t r, uint8_t g, uint8_t b)
@@ -168,8 +190,7 @@ private:
         for (int i = 0; i < STRIP_COUNT; i++)
             _strip.setPixelColor(i, _strip.Color(r, g, b));
         _strip.show();
-        _onboard.setPixelColor(0, _onboard.Color(r, g, b));
-        _onboard.show();
+        _setOnboard(r, g, b);
     }
 
     // Strip: bouncing white dot, symmetric dwell time (fastest through the
@@ -195,8 +216,7 @@ private:
             _flashOn   = !_flashOn;
             _flashNext = now + 500;
             uint8_t b  = _flashOn ? 30 : 0; // dim — full white at close range was blinding
-            _onboard.setPixelColor(0, _onboard.Color(b, b, b));
-            _onboard.show();
+            _setOnboard(b, b, b);
         }
     }
 
@@ -234,15 +254,11 @@ private:
         // Onboard: flash near the start of each wave (the "ripple launching"
         // moment), otherwise show the same brightening blend.
         if (waveT < 0.3f)
-        {
-            _onboard.setPixelColor(0, _onboard.Color(150, 150, 150)); // dimmer than the strip's flash — close-range pixel
-        }
+            _setOnboard(150, 150, 150); // dimmer than the strip's flash — close-range pixel
         else
-        {
-            _onboard.setPixelColor(0, _onboard.Color(
-                (uint8_t)((float)_capR * mix), (uint8_t)((float)_capG * mix), (uint8_t)((float)_capB * mix)));
-        }
-        _onboard.show();
+            _setOnboard((uint8_t)((float)_capR * mix),
+                        (uint8_t)((float)_capG * mix),
+                        (uint8_t)((float)_capB * mix));
     }
 
     // Single white wavefront, outside->centre, over the current background
@@ -272,13 +288,14 @@ private:
         }
         _strip.show();
 
-        if (front < 3.0f) _onboard.setPixelColor(0, _onboard.Color(150, 150, 150));
-        else               _onboard.setPixelColor(0, _onboard.Color(baseR, baseG, baseB));
-        _onboard.show();
+        if (front < 3.0f) _setOnboard(150, 150, 150);
+        else              _setOnboard(baseR, baseG, baseB);
     }
 
     Adafruit_NeoPixel _strip;
+#ifndef NO_ONBOARD_PIXEL
     Adafruit_NeoPixel _onboard;
+#endif
     BeaconState       _state      = BeaconState::BootHw;
     BeaconState       _priorState = BeaconState::Idle; // what VpRipple restores when done
 
