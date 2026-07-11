@@ -845,6 +845,9 @@
       position: absolute;
       pointer-events: none;
       opacity: 0;
+      /* Fallback only — overwritten by JS (computeBeamGlowFilter, called from
+         updateFireEffectBounds) with radii scaled to BEAM_GLOW_FALLOFF_FRAC
+         of the video's actual rendered width once bounds are known. */
       filter:
         drop-shadow(0 0 14px #fff)
         drop-shadow(0 0 34px #fff)
@@ -2899,12 +2902,13 @@ const BEAM_APEX_Y        = 50;  // % — matches #reticle's centred position
 const BEAM_BASE_Y        = 68;  // % — top of the muzzle. Was 65; brought back down ~1/3 of the way
                                  // toward the previous (75) value per request. Still an estimate —
                                  // retune against the real FPV video if it still looks off.
-const BEAM_APEX_HALF_W   = 1.5; // % — near-point tip at the reticule
-const BEAM_BASE_HALF_W   = 15;  // % — wide base at the barrel
-const BEAM_BAND_H_START  = 7;   // % — traveling band's height when it starts (close, so "tall") —
-                                 // scaled to BEAM_BASE_Y - BEAM_APEX_Y (18%), not the old 25%/50% span
-const BEAM_BAND_H_END    = 1;   // % — band's height once it reaches the reticule (far, so "short")
-const BEAM_FEATHER_FRAC  = 0.4; // 40% of the band's current height, feathered at both edges (motion blur)
+const BEAM_APEX_HALF_W   = 0.75; // % — near-point tip at the reticule (half the previous width)
+const BEAM_BASE_HALF_W   = 7.5;  // % — wide base at the barrel (half the previous width)
+const BEAM_BAND_H_START  = 14;   // % — traveling band's height when it starts (close, so "tall") —
+                                  // doubled so the beam reads as a stretched bolt, not a short blob
+const BEAM_BAND_H_END    = 2;    // % — band's height once it reaches the reticule (far, so "short")
+const BEAM_FEATHER_FRAC  = 0.4;  // 40% of the band's current height, feathered at both edges (motion blur)
+const BEAM_GLOW_FALLOFF_FRAC = 0.10; // glow fades to ~0 by this fraction of the video's rendered width
 const MJPEG_FRAME_MS  = 50;  // MjpegServer.h default cap: 20 fps
 let _fireFlashActive     = false;
 let _fireBeamActive      = false;
@@ -2924,9 +2928,27 @@ const BEAM_CLIP_PATH = (() => {
   return `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
 })();
 
+// Builds #fire-beam's glow filter so it reaches ~0 opacity by
+// BEAM_GLOW_FALLOFF_FRAC of the video's actual rendered width (in px, not a
+// fixed value — a phone's fullscreen video and a much narrower one need
+// visibly different blur radii to both read as "glow reaches ~10% of my
+// screen"). drop-shadow's blur is a Gaussian, not a hard cutoff, so this is
+// an approximation: the innermost layer is small (reads as ~opaque right at
+// the shape's own edge) and the outermost layer's radius is the full
+// falloff distance (where the Gaussian tail has become negligible).
+function computeBeamGlowFilter(widthPx) {
+  const d = widthPx * BEAM_GLOW_FALLOFF_FRAC;
+  return `drop-shadow(0 0 ${d * 0.12}px #fff)` +
+    `drop-shadow(0 0 ${d * 0.3}px #fff)` +
+    `drop-shadow(0 0 ${d * 0.55}px rgba(255,255,255,0.9))` +
+    `drop-shadow(0 0 ${d}px rgba(255,255,255,0.65))`;
+}
+
 // Sizes/positions #fire-flash and #fire-beam to the video's actual rendered
 // rect within #screen-playing, excluding the object-fit:contain letterbox
-// bars, so neither effect lightens the black bars around the picture.
+// bars, so neither effect lightens the black bars around the picture. Also
+// rebuilds #fire-beam's glow filter (see computeBeamGlowFilter) since its
+// radii are relative to this same width.
 function updateFireEffectBounds() {
   const container = document.getElementById('screen-playing');
   const cw = container.clientWidth, ch = container.clientHeight;
@@ -2951,6 +2973,8 @@ function updateFireEffectBounds() {
     el.style.width  = width + 'px';
     el.style.height = height + 'px';
   }
+  const beamEl = document.getElementById('fire-beam');
+  if (beamEl) beamEl.style.filter = computeBeamGlowFilter(width);
 }
 window.addEventListener('resize', () => { if (document.body.classList.contains('game-active')) updateFireEffectBounds(); });
 
