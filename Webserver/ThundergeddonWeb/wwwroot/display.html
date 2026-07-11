@@ -252,17 +252,20 @@
   /* Fire flash overlay: white radial flash when the tank fires — bright centre,
      transparent at the cell edge, with a feathered mask cutting out the gun
      barrel silhouette at bottom-centre so the flash reads as behind the barrel.
-     mix-blend-mode:screen makes it additive (lightens the video underneath)
-     instead of alpha-compositing a translucent white layer on top — this
-     requires no ancestor between here and .grid-cell-canvas to establish a
-     stacking context (z-index/opacity/transform/filter/isolation), so no
-     z-index here; painting order relies on DOM position (after the canvas).
+     mix-blend-mode:overlay multiplies dark backdrop pixels (shadows stay dark)
+     and screens light backdrop pixels (highlights brighten) — plain screen
+     blows every pixel toward white uniformly regardless of how dark it
+     started, flattening the flash into a solid white lump. Overlay keeps
+     contrast/detail visible through the flash instead. This requires no
+     ancestor between here and .grid-cell-canvas to establish a stacking
+     context (z-index/opacity/transform/filter/isolation), so no z-index here;
+     painting order relies on DOM position (after the canvas).
      left/top/width/height are set by JS (updateGridFireFlashBounds) to the
      canvas's actual rendered rect, excluding the object-fit:contain letterbox
      bars, so the flash never lightens the black bars around the picture. */
   .grid-cell-fireflash {
     position: absolute; pointer-events: none; opacity: 0;
-    mix-blend-mode: screen;
+    mix-blend-mode: overlay;
     background: radial-gradient(ellipse farthest-side at center,
       rgba(255,255,255,1) 0%, rgba(255,255,255,0.85) 45%, rgba(255,255,255,0) 100%);
     -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
@@ -857,7 +860,7 @@ function videoWsUrl(robotUrl) {
 }
 
 // ── Fire flash overlay: white radial flash on a tank's video cell, masked
-// around the gun barrel, additively screened onto the video (see
+// around the gun barrel, overlay-blended onto the video (see
 // .grid-cell-fireflash CSS). Snaps to 100% instantly then decays
 // exponentially over FIRE_FLASH_MS. Triggered by the server-broadcast
 // FireEvent, keyed by callsign.

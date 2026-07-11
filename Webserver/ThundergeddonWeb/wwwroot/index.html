@@ -816,8 +816,11 @@
        Bright at centre, fully transparent by the screen edge. A feathered
        radial mask cuts a dark hole at bottom-centre matching the gun barrel
        silhouette so the flash reads as coming from behind the barrel.
-       mix-blend-mode:screen makes it additive (lightens the video underneath)
-       instead of alpha-compositing a translucent white layer on top.
+       mix-blend-mode:overlay multiplies dark backdrop pixels (shadows stay
+       dark) and screens light backdrop pixels (highlights brighten) — plain
+       screen blows every pixel toward white uniformly regardless of how dark
+       it started, flattening the flash into a solid white lump. Overlay keeps
+       contrast/detail visible through the flash instead.
        left/top/width/height are set by JS (updateFireFlashBounds) to the
        video's actual rendered rect, excluding the object-fit:contain letterbox
        bars, so the flash never bleeds into the black bars around the picture.
@@ -829,7 +832,7 @@
       position: absolute;
       pointer-events: none;
       opacity: 0;
-      mix-blend-mode: screen;
+      mix-blend-mode: overlay;
       background: radial-gradient(ellipse farthest-side at center,
         rgba(255,255,255,1) 0%,
         rgba(255,255,255,0.85) 45%,
@@ -2810,7 +2813,7 @@ if (window.visualViewport) {
 
 // ════════════════════════════════════════════════════════
 // Fire flash overlay — white radial flash on the FPV video, masked around the
-// gun barrel, additively screened onto the video (see #fire-flash CSS).
+// gun barrel, overlay-blended onto the video (see #fire-flash CSS).
 // Snaps to 100% instantly then decays exponentially over FIRE_FLASH_MS.
 // Triggered by the server-broadcast FireEvent (not locally on button press) so
 // the driver's screen also sees it in two-player mode, and so it can't desync
