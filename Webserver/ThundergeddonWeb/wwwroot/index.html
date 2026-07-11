@@ -816,14 +816,20 @@
        Bright at centre, fully transparent by the screen edge. A feathered
        radial mask cuts a dark hole at bottom-centre matching the gun barrel
        silhouette so the flash reads as coming from behind the barrel.
-       Opacity is driven by JS (exponential decay over 100ms).
+       mix-blend-mode:screen makes it additive (lightens the video underneath)
+       instead of alpha-compositing a translucent white layer on top.
+       left/top/width/height are set by JS (updateFireFlashBounds) to the
+       video's actual rendered rect, excluding the object-fit:contain letterbox
+       bars, so the flash never bleeds into the black bars around the picture.
        No z-index — painting order relies on DOM position: after #stream,
-       before #hit-overlay. ── */
+       before #hit-overlay. mix-blend-mode requires no ancestor between here and
+       #stream to create a stacking context (z-index/opacity/transform/filter/
+       isolation), or the blend isolates against nothing and renders opaque. ── */
     #fire-flash {
       position: absolute;
-      inset: 0;
       pointer-events: none;
       opacity: 0;
+      mix-blend-mode: screen;
       background: radial-gradient(ellipse farthest-side at center,
         rgba(255,255,255,1) 0%,
         rgba(255,255,255,0.85) 45%,
@@ -1429,6 +1435,7 @@ function startWsVideoDecoder(robotUrl) {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(blobUrl);
       frameCount++;
+      onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
       if (!gotFirstFrame) {
         gotFirstFrame        = true;
         canvas.style.display = '';
@@ -2803,36 +2810,98 @@ if (window.visualViewport) {
 
 // ════════════════════════════════════════════════════════
 // Fire flash overlay — white radial flash on the FPV video, masked around the
-// gun barrel. Snaps to 100% instantly then decays exponentially over 100ms.
+// gun barrel, additively screened onto the video (see #fire-flash CSS).
+// Snaps to 100% instantly then decays exponentially over FIRE_FLASH_MS.
 // Triggered by the server-broadcast FireEvent (not locally on button press) so
 // the driver's screen also sees it in two-player mode, and so it can't desync
 // from the shot the operator/robot actually fired.
+//
+// The opacity step is driven by actual decoded video frames rather than a
+// smooth rAF/CSS-transition ramp, so the flash's apparent "frame rate" never
+// exceeds the video's — steps between frames would just be redrawing the same
+// picture, which looks like the effect is running at a different rate than
+// the footage it's composited over.
+//   - WS/canvas decode path (iOS/Firefox): every arriving JPEG is a real,
+//     individually decoded frame — onVideoFrameTick() is called directly from
+//     the WebSocket decoder's img.onload once per frame.
+//   - Native <img> MJPEG path: the browser swaps multipart frames internally
+//     with no per-frame JS callback, so we approximate with a timer at the
+//     stream's known fps cap (MjpegServer.h _minFrameIntervalMs, 50ms/20fps
+//     default) — matching cadence, just not driven by the real decode event.
 // ════════════════════════════════════════════════════════
-const FIRE_FLASH_MS = 300;
-const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
-let _fireFlashRaf = null;
+const FIRE_FLASH_MS   = 300;
+const FIRE_FLASH_K    = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+const MJPEG_FRAME_MS  = 50;  // MjpegServer.h default cap: 20 fps
+let _fireFlashActive     = false;
+let _fireFlashStartTime  = 0;
+let _fireFlashTimerId    = null; // native <img> MJPEG path only
+
+// Sizes/positions #fire-flash to the video's actual rendered rect within
+// #screen-playing, excluding the object-fit:contain letterbox bars, so the
+// additive flash never lightens the black bars around the picture.
+function updateFireFlashBounds() {
+  const el = document.getElementById('fire-flash');
+  if (!el) return;
+  const container = document.getElementById('screen-playing');
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const usingWs = !!_videoWs;
+  const srcEl = usingWs ? document.getElementById('stream-canvas') : document.getElementById('stream');
+  const nw = usingWs ? srcEl.width : srcEl.naturalWidth;
+  const nh = usingWs ? srcEl.height : srcEl.naturalHeight;
+  let left = 0, top = 0, width = cw, height = ch;
+  if (nw && nh && cw && ch) {
+    const videoAspect = nw / nh, containerAspect = cw / ch;
+    if (videoAspect > containerAspect) {
+      width = cw; height = cw / videoAspect; left = 0; top = (ch - height) / 2;
+    } else {
+      height = ch; width = ch * videoAspect; top = 0; left = (cw - width) / 2;
+    }
+  }
+  el.style.left   = left + 'px';
+  el.style.top    = top + 'px';
+  el.style.width  = width + 'px';
+  el.style.height = height + 'px';
+}
+window.addEventListener('resize', () => { if (document.body.classList.contains('game-active')) updateFireFlashBounds(); });
+
+function fireFlashOpacityAt(elapsedMs) {
+  return elapsedMs >= FIRE_FLASH_MS ? 0 : Math.exp(-FIRE_FLASH_K * elapsedMs / FIRE_FLASH_MS);
+}
+
+// Called once per real (or emulated) video frame while the flash is active.
+function onVideoFrameTick() {
+  if (!_fireFlashActive) return;
+  const el = document.getElementById('fire-flash');
+  const elapsed = performance.now() - _fireFlashStartTime;
+  if (elapsed >= FIRE_FLASH_MS) {
+    el.style.opacity = '0';
+    _fireFlashActive = false;
+    if (_fireFlashTimerId) { clearInterval(_fireFlashTimerId); _fireFlashTimerId = null; }
+    return;
+  }
+  el.style.opacity = String(fireFlashOpacityAt(elapsed));
+}
 
 function playFireFx() {
   const el = document.getElementById('fire-flash');
   if (!el) return;
-  if (_fireFlashRaf) cancelAnimationFrame(_fireFlashRaf);
-  const t0 = performance.now();
-  el.style.opacity = '1';
-  function step(t) {
-    const dt = t - t0;
-    if (dt >= FIRE_FLASH_MS) {
-      el.style.opacity = '0';
-      _fireFlashRaf = null;
-      return;
-    }
-    el.style.opacity = String(Math.exp(-FIRE_FLASH_K * dt / FIRE_FLASH_MS));
-    _fireFlashRaf = requestAnimationFrame(step);
+  updateFireFlashBounds();
+  if (_fireFlashTimerId) { clearInterval(_fireFlashTimerId); _fireFlashTimerId = null; }
+  _fireFlashActive    = true;
+  _fireFlashStartTime = performance.now();
+  el.style.opacity = '1'; // first frame: flash to 100% straight away
+  if (!_videoWs) {
+    // No per-frame decode callback on the native MJPEG path — step at the
+    // stream's known frame cadence instead of every rAF tick.
+    _fireFlashTimerId = setInterval(onVideoFrameTick, MJPEG_FRAME_MS);
   }
-  _fireFlashRaf = requestAnimationFrame(step);
+  // WS/canvas path: onVideoFrameTick() is driven by real frame arrivals
+  // (see _videoWs.onmessage), nothing further to schedule here.
 }
 
 function stopFireFx() {
-  if (_fireFlashRaf) { cancelAnimationFrame(_fireFlashRaf); _fireFlashRaf = null; }
+  _fireFlashActive = false;
+  if (_fireFlashTimerId) { clearInterval(_fireFlashTimerId); _fireFlashTimerId = null; }
   const el = document.getElementById('fire-flash');
   if (el) el.style.opacity = '0';
 }

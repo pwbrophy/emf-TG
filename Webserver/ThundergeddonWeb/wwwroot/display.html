@@ -251,9 +251,18 @@
   .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
   /* Fire flash overlay: white radial flash when the tank fires — bright centre,
      transparent at the cell edge, with a feathered mask cutting out the gun
-     barrel silhouette at bottom-centre so the flash reads as behind the barrel. */
+     barrel silhouette at bottom-centre so the flash reads as behind the barrel.
+     mix-blend-mode:screen makes it additive (lightens the video underneath)
+     instead of alpha-compositing a translucent white layer on top — this
+     requires no ancestor between here and .grid-cell-canvas to establish a
+     stacking context (z-index/opacity/transform/filter/isolation), so no
+     z-index here; painting order relies on DOM position (after the canvas).
+     left/top/width/height are set by JS (updateGridFireFlashBounds) to the
+     canvas's actual rendered rect, excluding the object-fit:contain letterbox
+     bars, so the flash never lightens the black bars around the picture. */
   .grid-cell-fireflash {
-    position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 1;
+    position: absolute; pointer-events: none; opacity: 0;
+    mix-blend-mode: screen;
     background: radial-gradient(ellipse farthest-side at center,
       rgba(255,255,255,1) 0%, rgba(255,255,255,0.85) 45%, rgba(255,255,255,0) 100%);
     -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
@@ -848,29 +857,67 @@ function videoWsUrl(robotUrl) {
 }
 
 // ── Fire flash overlay: white radial flash on a tank's video cell, masked
-// around the gun barrel. Snaps to 100% then decays exponentially over 100ms.
-// Triggered by the server-broadcast FireEvent, keyed by callsign.
+// around the gun barrel, additively screened onto the video (see
+// .grid-cell-fireflash CSS). Snaps to 100% instantly then decays
+// exponentially over FIRE_FLASH_MS. Triggered by the server-broadcast
+// FireEvent, keyed by callsign.
+//
+// The opacity step is driven by real decoded video frames (the canvas
+// decode path's img.onload, called once per JPEG actually received) rather
+// than a smooth rAF ramp, so the flash never appears to update at a
+// different rate than the footage it's screened over — see the matching
+// comment in index.html's onVideoFrameTick for the fuller rationale.
 const FIRE_FLASH_MS = 300;
 const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
-const _gridFireFxTimers = {}; // index → rAF id
+const _gridFireFlashActive = {}; // index → bool
+const _gridFireFlashStart  = {}; // index → performance.now() at trigger
+
+// Sizes/positions a cell's fireflash div to the canvas's actual rendered
+// rect within .grid-cell-video, excluding the object-fit:contain letterbox
+// bars, so the additive flash never lightens the black bars around the feed.
+function updateGridFireFlashBounds(index) {
+  const el     = document.getElementById(`grid-firefx-${index}`);
+  const canvas = document.getElementById(`grid-canvas-${index}`);
+  if (!el || !canvas) return;
+  const container = canvas.parentElement; // .grid-cell-video
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const nw = canvas.width, nh = canvas.height;
+  let left = 0, top = 0, width = cw, height = ch;
+  if (nw && nh && cw && ch) {
+    const videoAspect = nw / nh, containerAspect = cw / ch;
+    if (videoAspect > containerAspect) {
+      width = cw; height = cw / videoAspect; left = 0; top = (ch - height) / 2;
+    } else {
+      height = ch; width = ch * videoAspect; top = 0; left = (cw - width) / 2;
+    }
+  }
+  el.style.left   = left + 'px';
+  el.style.top    = top + 'px';
+  el.style.width  = width + 'px';
+  el.style.height = height + 'px';
+}
+
+// Called once per real decoded frame for this cell while its flash is active.
+function onGridVideoFrameTick(index) {
+  if (!_gridFireFlashActive[index]) return;
+  const el = document.getElementById(`grid-firefx-${index}`);
+  if (!el) return;
+  const elapsed = performance.now() - _gridFireFlashStart[index];
+  if (elapsed >= FIRE_FLASH_MS) {
+    el.style.opacity = '0';
+    delete _gridFireFlashActive[index];
+    return;
+  }
+  el.style.opacity = String(Math.exp(-FIRE_FLASH_K * elapsed / FIRE_FLASH_MS));
+}
 
 function playGridFireFx(index) {
   const el = document.getElementById(`grid-firefx-${index}`);
   if (!el) return;
-  if (_gridFireFxTimers[index]) cancelAnimationFrame(_gridFireFxTimers[index]);
-  const t0 = performance.now();
-  el.style.opacity = '1';
-  function step(t) {
-    const dt = t - t0;
-    if (dt >= FIRE_FLASH_MS) {
-      el.style.opacity = '0';
-      delete _gridFireFxTimers[index];
-      return;
-    }
-    el.style.opacity = String(Math.exp(-FIRE_FLASH_K * dt / FIRE_FLASH_MS));
-    _gridFireFxTimers[index] = requestAnimationFrame(step);
-  }
-  _gridFireFxTimers[index] = requestAnimationFrame(step);
+  updateGridFireFlashBounds(index);
+  _gridFireFlashActive[index] = true;
+  _gridFireFlashStart[index]  = performance.now();
+  el.style.opacity = '1'; // first frame: flash to 100% straight away
 }
 
 function findGridIndexByCallsign(callsign) {
@@ -993,8 +1040,8 @@ function stopGrid() {
     try { _gridWs[k].close(); } catch(_) {}
     delete _gridWs[k];
   });
-  Object.keys(_gridFireFxTimers).forEach(k => cancelAnimationFrame(_gridFireFxTimers[k]));
-  for (const k in _gridFireFxTimers) delete _gridFireFxTimers[k];
+  for (const k in _gridFireFlashActive) delete _gridFireFlashActive[k];
+  for (const k in _gridFireFlashStart)  delete _gridFireFlashStart[k];
   const container = document.getElementById('tank-grid');
   container.classList.remove('active');
   container.innerHTML = '';
@@ -1025,6 +1072,7 @@ function startGridStream(index, robotUrl) {
         canvas.height = img.naturalHeight || canvas.offsetHeight;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(blobUrl);
+      onGridVideoFrameTick(index); // step this cell's fire-flash decay in lockstep with real decoded frames
     };
     img.src = blobUrl;
   };
