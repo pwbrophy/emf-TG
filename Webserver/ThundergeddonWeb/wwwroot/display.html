@@ -250,28 +250,42 @@
   .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000; }
   .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
   /* Fire beam overlay: glowing white bolt from the barrel to the cell centre.
-     clip-path is a STATIC trapezoid (wide at the muzzle, narrowing to a point
-     at centre), set once from the BEAM_* constants (see BEAM_CLIP_PATH in
-     JS). mask-image is a Y-axis linear-gradient recomputed every tick (see
-     updateGridFireBeamClip): it reveals a travelling band that sweeps from
-     the muzzle up to centre, with its own top/bottom edges feathered by 20%
-     of the band's current height for a motion-blur look. Together,
-     clip-path's own base line and the mask's stops guarantee nothing is ever
-     drawn below BEAM_BASE_Y (the muzzle top).
-     No mix-blend-mode (i.e. normal blend) — unlike the flash, the laser
-     should read as a bright solid light source regardless of what's behind
-     it. Solid white fill; the "heavy glow" comes from stacked drop-shadow()
-     layers, which (unlike box-shadow) follow the clip-path/mask's actual
-     visible silhouette. No z-index — comes before .grid-cell-fireflash in
-     DOM order so the flash paints on top of the beam. */
+     Split into a wrapper (.grid-cell-firebeam, glow only) and a child
+     (.grid-cell-firebeam-shape, the actual masked/clipped white shape).
+     Applying filter:drop-shadow() and clip-path/mask-image to the SAME
+     element is a known cross-browser footgun — several engines resolve the
+     mask/clip against the filtered result (or vice versa) inconsistently,
+     and the glow can end up cropped away by its own mask instead of
+     spreading past it. Putting the glow on a parent that merely CONTAINS the
+     already-clipped-and-masked child sidesteps the ambiguity — see the
+     matching comment in index.html's #fire-beam CSS for the fuller
+     rationale.
+     The child's clip-path is a STATIC trapezoid (wide at the muzzle,
+     narrowing to a point at centre), set once from the BEAM_* constants (see
+     BEAM_CLIP_PATH in JS). Its mask-image is a Y-axis linear-gradient
+     recomputed every tick (see updateGridFireBeamClip): it reveals a
+     travelling band that sweeps from the muzzle up to centre, with its own
+     top/bottom edges feathered by BEAM_FEATHER_FRAC of the band's current
+     height for a motion-blur look. Together, clip-path's own base line and
+     the mask's stops guarantee nothing is ever drawn below BEAM_BASE_Y (the
+     muzzle top).
+     No mix-blend-mode anywhere in this pair (i.e. normal blend) — unlike the
+     flash, the laser should read as a bright solid light source regardless
+     of what's behind it. The wrapper's opacity (not the child's) drives the
+     fade, so the glow fades together with the shape.
+     No z-index — comes before .grid-cell-fireflash in DOM order so the flash
+     paints on top of the beam. */
   .grid-cell-firebeam {
     position: absolute; pointer-events: none; opacity: 0;
-    background: #fff;
     filter:
-      drop-shadow(0 0 4px #fff)
-      drop-shadow(0 0 10px #fff)
-      drop-shadow(0 0 20px rgba(255,255,255,0.85))
-      drop-shadow(0 0 36px rgba(255,255,255,0.55));
+      drop-shadow(0 0 7px #fff)
+      drop-shadow(0 0 17px #fff)
+      drop-shadow(0 0 32px rgba(255,255,255,0.9))
+      drop-shadow(0 0 60px rgba(255,255,255,0.7));
+  }
+  .grid-cell-firebeam-shape {
+    position: absolute; inset: 0;
+    background: #fff;
   }
   /* Fire flash overlay: white radial flash when the tank fires — bright centre,
      transparent at the cell edge, with a feathered mask cutting out the gun
@@ -903,21 +917,21 @@ function videoWsUrl(robotUrl) {
 // index.html's onVideoFrameTick for the fuller rationale.
 const FIRE_FLASH_MS = 300;
 const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
-const BEAM_MS            = 200;
+const BEAM_MS            = 130;
 const BEAM_EASE_K        = 0.6; // gentle ease-out: still moving at ~55% of its starting speed at
                                  // the end (exp(-K)), not grinding to a halt like a stronger K would
-const BEAM_FADE_MS       = 50;  // trailing portion of BEAM_MS spent fading opacity to 0, so the
+const BEAM_FADE_MS       = 33;  // trailing portion of BEAM_MS spent fading opacity to 0, so the
                                  // shape doesn't just vanish mid-frame when the sweep finishes
 const BEAM_APEX_Y        = 50;  // % — cell's visual centre (no reticule on this spectator view)
-const BEAM_BASE_Y        = 65;  // % — top of the muzzle. This is an estimate from screenshots, not
-                                 // measured against a live camera feed — retune against the real
-                                 // FPV video if the beam still looks off relative to the barrel.
+const BEAM_BASE_Y        = 68;  // % — top of the muzzle. Was 65; brought back down ~1/3 of the way
+                                 // toward the previous (75) value per request. Still an estimate —
+                                 // retune against the real FPV video if it still looks off.
 const BEAM_APEX_HALF_W   = 1.5; // % — near-point tip at the centre
 const BEAM_BASE_HALF_W   = 15;  // % — wide base at the barrel
 const BEAM_BAND_H_START  = 7;   // % — traveling band's height when it starts (close, so "tall") —
-                                 // scaled to BEAM_BASE_Y - BEAM_APEX_Y (15%), not the old 25%/50% span
+                                 // scaled to BEAM_BASE_Y - BEAM_APEX_Y (18%), not the old 25%/50% span
 const BEAM_BAND_H_END    = 1;   // % — band's height once it reaches the centre (far, so "short")
-const BEAM_FEATHER_FRAC  = 0.2; // 20% of the band's current height, feathered at both edges (motion blur)
+const BEAM_FEATHER_FRAC  = 0.4; // 40% of the band's current height, feathered at both edges (motion blur)
 const _gridFireFlashActive = {}; // index → bool
 const _gridFireBeamActive  = {}; // index → bool
 const _gridFireStart       = {}; // index → performance.now() at trigger (shared: flash + beam fire together)
@@ -983,35 +997,38 @@ function beamOpacityAt(elapsedMs) {
   return 1 - (elapsedMs - fadeStart) / BEAM_FADE_MS;
 }
 
-// Updates a cell's firebeam mask-image to the current sweep position: a
+// Updates a cell's firebeam-shape mask-image to the current sweep position: a
 // travelling band, feathered at both edges, whose TRAILING (muzzle-side)
 // edge sweeps from the muzzle (BEAM_BASE_Y%) toward the centre
 // (BEAM_APEX_Y%) as the LEADING edge trails behind it by the current band
 // height — so the band always sits within [apexY, baseY], never past the
 // muzzle. Band height shrinks toward the centre (perspective), and the
-// feather width (20% of the current band height) shrinks along with it.
-// Combined with the cell's static clip-path (the X taper), the visible
-// slice narrows in both X and Y as it recedes, reading as perspective.
-// Position keeps advancing for the full BEAM_MS independently of the
-// opacity fade in beamOpacityAt, so the beam is still moving as it fades
-// rather than freezing then vanishing.
+// feather width (BEAM_FEATHER_FRAC of the current band height) shrinks along
+// with it. Combined with the shape's static clip-path (the X taper), the
+// visible slice narrows in both X and Y as it recedes, reading as
+// perspective. The wrapper's (.grid-cell-firebeam's) opacity is what
+// actually fades — see beamOpacityAt — so the glow fades together with the
+// shape. Position keeps advancing for the full BEAM_MS independently of that
+// fade, so the beam is still moving as it fades rather than freezing then
+// vanishing.
 function updateGridFireBeamClip(index, elapsedMs) {
-  const el = document.getElementById(`grid-firebeam-${index}`);
-  if (!el) return;
+  const wrapperEl = document.getElementById(`grid-firebeam-${index}`);
+  const shapeEl   = document.getElementById(`grid-firebeam-shape-${index}`);
+  if (!wrapperEl || !shapeEl) return;
   const p = beamEaseProgress(elapsedMs);
   const trailY = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
   const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
   const leadY  = trailY - bandH;
-  const feather      = BEAM_FEATHER_FRAC * bandH;
+  const feather      = Math.min(BEAM_FEATHER_FRAC * bandH, bandH / 2);
   const innerTop    = leadY + feather;
   const innerBottom = trailY - feather;
   const mask = `linear-gradient(to bottom,` +
     `rgba(0,0,0,0) 0%, rgba(0,0,0,0) ${leadY}%,` +
     `#000 ${innerTop}%, #000 ${innerBottom}%,` +
     `rgba(0,0,0,0) ${trailY}%, rgba(0,0,0,0) 100%)`;
-  el.style.webkitMaskImage = mask;
-  el.style.maskImage = mask;
-  el.style.opacity = String(beamOpacityAt(elapsedMs));
+  shapeEl.style.webkitMaskImage = mask;
+  shapeEl.style.maskImage = mask;
+  wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
 }
 
 // Called once per real decoded frame for this cell while either effect is active.
@@ -1038,13 +1055,14 @@ function onGridVideoFrameTick(index) {
 function playGridFireFx(index) {
   const flashEl = document.getElementById(`grid-firefx-${index}`);
   const beamEl  = document.getElementById(`grid-firebeam-${index}`);
-  if (!flashEl || !beamEl) return;
+  const beamShapeEl = document.getElementById(`grid-firebeam-shape-${index}`);
+  if (!flashEl || !beamEl || !beamShapeEl) return;
   updateGridFireEffectBounds(index);
   _gridFireStart[index]       = performance.now();
   _gridFireFlashActive[index] = true;
   _gridFireBeamActive[index]  = true;
   flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
-  beamEl.style.clipPath = beamEl.style.webkitClipPath = BEAM_CLIP_PATH;
+  beamShapeEl.style.clipPath = beamShapeEl.style.webkitClipPath = BEAM_CLIP_PATH;
   updateGridFireBeamClip(index, 0);
 }
 
@@ -1092,7 +1110,9 @@ function buildGridCell(r, i, footerCls) {
   cell.innerHTML =
     `<div class="grid-cell-video">` +
       `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
-      `<div class="grid-cell-firebeam" id="grid-firebeam-${i}"></div>` +
+      `<div class="grid-cell-firebeam" id="grid-firebeam-${i}">` +
+        `<div class="grid-cell-firebeam-shape" id="grid-firebeam-shape-${i}"></div>` +
+      `</div>` +
       `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
       `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
         (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
