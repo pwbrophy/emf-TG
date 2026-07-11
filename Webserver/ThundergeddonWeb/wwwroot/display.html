@@ -250,28 +250,28 @@
   .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000; }
   .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
   /* Fire beam overlay: glowing white bolt from the barrel to the cell centre.
-     The trapezoid shape (wide at the barrel, narrowing to a point at centre)
-     is static — JS only animates which slice of it is visible, via clip-path,
-     to sell a bolt travelling up the beam over BEAM_MS (see
-     updateGridFireBeamClip). Same barrel-cutout mask and overlay blend as
-     .grid-cell-fireflash (see comment below). Solid white fill; the glow
-     comes from stacked drop-shadow() layers (which, unlike box-shadow,
-     follow the clip-path's actual visible silhouette) rather than blurring
-     the fill itself, so the beam stays crisp/solid with a soft halo around
-     it. No z-index — comes before .grid-cell-fireflash in DOM order so the
-     flash paints on top of the beam. */
+     clip-path is a STATIC trapezoid (wide at the muzzle, narrowing to a point
+     at centre), set once from the BEAM_* constants (see BEAM_CLIP_PATH in
+     JS). mask-image is a Y-axis linear-gradient recomputed every tick (see
+     updateGridFireBeamClip): it reveals a travelling band that sweeps from
+     the muzzle up to centre, with its own top/bottom edges feathered by 20%
+     of the band's current height for a motion-blur look. Together,
+     clip-path's own base line and the mask's stops guarantee nothing is ever
+     drawn below BEAM_BASE_Y (the muzzle top).
+     No mix-blend-mode (i.e. normal blend) — unlike the flash, the laser
+     should read as a bright solid light source regardless of what's behind
+     it. Solid white fill; the "heavy glow" comes from stacked drop-shadow()
+     layers, which (unlike box-shadow) follow the clip-path/mask's actual
+     visible silhouette. No z-index — comes before .grid-cell-fireflash in
+     DOM order so the flash paints on top of the beam. */
   .grid-cell-firebeam {
     position: absolute; pointer-events: none; opacity: 0;
-    mix-blend-mode: overlay;
     background: #fff;
-    filter: blur(0.5px)
-      drop-shadow(0 0 6px rgba(255,255,255,0.95))
-      drop-shadow(0 0 14px rgba(255,255,255,0.75))
-      drop-shadow(0 0 26px rgba(255,255,255,0.5));
-    -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
-      rgba(0,0,0,0) 50%, #000 95%);
-    mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
-      rgba(0,0,0,0) 50%, #000 95%);
+    filter:
+      drop-shadow(0 0 4px #fff)
+      drop-shadow(0 0 10px #fff)
+      drop-shadow(0 0 20px rgba(255,255,255,0.85))
+      drop-shadow(0 0 36px rgba(255,255,255,0.55));
   }
   /* Fire flash overlay: white radial flash when the tank fires — bright centre,
      transparent at the cell edge, with a feathered mask cutting out the gun
@@ -903,20 +903,37 @@ function videoWsUrl(robotUrl) {
 // index.html's onVideoFrameTick for the fuller rationale.
 const FIRE_FLASH_MS = 300;
 const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
-const BEAM_MS           = 400;
-const BEAM_EASE_K       = 0.6; // gentle ease-out: still moving at ~55% of its starting speed at
-                                // the end (exp(-K)), not grinding to a halt like a stronger K would
-const BEAM_FADE_MS      = 100; // trailing portion of BEAM_MS spent fading opacity to 0, so the
-                                // shape doesn't just vanish mid-frame when the sweep finishes
-const BEAM_APEX_Y       = 50;  // % — cell's visual centre (no reticule on this spectator view)
-const BEAM_BASE_Y       = 75;  // % — beam originates near the visible barrel tip, not the cell edge
-const BEAM_APEX_HALF_W  = 1.5; // % — near-point tip at the centre
-const BEAM_BASE_HALF_W  = 15;  // % — wide base at the barrel
-const BEAM_BAND_H_START = 24;  // % — traveling band's height when it starts (close, so "tall")
-const BEAM_BAND_H_END   = 3;   // % — band's height once it reaches the centre (far, so "short")
+const BEAM_MS            = 200;
+const BEAM_EASE_K        = 0.6; // gentle ease-out: still moving at ~55% of its starting speed at
+                                 // the end (exp(-K)), not grinding to a halt like a stronger K would
+const BEAM_FADE_MS       = 50;  // trailing portion of BEAM_MS spent fading opacity to 0, so the
+                                 // shape doesn't just vanish mid-frame when the sweep finishes
+const BEAM_APEX_Y        = 50;  // % — cell's visual centre (no reticule on this spectator view)
+const BEAM_BASE_Y        = 65;  // % — top of the muzzle. This is an estimate from screenshots, not
+                                 // measured against a live camera feed — retune against the real
+                                 // FPV video if the beam still looks off relative to the barrel.
+const BEAM_APEX_HALF_W   = 1.5; // % — near-point tip at the centre
+const BEAM_BASE_HALF_W   = 15;  // % — wide base at the barrel
+const BEAM_BAND_H_START  = 7;   // % — traveling band's height when it starts (close, so "tall") —
+                                 // scaled to BEAM_BASE_Y - BEAM_APEX_Y (15%), not the old 25%/50% span
+const BEAM_BAND_H_END    = 1;   // % — band's height once it reaches the centre (far, so "short")
+const BEAM_FEATHER_FRAC  = 0.2; // 20% of the band's current height, feathered at both edges (motion blur)
 const _gridFireFlashActive = {}; // index → bool
 const _gridFireBeamActive  = {}; // index → bool
 const _gridFireStart       = {}; // index → performance.now() at trigger (shared: flash + beam fire together)
+
+// Static barrel→centre trapezoid outline (X taper), computed once from the
+// BEAM_* constants — the apex/base positions never change, so this doesn't
+// need to be recomputed per tick like the mask (see updateGridFireBeamClip).
+const BEAM_CLIP_PATH = (() => {
+  const pts = [
+    [50 - BEAM_APEX_HALF_W, BEAM_APEX_Y],
+    [50 + BEAM_APEX_HALF_W, BEAM_APEX_Y],
+    [50 + BEAM_BASE_HALF_W, BEAM_BASE_Y],
+    [50 - BEAM_BASE_HALF_W, BEAM_BASE_Y],
+  ];
+  return `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
+})();
 
 // Sizes/positions a cell's fireflash/firebeam divs to the canvas's actual
 // rendered rect within .grid-cell-video, excluding the object-fit:contain
@@ -966,31 +983,34 @@ function beamOpacityAt(elapsedMs) {
   return 1 - (elapsedMs - fadeStart) / BEAM_FADE_MS;
 }
 
-// Updates a cell's firebeam clip-path to the current sweep position: a
-// horizontal band sliced out of the static barrel→centre trapezoid, sliding
-// from the barrel (BEAM_BASE_Y%) to the centre (BEAM_APEX_Y%) and shrinking
-// in height as it goes, so the visible slice narrows in both X (trapezoid
-// taper) and Y (band height) — the combination reads as perspective as the
-// bolt travels away. Position keeps advancing for the full BEAM_MS (clamped
-// at the centre) independently of the opacity fade in beamOpacityAt, so the
-// beam is still moving as it fades rather than freezing then vanishing.
+// Updates a cell's firebeam mask-image to the current sweep position: a
+// travelling band, feathered at both edges, whose TRAILING (muzzle-side)
+// edge sweeps from the muzzle (BEAM_BASE_Y%) toward the centre
+// (BEAM_APEX_Y%) as the LEADING edge trails behind it by the current band
+// height — so the band always sits within [apexY, baseY], never past the
+// muzzle. Band height shrinks toward the centre (perspective), and the
+// feather width (20% of the current band height) shrinks along with it.
+// Combined with the cell's static clip-path (the X taper), the visible
+// slice narrows in both X and Y as it recedes, reading as perspective.
+// Position keeps advancing for the full BEAM_MS independently of the
+// opacity fade in beamOpacityAt, so the beam is still moving as it fades
+// rather than freezing then vanishing.
 function updateGridFireBeamClip(index, elapsedMs) {
   const el = document.getElementById(`grid-firebeam-${index}`);
   if (!el) return;
   const p = beamEaseProgress(elapsedMs);
-  const leadY  = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
+  const trailY = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
   const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
-  const trailY = leadY + bandH;
-  const frac    = y => (y - BEAM_APEX_Y) / (BEAM_BASE_Y - BEAM_APEX_Y);
-  const leftX   = y => (50 - BEAM_APEX_HALF_W) + ((50 - BEAM_BASE_HALF_W) - (50 - BEAM_APEX_HALF_W)) * frac(y);
-  const rightX  = y => (50 + BEAM_APEX_HALF_W) + ((50 + BEAM_BASE_HALF_W) - (50 + BEAM_APEX_HALF_W)) * frac(y);
-  const pts = [
-    [leftX(leadY),   leadY],
-    [rightX(leadY),  leadY],
-    [rightX(trailY), trailY],
-    [leftX(trailY),  trailY],
-  ];
-  el.style.clipPath = `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
+  const leadY  = trailY - bandH;
+  const feather      = BEAM_FEATHER_FRAC * bandH;
+  const innerTop    = leadY + feather;
+  const innerBottom = trailY - feather;
+  const mask = `linear-gradient(to bottom,` +
+    `rgba(0,0,0,0) 0%, rgba(0,0,0,0) ${leadY}%,` +
+    `#000 ${innerTop}%, #000 ${innerBottom}%,` +
+    `rgba(0,0,0,0) ${trailY}%, rgba(0,0,0,0) 100%)`;
+  el.style.webkitMaskImage = mask;
+  el.style.maskImage = mask;
   el.style.opacity = String(beamOpacityAt(elapsedMs));
 }
 
@@ -1024,6 +1044,7 @@ function playGridFireFx(index) {
   _gridFireFlashActive[index] = true;
   _gridFireBeamActive[index]  = true;
   flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
+  beamEl.style.clipPath = beamEl.style.webkitClipPath = BEAM_CLIP_PATH;
   updateGridFireBeamClip(index, 0);
 }
 
