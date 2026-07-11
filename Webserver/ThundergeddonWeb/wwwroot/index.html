@@ -241,6 +241,26 @@
       -webkit-touch-callout: none;
       user-select: none;
       -webkit-user-select: none;
+      /* The static mask for camera shake: #video-shake-scale below is
+         permanently overscanned so its dynamic shake transform never reveals
+         its own edges, and this clips that overscanned margin to the true
+         screen bounds. */
+      overflow: hidden;
+    }
+
+    /* Camera shake wrappers — see the HTML comment above #video-shake-scale
+       for the two-layer rationale (static zoom vs. dynamic shake transform).
+       VIDEO_SHAKE_SCALE in JS must match this value. */
+    #video-shake-scale {
+      position: absolute;
+      inset: 0;
+      transform: scale(1.16);
+      transform-origin: center;
+    }
+    #video-shake {
+      position: absolute;
+      inset: 0;
+      will-change: transform;
     }
 
     /* Camera stream fills the whole screen */
@@ -1115,25 +1135,35 @@
 
 <!-- ── Screen 3: Playing ───────────────────────────────────────────── -->
 <div id="screen-playing" class="screen">
-  <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
-  <canvas id="stream-canvas" style="display:none"></canvas>
-  <div id="stream-placeholder" style="display:none">No video stream</div>
+  <!-- Camera shake: only the video and anything "inside" it (fire beam, fire
+       flash, hit markers) shakes — everything else in #screen-playing (HUD,
+       controls, reticle) sits outside these wrappers and stays put.
+       #video-shake-scale is a STATIC zoom (see CSS) that overscans the video
+       just enough that #video-shake's dynamic translate/rotate (driven by
+       JS, see updateShakeTransform) never reveals its own edges within the
+       viewport — #screen-playing's overflow:hidden is the actual mask that
+       hides the overscanned margin. -->
+  <div id="video-shake-scale"><div id="video-shake">
+    <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
+    <canvas id="stream-canvas" style="display:none"></canvas>
+    <div id="stream-placeholder" style="display:none">No video stream</div>
 
-  <!-- Fire beam overlay: glowing bolt travelling from the barrel to the reticule.
-       #fire-beam (glow only) wraps #fire-beam-shape (the masked/clipped white
-       shape) — see the CSS comment for why these must be separate elements. -->
-  <div id="fire-beam"><div id="fire-beam-shape"></div></div>
-  <!-- Fire flash overlay: white radial flash masked around the gun barrel. Comes
-       after #fire-beam so the flash paints on top of it. -->
-  <div id="fire-flash"></div>
+    <!-- Fire beam overlay: glowing bolt travelling from the barrel to the reticule.
+         #fire-beam (glow only) wraps #fire-beam-shape (the masked/clipped white
+         shape) — see the CSS comment for why these must be separate elements. -->
+    <div id="fire-beam"><div id="fire-beam-shape"></div></div>
+    <!-- Fire flash overlay: white radial flash masked around the gun barrel. Comes
+         after #fire-beam so the flash paints on top of it. -->
+    <div id="fire-flash"></div>
 
-  <!-- Hit direction overlay (above video, below HP bar / controls) -->
-  <div id="hit-overlay">
-    <div id="hit-front" class="hit-effect"></div>
-    <div id="hit-left"  class="hit-effect"></div>
-    <div id="hit-right" class="hit-effect"></div>
-    <div id="hit-rear"  class="hit-effect"></div>
-  </div>
+    <!-- Hit direction overlay (above video, below HP bar / controls) -->
+    <div id="hit-overlay">
+      <div id="hit-front" class="hit-effect"></div>
+      <div id="hit-left"  class="hit-effect"></div>
+      <div id="hit-right" class="hit-effect"></div>
+      <div id="hit-rear"  class="hit-effect"></div>
+    </div>
+  </div></div>
 
   <!-- Target reticle: crosshair + circle + dot, centred on video -->
   <div id="reticle">
@@ -2129,6 +2159,7 @@ function onStateUpdate(data) {
 function onYouAreDead() {
   isDead     = true;
   isDeadWalk = false;
+  triggerShake('destroy');
   // Release held controls so the joystick value from the moment of death can't
   // resume when dead-walk re-enables driving 5s from now.
   dropControls();
@@ -2595,6 +2626,7 @@ function dirToHitEffect(dir) {
 
 function showHitEffect(dir, shooter) {
   haptic([60, 40, 60]); // small double-tap rumble
+  triggerShake('hit');
   const effectEl = document.getElementById(dirToHitEffect(dir));
   effectEl.classList.remove('flash');
   void effectEl.offsetWidth; // force reflow to restart animation
@@ -3038,7 +3070,67 @@ function updateFireBeamClip(elapsedMs) {
   wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
 }
 
-// Called once per real (or emulated) video frame while either effect is active.
+// ════════════════════════════════════════════════════════
+// Camera shake — applied only to #video-shake (the video + fire-beam/
+// fire-flash/hit-overlay group — see the HTML comment above
+// #video-shake-scale), never the HUD/controls. Amplitudes are percentages
+// of #video-shake's own box (translate %, per CSS spec, is relative to the
+// element's own size), so the shake scales consistently across device
+// sizes like everything else in this file.
+// Uses independently-random per-frame offsets with an exponentially
+// decaying envelope (not a fixed keyframe animation) — the amplitude at
+// elapsed time t is ampMax * exp(-decayK * t / durationMs). Stepped on the
+// same real-or-emulated video frame ticks as the fire flash/beam (see
+// onVideoFrameTick) for the same reason: a shake that updates faster than
+// the video's own frame rate looks like it's happening independently of
+// the footage instead of within it.
+// Only one shake is active at a time — a higher-or-equal tier always takes
+// over a lower one; a lower tier arriving while a higher one is still
+// running is ignored (e.g. a fire-shake shouldn't cut a destroy-shake
+// short).
+// ════════════════════════════════════════════════════════
+const SHAKE_TIER_RANK = { fire: 1, hit: 2, destroy: 3 };
+const SHAKE_TIERS = {
+  fire:    { durationMs: 180, decayK: 5,   ampVpct: 0.6, ampHpct: 0,   ampRdeg: 0 }, // vertical only
+  hit:     { durationMs: 380, decayK: 4.5, ampVpct: 2.2, ampHpct: 0.9, ampRdeg: 0 }, // + a little horizontal
+  destroy: { durationMs: 900, decayK: 4,   ampVpct: 4.5, ampHpct: 3.2, ampRdeg: 3 }, // + rotation, a lot
+};
+let _shakeTier      = null; // 'fire' | 'hit' | 'destroy' | null
+let _shakeStartTime = 0;
+
+function triggerShake(tierName) {
+  const cfg = SHAKE_TIERS[tierName];
+  if (!cfg) return;
+  const now = performance.now();
+  const activeDone = !_shakeTier || (now - _shakeStartTime) >= SHAKE_TIERS[_shakeTier].durationMs;
+  if (activeDone || SHAKE_TIER_RANK[tierName] >= SHAKE_TIER_RANK[_shakeTier]) {
+    _shakeTier      = tierName;
+    _shakeStartTime = now;
+  }
+  ensureFireTicking(); // shake can be triggered (hit/destroy) with no flash/beam running
+}
+
+function updateShakeTransform() {
+  const el = document.getElementById('video-shake');
+  if (!el) return;
+  if (!_shakeTier) { el.style.transform = ''; return; }
+  const cfg = SHAKE_TIERS[_shakeTier];
+  const elapsed = performance.now() - _shakeStartTime;
+  if (elapsed >= cfg.durationMs) {
+    _shakeTier = null;
+    el.style.transform = '';
+    return;
+  }
+  const envelope = Math.exp(-cfg.decayK * elapsed / cfg.durationMs);
+  const rand = () => Math.random() * 2 - 1;
+  const dy  = cfg.ampVpct * envelope * rand();
+  const dx  = cfg.ampHpct * envelope * rand();
+  const rot = cfg.ampRdeg * envelope * rand();
+  el.style.transform = `translate(${dx}%, ${dy}%) rotate(${rot}deg)`;
+}
+
+// Called once per real (or emulated) video frame while any of fire-flash,
+// fire-beam, or camera shake is active.
 function onVideoFrameTick() {
   if (_fireFlashActive) {
     const el = document.getElementById('fire-flash');
@@ -3055,10 +3147,22 @@ function onVideoFrameTick() {
     updateFireBeamClip(elapsed);
     if (elapsed >= BEAM_MS) _fireBeamActive = false;
   }
-  if (!_fireFlashActive && !_fireBeamActive && _fireTimerId) {
+  updateShakeTransform();
+  if (!_fireFlashActive && !_fireBeamActive && !_shakeTier && _fireTimerId) {
     clearInterval(_fireTimerId);
     _fireTimerId = null;
   }
+}
+
+// Starts the native-<img>-MJPEG-path fallback timer (see onVideoFrameTick's
+// doc comment) if it isn't already running. Shared by playFireFx and
+// triggerShake since either can need ticking without the other being active.
+function ensureFireTicking() {
+  if (!_videoWs && !_fireTimerId) {
+    _fireTimerId = setInterval(onVideoFrameTick, MJPEG_FRAME_MS);
+  }
+  // WS/canvas path: onVideoFrameTick() is driven by real frame arrivals
+  // (see _videoWs.onmessage), nothing further to schedule here.
 }
 
 function playFireFx() {
@@ -3067,30 +3171,27 @@ function playFireFx() {
   const beamShapeEl = document.getElementById('fire-beam-shape');
   if (!flashEl || !beamEl || !beamShapeEl) return;
   updateFireEffectBounds();
-  if (_fireTimerId) { clearInterval(_fireTimerId); _fireTimerId = null; }
   _fireStartTime   = performance.now();
   _fireFlashActive = true;
   _fireBeamActive  = true;
   flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
   beamShapeEl.style.clipPath = beamShapeEl.style.webkitClipPath = BEAM_CLIP_PATH;
   updateFireBeamClip(0);
-  if (!_videoWs) {
-    // No per-frame decode callback on the native MJPEG path — step at the
-    // stream's known frame cadence instead of every rAF tick.
-    _fireTimerId = setInterval(onVideoFrameTick, MJPEG_FRAME_MS);
-  }
-  // WS/canvas path: onVideoFrameTick() is driven by real frame arrivals
-  // (see _videoWs.onmessage), nothing further to schedule here.
+  triggerShake('fire');
+  ensureFireTicking();
 }
 
 function stopFireFx() {
   _fireFlashActive = false;
   _fireBeamActive  = false;
+  _shakeTier       = null;
   if (_fireTimerId) { clearInterval(_fireTimerId); _fireTimerId = null; }
   const flashEl = document.getElementById('fire-flash');
   const beamEl  = document.getElementById('fire-beam');
+  const videoShakeEl = document.getElementById('video-shake');
   if (flashEl) flashEl.style.opacity = '0';
   if (beamEl)  beamEl.style.opacity  = '0';
+  if (videoShakeEl) videoShakeEl.style.transform = '';
 }
 
 // ════════════════════════════════════════════════════════

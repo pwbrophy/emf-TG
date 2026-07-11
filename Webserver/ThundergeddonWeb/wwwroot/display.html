@@ -121,22 +121,6 @@
     pointer-events: none; z-index: 55; opacity: 0; }
   #kill-overlay.kill-screen-pulse { animation: kill-screen-pulse 2s ease-out forwards; }
 
-  /* Ground shake — applied to body so everything rocks */
-  @keyframes ground-shake {
-    0%         { transform: translateY(0); }
-    8%         { transform: translateY(-10px); }
-    18%        { transform: translateY(8px); }
-    28%        { transform: translateY(-12px); }
-    38%        { transform: translateY(9px); }
-    48%        { transform: translateY(-6px); }
-    58%        { transform: translateY(4px); }
-    68%        { transform: translateY(-3px); }
-    80%        { transform: translateY(2px); }
-    90%        { transform: translateY(-1px); }
-    100%       { transform: translateY(0); }
-  }
-  body.ground-shake { animation: ground-shake 0.9s ease-out forwards; }
-
   /* Lobby overlay */
   #lobby-overlay { position: fixed; inset: 0; background: var(--bg);
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
@@ -247,7 +231,15 @@
   .grid-dead-sub { font-size: 0.8em; color: #aaa; margin-top: 10px; letter-spacing: 1px;
     text-transform: uppercase; }
 
-  .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000; }
+  .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000;
+    /* Static mask for camera shake — see .grid-cell-shake-scale below. */
+    overflow: hidden; }
+  /* Camera shake wrappers — see the HTML comment above these elements'
+     markup for the two-layer rationale (static zoom vs. dynamic shake
+     transform). VIDEO_SHAKE_SCALE-equivalent value must match
+     .grid-cell-shake-scale's transform below. */
+  .grid-cell-shake-scale { position: absolute; inset: 0; transform: scale(1.16); transform-origin: center; }
+  .grid-cell-shake { position: absolute; inset: 0; will-change: transform; }
   .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
   /* Fire beam overlay: glowing white bolt from the barrel to the cell centre.
      Split into a wrapper (.grid-cell-firebeam, glow only) and a child
@@ -975,7 +967,10 @@ function computeBeamGlowFilter(widthPx) {
 function updateGridFireEffectBounds(index) {
   const canvas = document.getElementById(`grid-canvas-${index}`);
   if (!canvas) return;
-  const container = canvas.parentElement; // .grid-cell-video
+  // canvas.parentElement is .grid-cell-shake now (nested inside the camera
+  // shake wrappers), but that's inset:0 same as .grid-cell-video used to be,
+  // so its clientWidth/Height are identical — no change needed here.
+  const container = canvas.parentElement;
   const cw = container.clientWidth, ch = container.clientHeight;
   const nw = canvas.width, nh = canvas.height;
   let left = 0, top = 0, width = cw, height = ch;
@@ -1053,7 +1048,58 @@ function updateGridFireBeamClip(index, elapsedMs) {
   wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
 }
 
-// Called once per real decoded frame for this cell while either effect is active.
+// ════════════════════════════════════════════════════════
+// Camera shake — applied only to a cell's .grid-cell-shake (the video +
+// fire-beam/fire-flash group — see the matching comment in index.html's
+// #video-shake-scale for the full rationale), never the cell's footer (name/
+// HP). Per-cell state since multiple cells can shake independently.
+// ════════════════════════════════════════════════════════
+const SHAKE_TIER_RANK = { fire: 1, hit: 2, destroy: 3 };
+const SHAKE_TIERS = {
+  fire:    { durationMs: 180, decayK: 5,   ampVpct: 0.6, ampHpct: 0,   ampRdeg: 0 }, // vertical only
+  hit:     { durationMs: 380, decayK: 4.5, ampVpct: 2.2, ampHpct: 0.9, ampRdeg: 0 }, // + a little horizontal
+  destroy: { durationMs: 900, decayK: 4,   ampVpct: 4.5, ampHpct: 3.2, ampRdeg: 3 }, // + rotation, a lot
+};
+const _gridShakeTier  = {}; // index → 'fire' | 'hit' | 'destroy'
+const _gridShakeStart = {}; // index → performance.now() at trigger
+
+function triggerGridShake(index, tierName) {
+  const cfg = SHAKE_TIERS[tierName];
+  if (!cfg) return;
+  const now = performance.now();
+  const current = _gridShakeTier[index];
+  const activeDone = !current || (now - _gridShakeStart[index]) >= SHAKE_TIERS[current].durationMs;
+  if (activeDone || SHAKE_TIER_RANK[tierName] >= SHAKE_TIER_RANK[current]) {
+    _gridShakeTier[index]  = tierName;
+    _gridShakeStart[index] = now;
+  }
+}
+
+function updateGridShakeTransform(index) {
+  const el = document.getElementById(`grid-shake-${index}`);
+  if (!el) return;
+  const tier = _gridShakeTier[index];
+  if (!tier) { el.style.transform = ''; return; }
+  const cfg = SHAKE_TIERS[tier];
+  const elapsed = performance.now() - _gridShakeStart[index];
+  if (elapsed >= cfg.durationMs) {
+    delete _gridShakeTier[index];
+    el.style.transform = '';
+    return;
+  }
+  const envelope = Math.exp(-cfg.decayK * elapsed / cfg.durationMs);
+  const rand = () => Math.random() * 2 - 1;
+  const dy  = cfg.ampVpct * envelope * rand();
+  const dx  = cfg.ampHpct * envelope * rand();
+  const rot = cfg.ampRdeg * envelope * rand();
+  el.style.transform = `translate(${dx}%, ${dy}%) rotate(${rot}deg)`;
+}
+
+// Called once per real decoded frame for this cell while any of fire-flash,
+// fire-beam, or camera shake is active — driven directly by the WS decode
+// path's img.onload (see startGridStream), so unlike index.html's fallback
+// timer, no separate "keep ticking" plumbing is needed: as long as frames
+// keep arriving for this cell, this keeps firing regardless of active state.
 function onGridVideoFrameTick(index) {
   if (_gridFireFlashActive[index]) {
     const el = document.getElementById(`grid-firefx-${index}`);
@@ -1072,6 +1118,7 @@ function onGridVideoFrameTick(index) {
     updateGridFireBeamClip(index, elapsed);
     if (elapsed >= BEAM_MS) delete _gridFireBeamActive[index];
   }
+  updateGridShakeTransform(index);
 }
 
 function playGridFireFx(index) {
@@ -1086,6 +1133,7 @@ function playGridFireFx(index) {
   flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
   beamShapeEl.style.clipPath = beamShapeEl.style.webkitClipPath = BEAM_CLIP_PATH;
   updateGridFireBeamClip(index, 0);
+  triggerGridShake(index, 'fire');
 }
 
 function findGridIndexByCallsign(callsign) {
@@ -1131,11 +1179,17 @@ function buildGridCell(r, i, footerCls) {
   cell.id = `grid-cell-${i}`;
   cell.innerHTML =
     `<div class="grid-cell-video">` +
-      `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
-      `<div class="grid-cell-firebeam" id="grid-firebeam-${i}">` +
-        `<div class="grid-cell-firebeam-shape" id="grid-firebeam-shape-${i}"></div>` +
-      `</div>` +
-      `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
+      // Camera shake: only the video + fire-beam/fire-flash shakes — the
+      // no-stream/dead/name-label overlays below stay put (UI). See the
+      // matching HTML comment on index.html's #video-shake-scale for the
+      // two-layer (static zoom + dynamic shake) rationale.
+      `<div class="grid-cell-shake-scale"><div class="grid-cell-shake" id="grid-shake-${i}">` +
+        `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
+        `<div class="grid-cell-firebeam" id="grid-firebeam-${i}">` +
+          `<div class="grid-cell-firebeam-shape" id="grid-firebeam-shape-${i}"></div>` +
+        `</div>` +
+        `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
+      `</div></div>` +
       `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
         (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
       `<div class="grid-dead-msg${isDead ? '' : ' hidden'}" id="grid-dead-${i}">` +
@@ -1214,6 +1268,8 @@ function stopGrid() {
   for (const k in _gridFireFlashActive) delete _gridFireFlashActive[k];
   for (const k in _gridFireBeamActive)  delete _gridFireBeamActive[k];
   for (const k in _gridFireStart)       delete _gridFireStart[k];
+  for (const k in _gridShakeTier)       delete _gridShakeTier[k];
+  for (const k in _gridShakeStart)      delete _gridShakeStart[k];
   const container = document.getElementById('tank-grid');
   container.classList.remove('active');
   container.innerHTML = '';
@@ -1331,11 +1387,18 @@ conn.on('KillEvent', data => {
   const callsign = (data && data.targetCallsign) ? data.targetCallsign : '';
   triggerKillBurn((data && data.teamIndex != null) ? data.teamIndex : -1);
   if (callsign) trackDeathForStats(callsign);
+  const idx = findGridIndexByCallsign(callsign);
+  if (idx >= 0) triggerGridShake(idx, 'destroy');
 });
 
 conn.on('FireEvent', data => {
   const idx = findGridIndexByCallsign(data && data.callsign);
   if (idx >= 0) playGridFireFx(idx);
+});
+
+conn.on('HitEvent', data => {
+  const idx = findGridIndexByCallsign(data && data.callsign);
+  if (idx >= 0) triggerGridShake(idx, 'hit');
 });
 
 function triggerKillBurn(teamIndex) {
@@ -1347,11 +1410,9 @@ function triggerKillBurn(teamIndex) {
     overlay.classList.add('kill-screen-pulse');
   }
 
-  // Ground shake — everything rocks for 0.9 s
-  document.body.classList.remove('ground-shake');
-  void document.body.offsetWidth;
-  document.body.classList.add('ground-shake');
-  setTimeout(() => document.body.classList.remove('ground-shake'), 950);
+  // Camera shake is now per-cell (see the KillEvent handler above, which
+  // calls triggerGridShake) so it stays confined to the destroyed robot's
+  // own video instead of shaking the whole page including the UI/HUD.
 
   if (teamIndex < 0) return;
 
