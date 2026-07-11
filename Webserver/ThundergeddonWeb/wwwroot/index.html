@@ -812,6 +812,35 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Fire beam overlay: glowing white bolt from the barrel to the reticule.
+       The trapezoid shape (wide at the barrel, narrowing to the reticule) is
+       static — JS only animates which slice of it is visible, via clip-path,
+       to sell a bolt travelling up the beam over BEAM_MS (see
+       updateFireBeamClip). Same barrel-cutout mask and overlay blend as
+       #fire-flash (see comment below). Solid white fill; the glow comes from
+       stacked drop-shadow() layers (which, unlike box-shadow, follow the
+       clip-path's actual visible silhouette instead of the element's full
+       bounding box) rather than blurring the fill itself, so the beam itself
+       stays crisp/solid with a soft halo around it.
+       left/top/width/height set by JS (updateFireEffectBounds) to the video's
+       actual rendered rect, same as #fire-flash. No z-index — comes before
+       #fire-flash in DOM order so the flash paints on top of the beam. ── */
+    #fire-beam {
+      position: absolute;
+      pointer-events: none;
+      opacity: 0;
+      mix-blend-mode: overlay;
+      background: #fff;
+      filter: blur(1px)
+        drop-shadow(0 0 10px rgba(255,255,255,0.95))
+        drop-shadow(0 0 24px rgba(255,255,255,0.75))
+        drop-shadow(0 0 46px rgba(255,255,255,0.5));
+      -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+      mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+    }
+
     /* ── Fire flash overlay: white radial flash when this tank fires.
        Bright at centre, fully transparent by the screen edge. A feathered
        radial mask cuts a dark hole at bottom-centre matching the gun barrel
@@ -824,10 +853,11 @@
        left/top/width/height are set by JS (updateFireEffectBounds) to the
        video's actual rendered rect, excluding the object-fit:contain letterbox
        bars, so the flash never bleeds into the black bars around the picture.
-       No z-index — painting order relies on DOM position: after #stream,
-       before #hit-overlay. mix-blend-mode requires no ancestor between here and
-       #stream to create a stacking context (z-index/opacity/transform/filter/
-       isolation), or the blend isolates against nothing and renders opaque. ── */
+       No z-index — comes after #fire-beam in DOM order so it paints on top of
+       the beam (and still after #stream, before #hit-overlay). mix-blend-mode
+       requires no ancestor between here and #stream to create a stacking
+       context (z-index/opacity/transform/filter/isolation), or the blend
+       isolates against nothing and renders opaque. ── */
     #fire-flash {
       position: absolute;
       pointer-events: none;
@@ -836,32 +866,6 @@
       background: radial-gradient(ellipse farthest-side at center,
         rgba(255,255,255,1) 0%,
         rgba(255,255,255,0.85) 45%,
-        rgba(255,255,255,0) 100%);
-      -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
-        rgba(0,0,0,0) 50%, #000 95%);
-      mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
-        rgba(0,0,0,0) 50%, #000 95%);
-    }
-
-    /* ── Fire beam overlay: glowing white bolt from the barrel to the reticule.
-       The trapezoid shape (wide at the barrel, narrowing to the reticule) is
-       static — JS only animates which slice of it is visible, via clip-path,
-       to sell a bolt travelling up the beam over BEAM_MS (see
-       updateFireBeamClip). Same barrel-cutout mask and overlay blend as
-       #fire-flash, for the same reasons (see comment above); blur() gives it
-       a soft glowing edge instead of a hard-edged wedge.
-       left/top/width/height set by JS (updateFireEffectBounds) to the video's
-       actual rendered rect, same as #fire-flash. ── */
-    #fire-beam {
-      position: absolute;
-      pointer-events: none;
-      opacity: 0;
-      mix-blend-mode: overlay;
-      filter: blur(5px);
-      background: linear-gradient(to right,
-        rgba(255,255,255,0) 0%,
-        rgba(255,255,255,0.95) 40%,
-        rgba(255,255,255,0.95) 60%,
         rgba(255,255,255,0) 100%);
       -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
         rgba(0,0,0,0) 50%, #000 95%);
@@ -1096,10 +1100,11 @@
   <canvas id="stream-canvas" style="display:none"></canvas>
   <div id="stream-placeholder" style="display:none">No video stream</div>
 
-  <!-- Fire flash overlay: white radial flash masked around the gun barrel -->
-  <div id="fire-flash"></div>
   <!-- Fire beam overlay: glowing bolt travelling from the barrel to the reticule -->
   <div id="fire-beam"></div>
+  <!-- Fire flash overlay: white radial flash masked around the gun barrel. Comes
+       after #fire-beam so the flash paints on top of it. -->
+  <div id="fire-flash"></div>
 
   <!-- Hit direction overlay (above video, below HP bar / controls) -->
   <div id="hit-overlay">
@@ -2867,10 +2872,13 @@ if (window.visualViewport) {
 // ════════════════════════════════════════════════════════
 const FIRE_FLASH_MS   = 300;
 const FIRE_FLASH_K    = 5;   // exp(-K) ≈ 0.7% residual at end of decay
-const BEAM_MS          = 600;
-const BEAM_EASE_K      = 4;   // ease-out strength: fast start, slow finish (beam "receding")
+const BEAM_MS           = 400;
+const BEAM_EASE_K       = 0.6; // gentle ease-out: still moving at ~55% of its starting speed at
+                                // the end (exp(-K)), not grinding to a halt like a stronger K would
+const BEAM_FADE_MS      = 100; // trailing portion of BEAM_MS spent fading opacity to 0, so the
+                                // shape doesn't just vanish mid-frame when the sweep finishes
 const BEAM_APEX_Y      = 50;  // % — matches #reticle's centred position
-const BEAM_BASE_Y      = 100; // % — beam originates at the bottom edge, behind the barrel mask
+const BEAM_BASE_Y      = 75;  // % — beam originates near the visible barrel tip, not the screen edge
 const BEAM_APEX_HALF_W = 1.5; // % — near-point tip at the reticule
 const BEAM_BASE_HALF_W = 15;  // % — wide base at the barrel
 const BEAM_BAND_H_START = 24; // % — traveling band's height when it starts (close, so "tall")
@@ -2915,24 +2923,37 @@ function fireFlashOpacityAt(elapsedMs) {
   return elapsedMs >= FIRE_FLASH_MS ? 0 : Math.exp(-FIRE_FLASH_K * elapsedMs / FIRE_FLASH_MS);
 }
 
-// Ease-out: fast initial movement, slowing as it approaches the reticule —
-// mimics a fast-moving object appearing to slow down as it recedes into the
-// distance. Normalised so p(0)=0 and p(BEAM_MS)=1 exactly.
+// Gentle ease-out: mostly-constant speed with only a slight slowdown near the
+// reticule (see BEAM_EASE_K) — a strong ease-out reads as the beam drifting
+// to a stop, which looks wrong for something meant to still be moving fast
+// when it arrives. Normalised so p(0)=0 and p(BEAM_MS)=1 exactly.
 function beamEaseProgress(elapsedMs) {
   const t = Math.min(1, elapsedMs / BEAM_MS);
   const norm = 1 - Math.exp(-BEAM_EASE_K);
   return (1 - Math.exp(-BEAM_EASE_K * t)) / norm;
 }
 
+// Fades the beam out over the trailing BEAM_FADE_MS of its life instead of
+// cutting it at full opacity — an instant cut reads as a visible "pop" right
+// as the sweep finishes.
+function beamOpacityAt(elapsedMs) {
+  const fadeStart = BEAM_MS - BEAM_FADE_MS;
+  if (elapsedMs <= fadeStart) return 1;
+  if (elapsedMs >= BEAM_MS) return 0;
+  return 1 - (elapsedMs - fadeStart) / BEAM_FADE_MS;
+}
+
 // Updates #fire-beam's clip-path to the current sweep position: a horizontal
 // band sliced out of the static barrel→reticule trapezoid, sliding from the
-// barrel (100%) to the reticule (BEAM_APEX_Y%) and shrinking in height as it
-// goes, so the visible slice narrows in both X (trapezoid taper) and Y (band
-// height) — the combination reads as perspective as the bolt travels away.
+// barrel (BEAM_BASE_Y%) to the reticule (BEAM_APEX_Y%) and shrinking in
+// height as it goes, so the visible slice narrows in both X (trapezoid
+// taper) and Y (band height) — the combination reads as perspective as the
+// bolt travels away. Position keeps advancing for the full BEAM_MS (clamped
+// at the reticule) independently of the opacity fade in beamOpacityAt, so
+// the beam is still moving as it fades rather than freezing then vanishing.
 function updateFireBeamClip(elapsedMs) {
   const el = document.getElementById('fire-beam');
   if (!el) return;
-  if (elapsedMs >= BEAM_MS) { el.style.opacity = '0'; return; }
   const p = beamEaseProgress(elapsedMs);
   const leadY  = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
   const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
@@ -2948,7 +2969,7 @@ function updateFireBeamClip(elapsedMs) {
     [leftX(trailY),  trailY],
   ];
   el.style.clipPath = `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
-  el.style.opacity = '1';
+  el.style.opacity = String(beamOpacityAt(elapsedMs));
 }
 
 // Called once per real (or emulated) video frame while either effect is active.
