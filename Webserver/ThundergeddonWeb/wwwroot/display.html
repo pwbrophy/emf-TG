@@ -260,7 +260,7 @@
      ancestor between here and .grid-cell-canvas to establish a stacking
      context (z-index/opacity/transform/filter/isolation), so no z-index here;
      painting order relies on DOM position (after the canvas).
-     left/top/width/height are set by JS (updateGridFireFlashBounds) to the
+     left/top/width/height are set by JS (updateGridFireEffectBounds) to the
      canvas's actual rendered rect, excluding the object-fit:contain letterbox
      bars, so the flash never lightens the black bars around the picture. */
   .grid-cell-fireflash {
@@ -268,6 +268,25 @@
     mix-blend-mode: overlay;
     background: radial-gradient(ellipse farthest-side at center,
       rgba(255,255,255,1) 0%, rgba(255,255,255,0.85) 45%, rgba(255,255,255,0) 100%);
+    -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+      rgba(0,0,0,0) 50%, #000 95%);
+    mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+      rgba(0,0,0,0) 50%, #000 95%);
+  }
+  /* Fire beam overlay: glowing white bolt from the barrel to the cell centre.
+     The trapezoid shape (wide at the barrel, narrowing to a point at centre)
+     is static — JS only animates which slice of it is visible, via clip-path,
+     to sell a bolt travelling up the beam over BEAM_MS (see
+     updateGridFireBeamClip). Same barrel-cutout mask and overlay blend as
+     .grid-cell-fireflash, for the same reasons; blur() gives it a soft
+     glowing edge instead of a hard-edged wedge. */
+  .grid-cell-firebeam {
+    position: absolute; pointer-events: none; opacity: 0;
+    mix-blend-mode: overlay;
+    filter: blur(3px);
+    background: linear-gradient(to right,
+      rgba(255,255,255,0) 0%, rgba(255,255,255,0.95) 40%,
+      rgba(255,255,255,0.95) 60%, rgba(255,255,255,0) 100%);
     -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
       rgba(0,0,0,0) 50%, #000 95%);
     mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
@@ -859,29 +878,43 @@ function videoWsUrl(robotUrl) {
   return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}`;
 }
 
-// ── Fire flash overlay: white radial flash on a tank's video cell, masked
-// around the gun barrel, overlay-blended onto the video (see
-// .grid-cell-fireflash CSS). Snaps to 100% instantly then decays
-// exponentially over FIRE_FLASH_MS. Triggered by the server-broadcast
-// FireEvent, keyed by callsign.
+// ── Fire effect overlay: two pieces per tank's video cell, both
+// overlay-blended (see .grid-cell-fireflash / .grid-cell-firebeam CSS) and
+// masked around the gun barrel. Triggered by the server-broadcast FireEvent,
+// keyed by callsign.
+//   - .grid-cell-fireflash: white radial flash, snaps to 100% instantly then
+//     decays exponentially over FIRE_FLASH_MS.
+//   - .grid-cell-firebeam: glowing trapezoid from the barrel to the cell
+//     centre. The trapezoid shape itself is static; a clip-path band sweeps
+//     from the barrel up to the centre over BEAM_MS, shrinking in height as
+//     it goes, to sell a bolt travelling away from the camera (see
+//     updateGridFireBeamClip).
 //
-// The opacity step is driven by real decoded video frames (the canvas
-// decode path's img.onload, called once per JPEG actually received) rather
-// than a smooth rAF ramp, so the flash never appears to update at a
-// different rate than the footage it's screened over — see the matching
-// comment in index.html's onVideoFrameTick for the fuller rationale.
+// Both are stepped by real decoded video frames (the canvas decode path's
+// img.onload, called once per JPEG actually received) rather than a smooth
+// rAF ramp, so neither effect ever appears to update at a different rate
+// than the footage it's screened over — see the matching comment in
+// index.html's onVideoFrameTick for the fuller rationale.
 const FIRE_FLASH_MS = 300;
 const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+const BEAM_MS           = 600;
+const BEAM_EASE_K       = 4;   // ease-out strength: fast start, slow finish (beam "receding")
+const BEAM_APEX_Y       = 50;  // % — cell's visual centre (no reticule on this spectator view)
+const BEAM_BASE_Y       = 100; // % — beam originates at the bottom edge, behind the barrel mask
+const BEAM_APEX_HALF_W  = 1.5; // % — near-point tip at the centre
+const BEAM_BASE_HALF_W  = 15;  // % — wide base at the barrel
+const BEAM_BAND_H_START = 24;  // % — traveling band's height when it starts (close, so "tall")
+const BEAM_BAND_H_END   = 3;   // % — band's height once it reaches the centre (far, so "short")
 const _gridFireFlashActive = {}; // index → bool
-const _gridFireFlashStart  = {}; // index → performance.now() at trigger
+const _gridFireBeamActive  = {}; // index → bool
+const _gridFireStart       = {}; // index → performance.now() at trigger (shared: flash + beam fire together)
 
-// Sizes/positions a cell's fireflash div to the canvas's actual rendered
-// rect within .grid-cell-video, excluding the object-fit:contain letterbox
-// bars, so the additive flash never lightens the black bars around the feed.
-function updateGridFireFlashBounds(index) {
-  const el     = document.getElementById(`grid-firefx-${index}`);
+// Sizes/positions a cell's fireflash/firebeam divs to the canvas's actual
+// rendered rect within .grid-cell-video, excluding the object-fit:contain
+// letterbox bars, so neither effect lightens the black bars around the feed.
+function updateGridFireEffectBounds(index) {
   const canvas = document.getElementById(`grid-canvas-${index}`);
-  if (!el || !canvas) return;
+  if (!canvas) return;
   const container = canvas.parentElement; // .grid-cell-video
   const cw = container.clientWidth, ch = container.clientHeight;
   const nw = canvas.width, nh = canvas.height;
@@ -894,33 +927,83 @@ function updateGridFireFlashBounds(index) {
       height = ch; width = ch * videoAspect; top = 0; left = (cw - width) / 2;
     }
   }
-  el.style.left   = left + 'px';
-  el.style.top    = top + 'px';
-  el.style.width  = width + 'px';
-  el.style.height = height + 'px';
+  for (const prefix of ['grid-firefx-', 'grid-firebeam-']) {
+    const el = document.getElementById(`${prefix}${index}`);
+    if (!el) continue;
+    el.style.left   = left + 'px';
+    el.style.top    = top + 'px';
+    el.style.width  = width + 'px';
+    el.style.height = height + 'px';
+  }
 }
 
-// Called once per real decoded frame for this cell while its flash is active.
-function onGridVideoFrameTick(index) {
-  if (!_gridFireFlashActive[index]) return;
-  const el = document.getElementById(`grid-firefx-${index}`);
+// Ease-out: fast initial movement, slowing as it approaches the cell centre —
+// mimics a fast-moving object appearing to slow down as it recedes into the
+// distance. Normalised so p(0)=0 and p(BEAM_MS)=1 exactly.
+function beamEaseProgress(elapsedMs) {
+  const t = Math.min(1, elapsedMs / BEAM_MS);
+  const norm = 1 - Math.exp(-BEAM_EASE_K);
+  return (1 - Math.exp(-BEAM_EASE_K * t)) / norm;
+}
+
+// Updates a cell's firebeam clip-path to the current sweep position: a
+// horizontal band sliced out of the static barrel→centre trapezoid, sliding
+// from the barrel (100%) to the centre (BEAM_APEX_Y%) and shrinking in
+// height as it goes, so the visible slice narrows in both X (trapezoid
+// taper) and Y (band height) — the combination reads as perspective as the
+// bolt travels away.
+function updateGridFireBeamClip(index, elapsedMs) {
+  const el = document.getElementById(`grid-firebeam-${index}`);
   if (!el) return;
-  const elapsed = performance.now() - _gridFireFlashStart[index];
-  if (elapsed >= FIRE_FLASH_MS) {
-    el.style.opacity = '0';
-    delete _gridFireFlashActive[index];
-    return;
+  if (elapsedMs >= BEAM_MS) { el.style.opacity = '0'; return; }
+  const p = beamEaseProgress(elapsedMs);
+  const leadY  = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
+  const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
+  const trailY = leadY + bandH;
+  const frac    = y => (y - BEAM_APEX_Y) / (BEAM_BASE_Y - BEAM_APEX_Y);
+  const leftX   = y => (50 - BEAM_APEX_HALF_W) + ((50 - BEAM_BASE_HALF_W) - (50 - BEAM_APEX_HALF_W)) * frac(y);
+  const rightX  = y => (50 + BEAM_APEX_HALF_W) + ((50 + BEAM_BASE_HALF_W) - (50 + BEAM_APEX_HALF_W)) * frac(y);
+  const pts = [
+    [leftX(leadY),   leadY],
+    [rightX(leadY),  leadY],
+    [rightX(trailY), trailY],
+    [leftX(trailY),  trailY],
+  ];
+  el.style.clipPath = `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
+  el.style.opacity = '1';
+}
+
+// Called once per real decoded frame for this cell while either effect is active.
+function onGridVideoFrameTick(index) {
+  if (_gridFireFlashActive[index]) {
+    const el = document.getElementById(`grid-firefx-${index}`);
+    const elapsed = performance.now() - _gridFireStart[index];
+    if (el) {
+      if (elapsed >= FIRE_FLASH_MS) {
+        el.style.opacity = '0';
+        delete _gridFireFlashActive[index];
+      } else {
+        el.style.opacity = String(Math.exp(-FIRE_FLASH_K * elapsed / FIRE_FLASH_MS));
+      }
+    }
   }
-  el.style.opacity = String(Math.exp(-FIRE_FLASH_K * elapsed / FIRE_FLASH_MS));
+  if (_gridFireBeamActive[index]) {
+    const elapsed = performance.now() - _gridFireStart[index];
+    updateGridFireBeamClip(index, elapsed);
+    if (elapsed >= BEAM_MS) delete _gridFireBeamActive[index];
+  }
 }
 
 function playGridFireFx(index) {
-  const el = document.getElementById(`grid-firefx-${index}`);
-  if (!el) return;
-  updateGridFireFlashBounds(index);
+  const flashEl = document.getElementById(`grid-firefx-${index}`);
+  const beamEl  = document.getElementById(`grid-firebeam-${index}`);
+  if (!flashEl || !beamEl) return;
+  updateGridFireEffectBounds(index);
+  _gridFireStart[index]       = performance.now();
   _gridFireFlashActive[index] = true;
-  _gridFireFlashStart[index]  = performance.now();
-  el.style.opacity = '1'; // first frame: flash to 100% straight away
+  _gridFireBeamActive[index]  = true;
+  flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
+  updateGridFireBeamClip(index, 0);
 }
 
 function findGridIndexByCallsign(callsign) {
@@ -968,6 +1051,7 @@ function buildGridCell(r, i, footerCls) {
     `<div class="grid-cell-video">` +
       `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
       `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
+      `<div class="grid-cell-firebeam" id="grid-firebeam-${i}"></div>` +
       `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
         (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
       `<div class="grid-dead-msg${isDead ? '' : ' hidden'}" id="grid-dead-${i}">` +
@@ -1044,7 +1128,8 @@ function stopGrid() {
     delete _gridWs[k];
   });
   for (const k in _gridFireFlashActive) delete _gridFireFlashActive[k];
-  for (const k in _gridFireFlashStart)  delete _gridFireFlashStart[k];
+  for (const k in _gridFireBeamActive)  delete _gridFireBeamActive[k];
+  for (const k in _gridFireStart)       delete _gridFireStart[k];
   const container = document.getElementById('tank-grid');
   container.classList.remove('active');
   container.innerHTML = '';

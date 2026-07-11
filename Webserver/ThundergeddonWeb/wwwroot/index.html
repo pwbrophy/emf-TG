@@ -821,7 +821,7 @@
        screen blows every pixel toward white uniformly regardless of how dark
        it started, flattening the flash into a solid white lump. Overlay keeps
        contrast/detail visible through the flash instead.
-       left/top/width/height are set by JS (updateFireFlashBounds) to the
+       left/top/width/height are set by JS (updateFireEffectBounds) to the
        video's actual rendered rect, excluding the object-fit:contain letterbox
        bars, so the flash never bleeds into the black bars around the picture.
        No z-index — painting order relies on DOM position: after #stream,
@@ -836,6 +836,32 @@
       background: radial-gradient(ellipse farthest-side at center,
         rgba(255,255,255,1) 0%,
         rgba(255,255,255,0.85) 45%,
+        rgba(255,255,255,0) 100%);
+      -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+      mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+    }
+
+    /* ── Fire beam overlay: glowing white bolt from the barrel to the reticule.
+       The trapezoid shape (wide at the barrel, narrowing to the reticule) is
+       static — JS only animates which slice of it is visible, via clip-path,
+       to sell a bolt travelling up the beam over BEAM_MS (see
+       updateFireBeamClip). Same barrel-cutout mask and overlay blend as
+       #fire-flash, for the same reasons (see comment above); blur() gives it
+       a soft glowing edge instead of a hard-edged wedge.
+       left/top/width/height set by JS (updateFireEffectBounds) to the video's
+       actual rendered rect, same as #fire-flash. ── */
+    #fire-beam {
+      position: absolute;
+      pointer-events: none;
+      opacity: 0;
+      mix-blend-mode: overlay;
+      filter: blur(5px);
+      background: linear-gradient(to right,
+        rgba(255,255,255,0) 0%,
+        rgba(255,255,255,0.95) 40%,
+        rgba(255,255,255,0.95) 60%,
         rgba(255,255,255,0) 100%);
       -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
         rgba(0,0,0,0) 50%, #000 95%);
@@ -1072,6 +1098,8 @@
 
   <!-- Fire flash overlay: white radial flash masked around the gun barrel -->
   <div id="fire-flash"></div>
+  <!-- Fire beam overlay: glowing bolt travelling from the barrel to the reticule -->
+  <div id="fire-beam"></div>
 
   <!-- Hit direction overlay (above video, below HP bar / controls) -->
   <div id="hit-overlay">
@@ -2812,15 +2840,20 @@ if (window.visualViewport) {
 }
 
 // ════════════════════════════════════════════════════════
-// Fire flash overlay — white radial flash on the FPV video, masked around the
-// gun barrel, overlay-blended onto the video (see #fire-flash CSS).
-// Snaps to 100% instantly then decays exponentially over FIRE_FLASH_MS.
-// Triggered by the server-broadcast FireEvent (not locally on button press) so
-// the driver's screen also sees it in two-player mode, and so it can't desync
-// from the shot the operator/robot actually fired.
+// Fire effect overlay — two pieces, both on the FPV video, both overlay-blended
+// (see #fire-flash / #fire-beam CSS) and masked around the gun barrel:
+//   - #fire-flash: white radial flash, snaps to 100% instantly then decays
+//     exponentially over FIRE_FLASH_MS.
+//   - #fire-beam: glowing trapezoid from the barrel to the reticule. The
+//     trapezoid shape itself is static; a clip-path band sweeps from the
+//     barrel up to the reticule over BEAM_MS, shrinking in height as it goes,
+//     to sell a bolt travelling away from the camera (see updateFireBeamClip).
+// Both are triggered together by the server-broadcast FireEvent (not locally
+// on button press) so the driver's screen also sees it in two-player mode,
+// and so it can't desync from the shot the operator/robot actually fired.
 //
-// The opacity step is driven by actual decoded video frames rather than a
-// smooth rAF/CSS-transition ramp, so the flash's apparent "frame rate" never
+// Both are stepped by actual decoded video frames rather than a smooth
+// rAF/CSS-transition ramp, so neither effect's apparent "frame rate" ever
 // exceeds the video's — steps between frames would just be redrawing the same
 // picture, which looks like the effect is running at a different rate than
 // the footage it's composited over.
@@ -2834,17 +2867,24 @@ if (window.visualViewport) {
 // ════════════════════════════════════════════════════════
 const FIRE_FLASH_MS   = 300;
 const FIRE_FLASH_K    = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+const BEAM_MS          = 600;
+const BEAM_EASE_K      = 4;   // ease-out strength: fast start, slow finish (beam "receding")
+const BEAM_APEX_Y      = 50;  // % — matches #reticle's centred position
+const BEAM_BASE_Y      = 100; // % — beam originates at the bottom edge, behind the barrel mask
+const BEAM_APEX_HALF_W = 1.5; // % — near-point tip at the reticule
+const BEAM_BASE_HALF_W = 15;  // % — wide base at the barrel
+const BEAM_BAND_H_START = 24; // % — traveling band's height when it starts (close, so "tall")
+const BEAM_BAND_H_END   = 3;  // % — band's height once it reaches the reticule (far, so "short")
 const MJPEG_FRAME_MS  = 50;  // MjpegServer.h default cap: 20 fps
 let _fireFlashActive     = false;
-let _fireFlashStartTime  = 0;
-let _fireFlashTimerId    = null; // native <img> MJPEG path only
+let _fireBeamActive      = false;
+let _fireStartTime       = 0;  // shared: flash + beam are always triggered together
+let _fireTimerId         = null; // native <img> MJPEG path only
 
-// Sizes/positions #fire-flash to the video's actual rendered rect within
-// #screen-playing, excluding the object-fit:contain letterbox bars, so the
-// additive flash never lightens the black bars around the picture.
-function updateFireFlashBounds() {
-  const el = document.getElementById('fire-flash');
-  if (!el) return;
+// Sizes/positions #fire-flash and #fire-beam to the video's actual rendered
+// rect within #screen-playing, excluding the object-fit:contain letterbox
+// bars, so neither effect lightens the black bars around the picture.
+function updateFireEffectBounds() {
   const container = document.getElementById('screen-playing');
   const cw = container.clientWidth, ch = container.clientHeight;
   const usingWs = !!_videoWs;
@@ -2860,43 +2900,95 @@ function updateFireFlashBounds() {
       height = ch; width = ch * videoAspect; top = 0; left = (cw - width) / 2;
     }
   }
-  el.style.left   = left + 'px';
-  el.style.top    = top + 'px';
-  el.style.width  = width + 'px';
-  el.style.height = height + 'px';
+  for (const id of ['fire-flash', 'fire-beam']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.style.left   = left + 'px';
+    el.style.top    = top + 'px';
+    el.style.width  = width + 'px';
+    el.style.height = height + 'px';
+  }
 }
-window.addEventListener('resize', () => { if (document.body.classList.contains('game-active')) updateFireFlashBounds(); });
+window.addEventListener('resize', () => { if (document.body.classList.contains('game-active')) updateFireEffectBounds(); });
 
 function fireFlashOpacityAt(elapsedMs) {
   return elapsedMs >= FIRE_FLASH_MS ? 0 : Math.exp(-FIRE_FLASH_K * elapsedMs / FIRE_FLASH_MS);
 }
 
-// Called once per real (or emulated) video frame while the flash is active.
+// Ease-out: fast initial movement, slowing as it approaches the reticule —
+// mimics a fast-moving object appearing to slow down as it recedes into the
+// distance. Normalised so p(0)=0 and p(BEAM_MS)=1 exactly.
+function beamEaseProgress(elapsedMs) {
+  const t = Math.min(1, elapsedMs / BEAM_MS);
+  const norm = 1 - Math.exp(-BEAM_EASE_K);
+  return (1 - Math.exp(-BEAM_EASE_K * t)) / norm;
+}
+
+// Updates #fire-beam's clip-path to the current sweep position: a horizontal
+// band sliced out of the static barrel→reticule trapezoid, sliding from the
+// barrel (100%) to the reticule (BEAM_APEX_Y%) and shrinking in height as it
+// goes, so the visible slice narrows in both X (trapezoid taper) and Y (band
+// height) — the combination reads as perspective as the bolt travels away.
+function updateFireBeamClip(elapsedMs) {
+  const el = document.getElementById('fire-beam');
+  if (!el) return;
+  if (elapsedMs >= BEAM_MS) { el.style.opacity = '0'; return; }
+  const p = beamEaseProgress(elapsedMs);
+  const leadY  = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
+  const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
+  const trailY = leadY + bandH;
+  // X coordinates on the trapezoid's slanted sides at a given Y (0 at apex, 1 at base).
+  const frac    = y => (y - BEAM_APEX_Y) / (BEAM_BASE_Y - BEAM_APEX_Y);
+  const leftX   = y => (50 - BEAM_APEX_HALF_W) + ((50 - BEAM_BASE_HALF_W) - (50 - BEAM_APEX_HALF_W)) * frac(y);
+  const rightX  = y => (50 + BEAM_APEX_HALF_W) + ((50 + BEAM_BASE_HALF_W) - (50 + BEAM_APEX_HALF_W)) * frac(y);
+  const pts = [
+    [leftX(leadY),   leadY],
+    [rightX(leadY),  leadY],
+    [rightX(trailY), trailY],
+    [leftX(trailY),  trailY],
+  ];
+  el.style.clipPath = `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
+  el.style.opacity = '1';
+}
+
+// Called once per real (or emulated) video frame while either effect is active.
 function onVideoFrameTick() {
-  if (!_fireFlashActive) return;
-  const el = document.getElementById('fire-flash');
-  const elapsed = performance.now() - _fireFlashStartTime;
-  if (elapsed >= FIRE_FLASH_MS) {
-    el.style.opacity = '0';
-    _fireFlashActive = false;
-    if (_fireFlashTimerId) { clearInterval(_fireFlashTimerId); _fireFlashTimerId = null; }
-    return;
+  if (_fireFlashActive) {
+    const el = document.getElementById('fire-flash');
+    const elapsed = performance.now() - _fireStartTime;
+    if (elapsed >= FIRE_FLASH_MS) {
+      el.style.opacity = '0';
+      _fireFlashActive = false;
+    } else {
+      el.style.opacity = String(fireFlashOpacityAt(elapsed));
+    }
   }
-  el.style.opacity = String(fireFlashOpacityAt(elapsed));
+  if (_fireBeamActive) {
+    const elapsed = performance.now() - _fireStartTime;
+    updateFireBeamClip(elapsed);
+    if (elapsed >= BEAM_MS) _fireBeamActive = false;
+  }
+  if (!_fireFlashActive && !_fireBeamActive && _fireTimerId) {
+    clearInterval(_fireTimerId);
+    _fireTimerId = null;
+  }
 }
 
 function playFireFx() {
-  const el = document.getElementById('fire-flash');
-  if (!el) return;
-  updateFireFlashBounds();
-  if (_fireFlashTimerId) { clearInterval(_fireFlashTimerId); _fireFlashTimerId = null; }
-  _fireFlashActive    = true;
-  _fireFlashStartTime = performance.now();
-  el.style.opacity = '1'; // first frame: flash to 100% straight away
+  const flashEl = document.getElementById('fire-flash');
+  const beamEl  = document.getElementById('fire-beam');
+  if (!flashEl || !beamEl) return;
+  updateFireEffectBounds();
+  if (_fireTimerId) { clearInterval(_fireTimerId); _fireTimerId = null; }
+  _fireStartTime   = performance.now();
+  _fireFlashActive = true;
+  _fireBeamActive  = true;
+  flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
+  updateFireBeamClip(0);
   if (!_videoWs) {
     // No per-frame decode callback on the native MJPEG path — step at the
     // stream's known frame cadence instead of every rAF tick.
-    _fireFlashTimerId = setInterval(onVideoFrameTick, MJPEG_FRAME_MS);
+    _fireTimerId = setInterval(onVideoFrameTick, MJPEG_FRAME_MS);
   }
   // WS/canvas path: onVideoFrameTick() is driven by real frame arrivals
   // (see _videoWs.onmessage), nothing further to schedule here.
@@ -2904,9 +2996,12 @@ function playFireFx() {
 
 function stopFireFx() {
   _fireFlashActive = false;
-  if (_fireFlashTimerId) { clearInterval(_fireFlashTimerId); _fireFlashTimerId = null; }
-  const el = document.getElementById('fire-flash');
-  if (el) el.style.opacity = '0';
+  _fireBeamActive  = false;
+  if (_fireTimerId) { clearInterval(_fireTimerId); _fireTimerId = null; }
+  const flashEl = document.getElementById('fire-flash');
+  const beamEl  = document.getElementById('fire-beam');
+  if (flashEl) flashEl.style.opacity = '0';
+  if (beamEl)  beamEl.style.opacity  = '0';
 }
 
 // ════════════════════════════════════════════════════════
