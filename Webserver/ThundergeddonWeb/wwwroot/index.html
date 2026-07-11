@@ -812,26 +812,26 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Fire flash overlay: additive laser-blast frame sequence blended into the
-       video itself. Sits above the stream but below the hit overlay / HUD.
-       IMPORTANT: no z-index here — a z-index would create a stacking context that
-       isolates the img's mix-blend-mode from the video underneath (the blend would
-       then composite against nothing and render the frame's black background).
-       Painting order relies on DOM position: after #stream, before #hit-overlay. ── */
-    #fire-fx {
+    /* ── Fire flash overlay: white radial flash when this tank fires.
+       Bright at centre, fully transparent by the screen edge. A feathered
+       radial mask cuts a dark hole at bottom-centre matching the gun barrel
+       silhouette so the flash reads as coming from behind the barrel.
+       Opacity is driven by JS (exponential decay over 100ms).
+       No z-index — painting order relies on DOM position: after #stream,
+       before #hit-overlay. ── */
+    #fire-flash {
       position: absolute;
       inset: 0;
       pointer-events: none;
-      overflow: hidden;
-    }
-    #fire-fx-img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      mix-blend-mode: screen;
       opacity: 0;
+      background: radial-gradient(ellipse farthest-side at center,
+        rgba(255,255,255,1) 0%,
+        rgba(255,255,255,0.85) 45%,
+        rgba(255,255,255,0) 100%);
+      -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+      mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
     }
 
     /* ── Hit direction overlay ── */
@@ -1061,10 +1061,8 @@
   <canvas id="stream-canvas" style="display:none"></canvas>
   <div id="stream-placeholder" style="display:none">No video stream</div>
 
-  <!-- Fire flash overlay: laser-blast frame sequence, additively blended into the video -->
-  <div id="fire-fx">
-    <img id="fire-fx-img" src="" alt="" />
-  </div>
+  <!-- Fire flash overlay: white radial flash masked around the gun barrel -->
+  <div id="fire-flash"></div>
 
   <!-- Hit direction overlay (above video, below HP bar / controls) -->
   <div id="hit-overlay">
@@ -2804,44 +2802,38 @@ if (window.visualViewport) {
 }
 
 // ════════════════════════════════════════════════════════
-// Fire flash overlay — laser-blast frame sequence, additively blended into the
-// FPV video. Triggered by the server-broadcast FireEvent (not locally on button
-// press) so the driver's screen also sees it in two-player mode, and so it can't
-// desync from the shot the operator/robot actually fired.
+// Fire flash overlay — white radial flash on the FPV video, masked around the
+// gun barrel. Snaps to 100% instantly then decays exponentially over 100ms.
+// Triggered by the server-broadcast FireEvent (not locally on button press) so
+// the driver's screen also sees it in two-player mode, and so it can't desync
+// from the shot the operator/robot actually fired.
 // ════════════════════════════════════════════════════════
-const FIRE_FX_FRAMES = [
-  '/images/firefx/fx1.png', '/images/firefx/fx2.png', '/images/firefx/fx3.png', '/images/firefx/fx4.png',
-  '/images/firefx/fx5.png', '/images/firefx/fx6.png', '/images/firefx/fx7.png', '/images/firefx/fx8.png'
-];
-// Matches the MJPEG stream's ~20fps cap (MjpegServer default) so the overlay steps
-// frame-by-frame in lockstep with the video instead of looking like a smooth CSS animation.
-const FIRE_FX_FRAME_MS = 50;
-FIRE_FX_FRAMES.forEach(src => { const img = new Image(); img.src = src; }); // preload
-let _fireFxTimer = null;
+const FIRE_FLASH_MS = 300;
+const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+let _fireFlashRaf = null;
 
 function playFireFx() {
-  const el = document.getElementById('fire-fx-img');
+  const el = document.getElementById('fire-flash');
   if (!el) return;
-  clearInterval(_fireFxTimer);
-  let i = 0;
-  el.src = FIRE_FX_FRAMES[0];
+  if (_fireFlashRaf) cancelAnimationFrame(_fireFlashRaf);
+  const t0 = performance.now();
   el.style.opacity = '1';
-  _fireFxTimer = setInterval(() => {
-    i++;
-    if (i >= FIRE_FX_FRAMES.length) {
-      clearInterval(_fireFxTimer);
-      _fireFxTimer = null;
+  function step(t) {
+    const dt = t - t0;
+    if (dt >= FIRE_FLASH_MS) {
       el.style.opacity = '0';
+      _fireFlashRaf = null;
       return;
     }
-    el.src = FIRE_FX_FRAMES[i];
-  }, FIRE_FX_FRAME_MS);
+    el.style.opacity = String(Math.exp(-FIRE_FLASH_K * dt / FIRE_FLASH_MS));
+    _fireFlashRaf = requestAnimationFrame(step);
+  }
+  _fireFlashRaf = requestAnimationFrame(step);
 }
 
 function stopFireFx() {
-  clearInterval(_fireFxTimer);
-  _fireFxTimer = null;
-  const el = document.getElementById('fire-fx-img');
+  if (_fireFlashRaf) { cancelAnimationFrame(_fireFlashRaf); _fireFlashRaf = null; }
+  const el = document.getElementById('fire-flash');
   if (el) el.style.opacity = '0';
 }
 

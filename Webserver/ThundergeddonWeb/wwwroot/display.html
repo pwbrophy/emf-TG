@@ -249,10 +249,17 @@
 
   .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000; }
   .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
-  /* Fire flash overlay: additive laser-blast frame sequence, blended into the tank's video */
-  .grid-cell-firefx {
-    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
-    mix-blend-mode: screen; opacity: 0; pointer-events: none; z-index: 1;
+  /* Fire flash overlay: white radial flash when the tank fires — bright centre,
+     transparent at the cell edge, with a feathered mask cutting out the gun
+     barrel silhouette at bottom-centre so the flash reads as behind the barrel. */
+  .grid-cell-fireflash {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 1;
+    background: radial-gradient(ellipse farthest-side at center,
+      rgba(255,255,255,1) 0%, rgba(255,255,255,0.85) 45%, rgba(255,255,255,0) 100%);
+    -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+      rgba(0,0,0,0) 50%, #000 95%);
+    mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+      rgba(0,0,0,0) 50%, #000 95%);
   }
   .grid-cell-nolvideo { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: center; color: #444; font-size: 0.85em; }
@@ -840,35 +847,30 @@ function videoWsUrl(robotUrl) {
   return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}`;
 }
 
-// ── Fire flash overlay: additive laser-blast frame sequence, blended into a
-// tank's video cell. Triggered by the server-broadcast FireEvent, keyed by callsign.
-const FIRE_FX_FRAMES = [
-  '/images/firefx/fx1.png', '/images/firefx/fx2.png', '/images/firefx/fx3.png', '/images/firefx/fx4.png',
-  '/images/firefx/fx5.png', '/images/firefx/fx6.png', '/images/firefx/fx7.png', '/images/firefx/fx8.png'
-];
-// Matches the MJPEG stream's ~20fps cap (MjpegServer default) so the overlay steps
-// frame-by-frame in lockstep with the video instead of looking like a smooth CSS animation.
-const FIRE_FX_FRAME_MS = 50;
-FIRE_FX_FRAMES.forEach(src => { const img = new Image(); img.src = src; }); // preload
-const _gridFireFxTimers = {}; // index → interval id
+// ── Fire flash overlay: white radial flash on a tank's video cell, masked
+// around the gun barrel. Snaps to 100% then decays exponentially over 100ms.
+// Triggered by the server-broadcast FireEvent, keyed by callsign.
+const FIRE_FLASH_MS = 300;
+const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+const _gridFireFxTimers = {}; // index → rAF id
 
 function playGridFireFx(index) {
   const el = document.getElementById(`grid-firefx-${index}`);
   if (!el) return;
-  clearInterval(_gridFireFxTimers[index]);
-  let i = 0;
-  el.src = FIRE_FX_FRAMES[0];
+  if (_gridFireFxTimers[index]) cancelAnimationFrame(_gridFireFxTimers[index]);
+  const t0 = performance.now();
   el.style.opacity = '1';
-  _gridFireFxTimers[index] = setInterval(() => {
-    i++;
-    if (i >= FIRE_FX_FRAMES.length) {
-      clearInterval(_gridFireFxTimers[index]);
-      delete _gridFireFxTimers[index];
+  function step(t) {
+    const dt = t - t0;
+    if (dt >= FIRE_FLASH_MS) {
       el.style.opacity = '0';
+      delete _gridFireFxTimers[index];
       return;
     }
-    el.src = FIRE_FX_FRAMES[i];
-  }, FIRE_FX_FRAME_MS);
+    el.style.opacity = String(Math.exp(-FIRE_FLASH_K * dt / FIRE_FLASH_MS));
+    _gridFireFxTimers[index] = requestAnimationFrame(step);
+  }
+  _gridFireFxTimers[index] = requestAnimationFrame(step);
 }
 
 function findGridIndexByCallsign(callsign) {
@@ -915,7 +917,7 @@ function buildGridCell(r, i, footerCls) {
   cell.innerHTML =
     `<div class="grid-cell-video">` +
       `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
-      `<img class="grid-cell-firefx" id="grid-firefx-${i}" src="" alt="" />` +
+      `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
       `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
         (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
       `<div class="grid-dead-msg${isDead ? '' : ' hidden'}" id="grid-dead-${i}">` +
@@ -991,7 +993,7 @@ function stopGrid() {
     try { _gridWs[k].close(); } catch(_) {}
     delete _gridWs[k];
   });
-  Object.keys(_gridFireFxTimers).forEach(k => clearInterval(_gridFireFxTimers[k]));
+  Object.keys(_gridFireFxTimers).forEach(k => cancelAnimationFrame(_gridFireFxTimers[k]));
   for (const k in _gridFireFxTimers) delete _gridFireFxTimers[k];
   const container = document.getElementById('tank-grid');
   container.classList.remove('active');
