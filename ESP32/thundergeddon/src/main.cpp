@@ -1112,8 +1112,9 @@ static void handleWsText(const String& s)
     }
 
     if (strcmp(cmd, "flash_hit") == 0) {
-        leds.flashHit();
-        if (doc["rear"] | false)
+        bool isRear = doc["rear"] | false;
+        leds.flashHit(isRear, isRear ? 450 : 300);
+        if (isRear)
             startBuzzerRearHitEffect();
         else
             startBuzzerHitEffect();

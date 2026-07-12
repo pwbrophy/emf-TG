@@ -1,9 +1,11 @@
 // LedController.h — WS2812B strip (6 LEDs, GPIO38) + status LED (GPIO48).
 //
 // Strip effects (in priority order, highest first):
-//   flashHit(ms)   — all red for ms, then restore HP bar
-//   flashFire(ms)  — all white for ms, then restore HP bar
-//   HP bar         — blue pixels proportional to remaining HP (default)
+//   flashHit(isRear, ms) — red for ms, then restore HP bar.
+//                          Rear hits blink rapidly instead of solid, to stand
+//                          out as the 3x-damage direction.
+//   flashFire(ms)        — all white for ms, then restore HP bar
+//   HP bar               — blue pixels proportional to remaining HP (default)
 //
 // A hit arriving during a fire flash immediately overrides it.
 // After any timed effect expires, the HP bar is automatically redrawn.
@@ -147,7 +149,7 @@ public:
     //                          (front of robot first), like a projectile launching.
     void fireSequence()
     {
-        if (_effect == Effect::Hit) return; // hit takes priority
+        if (_isHitEffect(_effect)) return; // hit takes priority
         _effect   = Effect::FireSeq;
         _seqStart = millis();
         _strip.clear();
@@ -157,17 +159,19 @@ public:
     // Legacy solid-white flash (kept for other callers).
     void flashFire(uint32_t durationMs = 200)
     {
-        if (_effect == Effect::Hit) return;
+        if (_isHitEffect(_effect)) return;
         _effect    = Effect::Fire;
         _effectEnd = millis() + durationMs;
         _fillStrip(255, 255, 255);
     }
 
-    // All-red flash: robot was hit.
-    void flashHit(uint32_t durationMs = 300)
+    // Red flash: robot was hit. Rear hits (isRear=true) blink rapidly instead
+    // of holding solid, so the higher-damage rear hit reads as visually distinct.
+    void flashHit(bool isRear = false, uint32_t durationMs = 300)
     {
-        _effect    = Effect::Hit; // always overrides fire
-        _effectEnd = millis() + durationMs;
+        _effect    = isRear ? Effect::HitRear : Effect::Hit; // always overrides fire
+        _seqStart  = millis();
+        _effectEnd = _seqStart + durationMs;
         _fillStrip(255, 0, 0);
     }
 
@@ -176,7 +180,7 @@ public:
     // Phase 2 (750–1200 ms): 5 rapid white flashes (90 ms on / 90 ms off).
     void healCharge()
     {
-        if (_effect == Effect::Hit) return; // hit takes priority
+        if (_isHitEffect(_effect)) return; // hit takes priority
         _effect   = Effect::HealCharge;
         _seqStart = millis();
         _strip.clear();
@@ -187,7 +191,7 @@ public:
     // hold for 200 ms, then restore HP bar. Total 650 ms.
     void captureSequence()
     {
-        if (_effect == Effect::Hit) return; // hit takes priority
+        if (_isHitEffect(_effect)) return; // hit takes priority
         _effect   = Effect::CaptureSeq;
         _seqStart = millis();
         _strip.clear();
@@ -262,7 +266,9 @@ public:
     }
 
 private:
-    enum class Effect : uint8_t { None, Fire, Hit, FireSeq, HealCharge, CaptureSeq, DeathExplosion, DeadBlink };
+    enum class Effect : uint8_t { None, Fire, Hit, HitRear, FireSeq, HealCharge, CaptureSeq, DeathExplosion, DeadBlink };
+
+    static bool _isHitEffect(Effect e) { return e == Effect::Hit || e == Effect::HitRear; }
 
     // Check whether the active timed effect has expired; drive animations.
     void _updateEffect(uint32_t now)
@@ -397,6 +403,20 @@ private:
                 _deadBlinkToggle = now + 500;
                 _drawDeadBlink();
             }
+            return;
+        }
+
+        if (_effect == Effect::HitRear) {
+            // Rapid on/off red blink (70 ms on / 70 ms off) so a rear hit reads
+            // as visually distinct from a normal solid-red hit flash.
+            if ((int32_t)(now - _effectEnd) >= 0) {
+                _effect = Effect::None;
+                _restoreBackground();
+                return;
+            }
+            bool flashOn = ((now - _seqStart) % 140u) < 70u; // 70 ms on / 70 ms off
+            if (flashOn) _fillStrip(255, 0, 0);
+            else { _strip.clear(); _strip.show(); }
             return;
         }
 
