@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stay in touch — Thundergeddon</title>
+<style>
+  :root {
+    --bg:      #0d0d14;
+    --surface: #1a1a28;
+    --border:  #2e2e50;
+    --accent:  #ff4d1c;
+    --text:    #e8e8f0;
+    --muted:   #6b6b90;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 16px; gap: 12px; min-height: 100%; }
+  h1 { font-size: 1.3rem; letter-spacing: 0.05em; }
+  p.sub { color: var(--muted); font-size: 0.9rem; text-align: center; max-width: 480px; }
+  iframe {
+    width: 100%;
+    max-width: 640px;
+    flex: 1;
+    min-height: 420px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .yt-link {
+    display: inline-block;
+    padding: 12px 24px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .skip { color: var(--muted); font-size: 0.85rem; text-decoration: underline; background: none; border: none; cursor: pointer; font-family: inherit; }
+</style>
+</head>
+<body>
+  <h1>STAY IN TOUCH</h1>
+  <p class="sub">Fill in the form below — once you submit it, we'll take you to our YouTube channel.</p>
+  <iframe id="form-frame" src="https://docs.google.com/forms/d/e/1FAIpQLSfJR49OylSJ8v3zegsLSLGYDMGAm8q6q59vnx1NDO3oJDN3vQ/viewform?embedded=true" title="Stay in touch form"></iframe>
+  <a class="yt-link" href="https://www.youtube.com/@Thundergeddon" target="_blank" rel="noopener">Subscribe on YouTube ▸</a>
+  <button class="skip" onclick="window.close()">Close this tab</button>
+
+<script>
+  // Google Forms navigates the iframe internally from the form view to its
+  // "thank you" confirmation page on submit. We can't read the iframe's
+  // cross-origin URL, but the iframe still fires a `load` event on that
+  // internal navigation. First load = initial form render (ignore it);
+  // second load = submission confirmation → auto-continue to YouTube.
+  // If Google ever changes Forms to submit via XHR instead of navigation,
+  // this won't fire — the visible "Subscribe on YouTube" button above is
+  // the manual fallback either way.
+  const frame = document.getElementById('form-frame');
+  let loadCount = 0;
+  frame.addEventListener('load', () => {
+    loadCount++;
+    if (loadCount > 1) {
+      window.location.href = 'https://www.youtube.com/@Thundergeddon';
+    }
+  });
+</script>
+</body>
+</html>
