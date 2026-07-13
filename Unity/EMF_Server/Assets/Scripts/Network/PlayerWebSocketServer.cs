@@ -1365,17 +1365,30 @@ public class PlayerWebSocketServer : MonoBehaviour
         return driver + " and " + gunner;
     }
 
+    // Same definition of victory points used in the game_over "playerStats" payload
+    // (vpFromCaptures + vpFromKills), so the spoken announcement and the stats screen
+    // always agree on who the best player was.
+    Dictionary<string, int> ComputeVictoryPointsByPlayer()
+    {
+        var points = new Dictionary<string, int>();
+        foreach (var kvp in _connToPlayer)
+        {
+            string playerName = kvp.Value;
+            if (PlayerToRobotAny(playerName) == null) continue; // skip lobby-only connections
+            if (points.ContainsKey(playerName)) continue;       // driver+gunner share a name once
+
+            int vpFromCaptures = (int)System.Math.Round(_statVpFromCaptures.GetValueOrDefault(playerName, 0f));
+            int vpFromKills    = _statVpFromKills.GetValueOrDefault(playerName, 0);
+            points[playerName] = vpFromCaptures + vpFromKills;
+        }
+        return points;
+    }
+
     string CalculateBestPlayer()
     {
-        var scores = new Dictionary<string, int>();
-        foreach (var kvp in _playerKillTotal)
-            scores[kvp.Key] = scores.GetValueOrDefault(kvp.Key) + kvp.Value * 10;
-        foreach (var kvp in _playerCaptureScore)
-            scores[kvp.Key] = scores.GetValueOrDefault(kvp.Key) + kvp.Value * 5;
-
         string best = null;
         int bestScore = 0;
-        foreach (var kvp in scores)
+        foreach (var kvp in ComputeVictoryPointsByPlayer())
             if (kvp.Value > bestScore) { bestScore = kvp.Value; best = kvp.Key; }
         return best;
     }
@@ -1765,6 +1778,14 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (!string.IsNullOrEmpty(mostGroundPlayer))
         {
             sb.Append(",\"mostGround\":\""); sb.Append(EscapeJson(mostGroundPlayer)); sb.Append("\"");
+        }
+
+        // Same value used for the spoken "best player" announcement in OnGameWon,
+        // so the stats screen and the announcer always agree.
+        string bestPlayer = CalculateBestPlayer();
+        if (!string.IsNullOrEmpty(bestPlayer))
+        {
+            sb.Append(",\"bestPlayer\":\""); sb.Append(EscapeJson(bestPlayer)); sb.Append("\"");
         }
 
         sb.Append(",\"playerStats\":[");

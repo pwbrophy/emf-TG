@@ -432,6 +432,7 @@ public class UnityBridgeService : BackgroundService
         string reason     = GetString(root, "reason")     ?? "";
         bool   hasStats      = root.TryGetProperty("playerStats", out var statsArray);
         string mostGroundP   = GetString(root, "mostGround") ?? "";
+        string bestPlayerP   = GetString(root, "bestPlayer") ?? "";
 
         // ── Aggregate stats for the display page ──────────────────────────────────
         object? displayStats = null;
@@ -454,9 +455,9 @@ public class UnityBridgeService : BackgroundService
                 if (cp > capV)    { capV    = cp; capP    = n; }
             }
 
-            // Best player: most kills first, most damage as tiebreaker
-            string bestP = !string.IsNullOrEmpty(killsP)  ? killsP
-                         : !string.IsNullOrEmpty(damGvnP) ? damGvnP : "";
+            // Best player: authoritative value from Unity (most victory points, i.e.
+            // captures + kills — matches the spoken announcement exactly).
+            string bestP = bestPlayerP;
 
             displayStats = new
             {
