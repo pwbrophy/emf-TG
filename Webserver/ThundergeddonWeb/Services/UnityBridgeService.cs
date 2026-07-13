@@ -213,8 +213,9 @@ public class UnityBridgeService : BackgroundService
                 {
                     string? robotId  = GetString(doc.RootElement, "robotId");
                     string? callsign = GetString(doc.RootElement, "callsign");
+                    string? dir      = GetString(doc.RootElement, "dir");
                     await _hub.Clients.All.SendAsync("HitEvent",
-                        new { robotId = robotId ?? "", callsign = callsign ?? "" });
+                        new { robotId = robotId ?? "", callsign = callsign ?? "", dir = dir ?? "" });
                     break;
                 }
 

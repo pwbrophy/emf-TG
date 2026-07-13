@@ -307,6 +307,23 @@
     mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
       rgba(0,0,0,0) 50%, #000 95%);
   }
+  /* Red directional hit overlay — mirrors index.html's #hit-overlay /
+     .hit-effect so the display grid shows the same "you got hit" feedback
+     the player's own phone sees. Sized relative to the cell (closest-side /
+     percentages) rather than index.html's vmin, since vmin is relative to
+     the whole viewport and would be wildly oversized for a small grid cell. */
+  .grid-cell-hit-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  @keyframes gridHitFlash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+  .grid-cell-hit-effect { position: absolute; inset: 0; opacity: 0; }
+  .grid-cell-hit-effect.flash { animation: gridHitFlash 0.6s ease-out forwards; }
+  .grid-cell-hit-front { background: radial-gradient(circle closest-side at center,
+    rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 100%); }
+  .grid-cell-hit-left { background: linear-gradient(to right,
+    rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%); }
+  .grid-cell-hit-right { background: linear-gradient(to left,
+    rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%); }
+  .grid-cell-hit-rear { background: radial-gradient(ellipse at center,
+    rgba(255,0,0,0) 35%, rgba(255,0,0,0.85) 100%); }
   .grid-cell-nolvideo { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: center; color: #444; font-size: 0.85em; }
 
@@ -1189,6 +1206,12 @@ function buildGridCell(r, i, footerCls) {
           `<div class="grid-cell-firebeam-shape" id="grid-firebeam-shape-${i}"></div>` +
         `</div>` +
         `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
+        `<div class="grid-cell-hit-overlay" id="grid-hitoverlay-${i}">` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-front"></div>` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-left"></div>` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-right"></div>` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-rear"></div>` +
+        `</div>` +
       `</div></div>` +
       `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
         (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
@@ -1398,8 +1421,31 @@ conn.on('FireEvent', data => {
 
 conn.on('HitEvent', data => {
   const idx = findGridIndexByCallsign(data && data.callsign);
-  if (idx >= 0) triggerGridShake(idx, 'hit');
+  if (idx >= 0) {
+    triggerGridShake(idx, 'hit');
+    showGridHitEffect(idx, (data && data.dir || '').toUpperCase());
+  }
 });
+
+// Mirrors index.html's dirToHitEffect/showHitEffect so the display grid's
+// red hit flash matches what the player's own phone shows.
+function dirToGridHitEffect(dir) {
+  if (dir === 'S' || dir === 'SE' || dir === 'SW') return 'grid-cell-hit-rear';
+  if (dir === 'E')                                  return 'grid-cell-hit-right';
+  if (dir === 'W')                                  return 'grid-cell-hit-left';
+  return 'grid-cell-hit-front'; // N, NE, NW (and unknown)
+}
+
+function showGridHitEffect(index, dir) {
+  const overlay = document.getElementById(`grid-hitoverlay-${index}`);
+  if (!overlay) return;
+  const cls = dirToGridHitEffect(dir);
+  const el = overlay.querySelector(`.${cls}`);
+  if (!el) return;
+  el.classList.remove('flash');
+  void el.offsetWidth; // force reflow to restart animation
+  el.classList.add('flash');
+}
 
 function triggerKillBurn(teamIndex) {
   // Full-screen red pulse

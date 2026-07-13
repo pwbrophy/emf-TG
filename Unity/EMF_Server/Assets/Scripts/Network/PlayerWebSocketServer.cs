@@ -1034,14 +1034,16 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         // Broadcast to ALL clients (unlike hit_taken above, which only reaches the
         // target's own phone) so the display page's spectator grid can identify
-        // which cell to camera-shake, the same way fire_event lets it find which
-        // cell to play the muzzle flash on.
+        // which cell to camera-shake and flash the directional red hit overlay on,
+        // the same way fire_event lets it find which cell to play the muzzle
+        // flash on.
         string targetCallsign = "";
         var hitDir = ServiceLocator.RobotDirectory;
         if (hitDir != null && hitDir.TryGet(targetId, out var hitInfo))
             targetCallsign = hitInfo.Callsign ?? "";
         BroadcastRaw("{\"cmd\":\"hit_event\",\"robotId\":\"" + EscapeJson(targetId) +
-                     "\",\"callsign\":\"" + EscapeJson(targetCallsign) + "\"}");
+                     "\",\"callsign\":\"" + EscapeJson(targetCallsign) +
+                     "\",\"dir\":\"" + EscapeJson(cardinalDir ?? "") + "\"}");
 
         // Announce rear hits
         if (cardinalDir == "S" && !string.IsNullOrEmpty(shooterName))
