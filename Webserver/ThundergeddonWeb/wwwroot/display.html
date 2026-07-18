@@ -120,28 +120,31 @@
     pointer-events: none; z-index: 55; opacity: 0; }
   #kill-overlay.kill-screen-pulse { animation: kill-screen-pulse 2s ease-out forwards; }
 
-  /* Lobby overlay */
+  /* Lobby overlay — sized in vmin so text reads from a distance and scales
+     with whatever window/display it's shown on. */
   #lobby-overlay { position: fixed; inset: 0; background: var(--bg);
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-    padding: 40px 24px; gap: 20px; z-index: 10; }
+    padding: 2.2vmin 3vmin; gap: 2.1vmin; z-index: 10; }
   #lobby-overlay.hidden { display: none; }
-  #lobby-title { font-size: 2.5em; font-weight: 900; letter-spacing: 4px;
-    text-transform: uppercase; color: #fff; }
+  #lobby-title { font-size: 13vmin; font-weight: 900; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #fff; line-height: 1.05; }
   #lobby-title span { color: #f0c040; }
-  #lobby-waiting { font-size: 1.4em; letter-spacing: 3px; color: var(--dim);
+  #lobby-waiting { font-size: 7.5vmin; letter-spacing: 0.06em; color: var(--dim);
     text-transform: uppercase; }
-  #lobby-alliances { display: flex; gap: 60px; }
+  #lobby-alliances { display: flex; gap: 10vmin; }
   .lobby-team { text-align: center; }
-  .lobby-team-title { font-size: 0.85em; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 1px; margin-bottom: 8px; }
+  .lobby-team-title { font-size: 4.8vmin; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; margin-bottom: 1.2vmin; }
   .lobby-team-title.a0 { color: var(--blue); }
   .lobby-team-title.a1 { color: var(--red); }
-  .lobby-player-name { font-size: 1.05em; padding: 3px 0; }
+  .lobby-player-name { font-size: 5.8vmin; padding: 0.35vmin 0; line-height: 1.15; }
   #lobby-unassigned-section { text-align: center; }
-  #lobby-unassigned-title { font-size: 0.85em; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 1px; margin-bottom: 8px; color: var(--dim); }
-  #lobby-unassigned { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 22px; }
-  #lobby-slots { font-size: 0.9em; color: var(--dim); }
+  #lobby-unassigned-title { font-size: 4.8vmin; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; margin-bottom: 1.2vmin; color: var(--dim); }
+  #lobby-unassigned { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.7vmin 4.5vmin; }
+  #lobby-unassigned .lobby-player-name { font-size: 5.8vmin; }
+  #lobby-slots { font-size: 4.2vmin; color: var(--dim); }
+  #lobby-site { font-size: 4.8vmin; font-weight: 700; letter-spacing: 0.04em; color: #f0c040; }
 
   /* Game paused overlay */
   #paused-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72);
@@ -416,6 +419,7 @@
     </div>
   </div>
   <div id="lobby-slots">— / — slots available</div>
+  <div id="lobby-site">www.thundergeddon.com</div>
 </div>
 
 <div id="countdown-overlay" class="hidden">
