@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Thundergeddon Display</title>
 <script src="/js/signalr.min.js"></script>
-<script src="/js/qrcode.min.js"></script>
 <style>
   :root {
     --blue:   #FFD594;  /* Desert Squad */
@@ -138,10 +137,11 @@
   .lobby-team-title.a0 { color: var(--blue); }
   .lobby-team-title.a1 { color: var(--red); }
   .lobby-player-name { font-size: 1.05em; padding: 3px 0; }
-  #qr-section { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-  #qr-label-top { font-size: 1em; color: #ccc; letter-spacing: 1px; }
-  #qr-code { background: #fff; padding: 12px; border-radius: 8px; }
-  #qr-slots { font-size: 0.9em; color: var(--dim); }
+  #lobby-unassigned-section { text-align: center; }
+  #lobby-unassigned-title { font-size: 0.85em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 8px; color: var(--dim); }
+  #lobby-unassigned { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 22px; }
+  #lobby-slots { font-size: 0.9em; color: var(--dim); }
 
   /* Game paused overlay */
   #paused-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72);
@@ -401,6 +401,10 @@
 <div id="lobby-overlay">
   <div id="lobby-title">&#9889; <span>THUNDERGEDDON</span></div>
   <div id="lobby-waiting">Waiting to Start</div>
+  <div id="lobby-unassigned-section">
+    <div id="lobby-unassigned-title">Unassigned</div>
+    <div id="lobby-unassigned"></div>
+  </div>
   <div id="lobby-alliances">
     <div class="lobby-team">
       <div class="lobby-team-title a0">Desert Squad</div>
@@ -411,11 +415,7 @@
       <div id="lobby-team-1"></div>
     </div>
   </div>
-  <div id="qr-section">
-    <div id="qr-label-top">Scan QR to join the next game</div>
-    <div id="qr-code"></div>
-    <div id="qr-slots">— / — slots available</div>
-  </div>
+  <div id="lobby-slots">— / — slots available</div>
 </div>
 
 <div id="countdown-overlay" class="hidden">
@@ -481,28 +481,6 @@
 <div id="status-banner">Connecting&hellip;</div>
 
 <script>
-// ── QR code (points to the server's LAN IP so phones can scan and connect) ──
-let qrInstance = null;
-
-function buildQr(url) {
-  const el = document.getElementById('qr-code');
-  el.innerHTML = '';
-  qrInstance = new QRCode(el, {
-    text: url,
-    width: 200, height: 200,
-    colorDark: '#000000', colorLight: '#ffffff',
-    correctLevel: QRCode.CorrectLevel.M
-  });
-}
-
-// Start with origin as placeholder, then replace with real LAN IP
-buildQr(window.location.origin);
-
-fetch('/api/serverip')
-  .then(r => r.json())
-  .then(data => { if (data.url) buildQr(data.url); })
-  .catch(() => { /* keep placeholder if fetch fails */ });
-
 // ── State ─────────────────────────────────────────────────────────────────
 let state = {
   phase: 'mainmenu',
@@ -512,6 +490,7 @@ let state = {
   teamPoints: [0, 0],
   maxTeamPoints: 300,
   allianceNames: ['Desert Squad', 'Jungle Squad'],
+  players: [],
   robots: [],
   capturePoints: [{ name:'North', owner:-1 }, { name:'Centre', owner:-1 }, { name:'South', owner:-1 }]
 };
@@ -1575,7 +1554,7 @@ function renderLobbyOverlay() {
   if (!isLobby) return;
 
   const avail = state.maxPlayers - state.playerCount;
-  document.getElementById('qr-slots').textContent =
+  document.getElementById('lobby-slots').textContent =
     `${avail} / ${state.maxPlayers} slots available`;
 
   // Update squad name headings
@@ -1583,17 +1562,30 @@ function renderLobbyOverlay() {
   document.querySelector('.lobby-team-title.a0').textContent = lobbyAn[0];
   document.querySelector('.lobby-team-title.a1').textContent = lobbyAn[1];
 
-  // Build per-alliance player lists from robots
-  const t0 = document.getElementById('lobby-team-0');
-  const t1 = document.getElementById('lobby-team-1');
-  t0.innerHTML = ''; t1.innerHTML = '';
-  (state.robots || []).forEach(r => {
+  // Build unassigned + per-alliance player lists
+  const unEl = document.getElementById('lobby-unassigned');
+  const t0   = document.getElementById('lobby-team-0');
+  const t1   = document.getElementById('lobby-team-1');
+  unEl.innerHTML = ''; t0.innerHTML = ''; t1.innerHTML = '';
+
+  const players = state.players || [];
+  const unassigned = players.filter(p => p.alliance !== 0 && p.alliance !== 1);
+  document.getElementById('lobby-unassigned-section').style.display =
+    unassigned.length ? '' : 'none';
+
+  unassigned.forEach(p => {
     const div = document.createElement('div');
     div.className = 'lobby-player-name';
-    div.textContent = r.gunnerPlayer
-      ? (r.player || '?') + ' & ' + r.gunnerPlayer
-      : (r.player || r.callsign || '?');
-    (r.alliance === 0 ? t0 : t1).appendChild(div);
+    div.textContent = p.name || '?';
+    unEl.appendChild(div);
+  });
+
+  players.forEach(p => {
+    if (p.alliance !== 0 && p.alliance !== 1) return;
+    const div = document.createElement('div');
+    div.className = 'lobby-player-name';
+    div.textContent = p.name || '?';
+    (p.alliance === 0 ? t0 : t1).appendChild(div);
   });
 }
 
@@ -1681,12 +1673,12 @@ function speak(text) {
     _speakTimer = setTimeout(() => {
       _speakTimer = null;
       const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 0.95; utt.pitch = 1.0;
+      utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
       speechSynthesis.speak(utt);
     }, 60);
   } else {
     const utt = new SpeechSynthesisUtterance(text);
-    utt.rate = 0.95; utt.pitch = 1.0;
+    utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
     speechSynthesis.speak(utt);
   }
 }

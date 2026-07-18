@@ -1937,6 +1937,23 @@ public class PlayerWebSocketServer : MonoBehaviour
         sb.Append(",\"allianceNames\":[\""); sb.Append(EscapeJson(AllianceName(0)));
         sb.Append("\",\"");                  sb.Append(EscapeJson(AllianceName(1))); sb.Append("\"]");
 
+        // Players array (name + alliance; -1 = unassigned) — used by the display's
+        // lobby view to list squads and unassigned players before a match starts.
+        sb.Append(",\"players\":[");
+        if (players != null)
+        {
+            bool firstP = true;
+            foreach (var p in players)
+            {
+                if (!firstP) sb.Append(",");
+                firstP = false;
+                sb.Append("{\"name\":\""); sb.Append(EscapeJson(p.Name)); sb.Append("\"");
+                sb.Append(",\"alliance\":"); sb.Append(p.AllianceIndex);
+                sb.Append("}");
+            }
+        }
+        sb.Append("]");
+
         // Robots array
         sb.Append(",\"robots\":[");
         if (inMatch && gs?.Robots != null)
