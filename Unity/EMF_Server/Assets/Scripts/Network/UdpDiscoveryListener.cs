@@ -1,5 +1,5 @@
 // UdpDiscoveryListener.cs
-// Listens for robot UDP announces while in Lobby, replies with the WebSocket URL.
+// Listens for robot UDP announces while in Lobby or Playing, replies with the WebSocket URL.
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -65,8 +65,21 @@ public class UdpDiscoveryListener : MonoBehaviour
 
         _flow.OnPhaseChanged += HandlePhaseChanged;
 
-        if (_flow.Phase == GamePhase.Lobby)
+        if (DiscoveryAllowedIn(_flow.Phase))
             StartListener();
+    }
+
+    // Discovery must stay live during Playing as well as Lobby. A robot that power-
+    // cycles mid-match boots with no stored server URL (the firmware never persists
+    // g_wsUrl) and can only learn it from a discovery reply — so with the listener
+    // closed it announces into silence and cannot rejoin until the match ends.
+    // The same applies after any WebSocket drop: the firmware's onWsClose() clears
+    // g_wsUrl and re-enters discovery. Letting robots discover mid-match is safe
+    // because RobotWebSocketServer's hello handler is the actual join gate, and it
+    // already accepts Lobby + Playing only.
+    private static bool DiscoveryAllowedIn(GamePhase phase)
+    {
+        return phase == GamePhase.Lobby || phase == GamePhase.Playing;
     }
 
     private void OnDisable()
@@ -135,10 +148,23 @@ public class UdpDiscoveryListener : MonoBehaviour
 
     private void HandlePhaseChanged(GamePhase phase)
     {
-        if (phase == GamePhase.Lobby)
-            StartListener();
-        else
+        if (!DiscoveryAllowedIn(phase))
+        {
             StopListener();
+            return;
+        }
+
+        // Lobby → Playing keeps the same socket open, so clear the log-suppression
+        // set on the transition: a robot that rediscovers mid-match should log once
+        // rather than being silenced by its lobby-time reply.
+        if (_running)
+        {
+            lock (_mtx) _repliedTo.Clear();
+        }
+        else
+        {
+            StartListener();
+        }
     }
 
     private void StartListener()

@@ -161,7 +161,7 @@ All services are created once in `AppBootstrap` (`[DefaultExecutionOrder(-1000)]
 |-------|------|
 | `RobotWebSocketServer` | `WebSocketSharp` server at `ws://<ip>:8080/esp32`. Thread-safe `PostMain` queue for Unity safety. Heartbeat timeout sweep every 2s. Auto-starts via `Start()`. Events: `OnPong`, `OnIrEmitAck`, `OnIrWindowResult`. **Important:** `hello` is accepted at any game phase — do not add a phase gate, or robots that reconnect during Playing will never register and all commands will fail. `OnClosed` does NOT remove the robot from `RobotDirectory`; only the heartbeat sweep removes stale entries. |
 | `PlayerWebSocketServer` | `WebSocketSharp` server at `ws://127.0.0.1:8081/players`. Receives join/leave/drive/turret/fire JSON from `UnityBridgeService`. Routes drive+turret to `RobotWebSocketServer`, fire to `ShootingController.RequestFire`. Subscribes to `GameFlow.OnPhaseChanged`, `GameService.OnHpChanged/OnRobotDied/OnGameWon`. On `Playing`: sends `game_started` per connection. Sends `state_update` (HP + timer) per connection at 1 Hz and immediately on HP change. Fires `OnPlayerInput` event for `PlayerInputMonitor`. **`HandleJoin` calls `TryAssignFreeRobotToPlayer` immediately after adding the player**, so any already-connected unassigned robot is auto-assigned to the new player. |
-| `UdpDiscoveryListener` | Background thread on UDP port 30560. Auto-starts via `Start()`. Replies to robot announces with WebSocket URL. Tracks `_repliedTo` set to suppress per-robot log spam on the 2s broadcast cadence. |
+| `UdpDiscoveryListener` | Background thread on UDP port 30560. Auto-starts via `Start()`. Replies to robot announces with WebSocket URL. Runs during `Lobby` **and** `Playing` (`DiscoveryAllowedIn`) so power-cycled robots can rejoin mid-match. Tracks `_repliedTo` set to suppress per-robot log spam on the 2s broadcast cadence. |
 | `ESP32VideoReceiver` | Receives JPEG byte arrays, decodes into `Texture2D` on a `RawImage`. |
 
 **UI layer:**
@@ -307,7 +307,7 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 
 - Robot broadcasts `{"robotId":"<MAC12>","callsign":""}` to UDP port 30560 every 2s
 - Server (Unity `UdpDiscoveryListener`) replies unicast: `{"ws":"ws://<ip>:8080/esp32"}`
-- Discovery only active while `GameFlow.Phase == Lobby`
+- Discovery is active in `Lobby` **and** `Playing`, and stopped in `MainMenu`/`Ended`. It must stay on during `Playing`: the firmware never persists the WebSocket URL, so a robot that power-cycles (or drops its socket) mid-match can only get back in via a discovery reply. `RobotWebSocketServer`'s `hello` handler is the real join gate — do not re-narrow discovery to Lobby only.
 
 ---
 
