@@ -368,6 +368,22 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     // ── Lobby handlers ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// True while the pre-game countdown is running. The lobby is closed for that
+    /// window: KickUnassignedPlayers() validates who has a tank at the top of the
+    /// countdown and GameService.StartGame() snapshots assignments at the bottom, so
+    /// anything that changed in between produced players with no tank (or tanks with
+    /// no player) at the moment the match started.
+    /// </summary>
+    bool CountdownLocked => ServiceLocator.Countdown != null && ServiceLocator.Countdown.IsRunning;
+
+    void RejectJoin(string connId, string message)
+    {
+        BroadcastRaw("{\"cmd\":\"join_rejected\"" +
+                     ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
+                     ",\"reason\":\""        + EscapeJson(message) + "\"}");
+    }
+
     void HandleJoin(string sessionId, string connId, string name)
     {
         if (string.IsNullOrWhiteSpace(connId) || string.IsNullOrWhiteSpace(name)) return;
@@ -396,6 +412,16 @@ public class PlayerWebSocketServer : MonoBehaviour
             string reason = EscapeJson("Game is in progress. Please wait for the next game.");
             BroadcastRaw("{\"cmd\":\"join_rejected\",\"connectionId\":\"" + EscapeJson(connId) + "\",\"reason\":\"" + reason + "\"}");
             Debug.Log("[PlayerWS] Rejected new join during Playing: " + name);
+            return;
+        }
+
+        // During the countdown the roster is frozen. Players already on the list may
+        // still reconnect (phone refresh / SignalR drop) so they keep their tank, but
+        // nobody new gets in — they would reach StartGame() with no tank assigned.
+        if (CountdownLocked && !alreadyListed)
+        {
+            RejectJoin(connId, "Game is starting — please wait for the next game.");
+            Debug.Log("[PlayerWS] Rejected new join during countdown: " + name);
             return;
         }
 
@@ -571,6 +597,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
         if (alliance != -1 && alliance != 0 && alliance != 1) return;
+        if (CountdownLocked) { Debug.Log("[PlayerWS] squad ignored — countdown running"); return; }
 
         // Update the player's alliance (-1 = unassigned)
         ServiceLocator.Players?.SetAllianceByName(playerName, alliance);
@@ -596,6 +623,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     void HandlePickRobot(string connId, string robotId)
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        if (CountdownLocked) { Debug.Log("[PlayerWS] pick_robot ignored — countdown running"); return; }
 
         var dir = ServiceLocator.RobotDirectory;
         if (dir == null) return;
@@ -630,6 +658,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     void HandleSetTwoPlayer(string connId, bool enabled)
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        if (CountdownLocked) { Debug.Log("[PlayerWS] set_two_player ignored — countdown running"); return; }
         var dir = ServiceLocator.RobotDirectory;
         if (dir == null) return;
 
@@ -646,6 +675,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
         if (string.IsNullOrEmpty(robotId)) return;
+        if (CountdownLocked) { Debug.Log("[PlayerWS] join_as_gunner ignored — countdown running"); return; }
 
         var settings = ServiceLocator.GameSettings;
         if (settings == null || !settings.TwoPlayerModeEnabled)
@@ -707,6 +737,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     void HandleLeaveGunner(string connId)
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        if (CountdownLocked) { Debug.Log("[PlayerWS] leave_gunner ignored — countdown running"); return; }
 
         var dir = ServiceLocator.RobotDirectory;
         if (dir == null) return;
@@ -734,6 +765,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     void HandleSwapRoles(string connId)
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
+        if (CountdownLocked) { Debug.Log("[PlayerWS] swap_roles ignored — countdown running"); return; }
 
         var dir = ServiceLocator.RobotDirectory;
         if (dir == null) return;

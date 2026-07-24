@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 
 public enum GamePhase { MainMenu, Lobby, Playing, Ended }
 
@@ -23,7 +24,28 @@ public sealed class GameFlow
     {
         if (Phase == p) return;
         Phase = p;
-        OnPhaseChanged?.Invoke(Phase);
+        Fire(OnPhaseChanged, Phase, "OnPhaseChanged");
+    }
+
+    /// <summary>
+    /// Invokes each subscriber individually so one throwing handler cannot stop the rest.
+    /// PlayerWebSocketServer subscribes in Start(), i.e. last in the chain, and is what
+    /// sends game_started to the phones and turns the robots on — an exception in any
+    /// earlier subscriber used to leave the match half-started with no way to recover.
+    /// </summary>
+    private static void Fire<T>(Action<T> evt, T arg, string label)
+    {
+        if (evt == null) return;
+        foreach (var d in evt.GetInvocationList())
+        {
+            try { ((Action<T>)d)(arg); }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[GameFlow] {label} subscriber " +
+                               $"{d.Target?.GetType().Name ?? "?"}.{d.Method.Name} threw — continuing.");
+                Debug.LogException(ex);
+            }
+        }
     }
 
     public bool CanGoToLobby()  => Phase == GamePhase.MainMenu || Phase == GamePhase.Ended;
@@ -63,7 +85,7 @@ public sealed class GameFlow
         if (!CanPause()) return;
         IsPaused = true;
         ServiceLocator.MatchTimer?.Pause();
-        OnPausedChanged?.Invoke(true);
+        Fire(OnPausedChanged, true, "OnPausedChanged");
     }
 
     public void ResumeGame()
@@ -71,7 +93,7 @@ public sealed class GameFlow
         if (!CanResume()) return;
         IsPaused = false;
         ServiceLocator.MatchTimer?.Resume();
-        OnPausedChanged?.Invoke(false);
+        Fire(OnPausedChanged, false, "OnPausedChanged");
     }
 
     /// <summary>Called by the operator End Game button or automatically by game logic.</summary>
@@ -83,7 +105,7 @@ public sealed class GameFlow
         if (IsPaused)
         {
             IsPaused = false;
-            OnPausedChanged?.Invoke(false);
+            Fire(OnPausedChanged, false, "OnPausedChanged");
         }
 
         // Stop the timer if still running
