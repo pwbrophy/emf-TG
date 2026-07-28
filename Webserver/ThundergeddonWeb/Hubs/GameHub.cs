@@ -186,6 +186,10 @@ public class GameHub : Hub
                    : "ServerNotReady";
         await Clients.Caller.SendAsync(evt);
 
+        // Push the current debug-console setting so a phone joining after the
+        // operator toggled it still matches everyone else.
+        await Clients.Caller.SendAsync("DebugConsole", _bridge.DebugConsoleEnabled);
+
         // Replay last display state so the display page can resume mid-game on refresh
         if (_bridge.LastDisplayUpdate != null)
             await Clients.Caller.SendAsync("DisplayUpdate", _bridge.LastDisplayUpdate);

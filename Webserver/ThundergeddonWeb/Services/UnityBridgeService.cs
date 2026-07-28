@@ -27,6 +27,7 @@ public class UnityBridgeService : BackgroundService
     private bool   _joinAllowed      = false;
     private string _currentPhase     = "mainmenu";
     private string? _lastDisplayUpdate  = null;
+    private bool   _debugConsoleEnabled = true;
 
     /// <summary>True while the WebSocket connection to Unity's PlayerWebSocketServer is open.</summary>
     public bool IsConnectedToUnity => _connectedToUnity;
@@ -36,6 +37,13 @@ public class UnityBridgeService : BackgroundService
 
     /// <summary>Last display_update JSON received from Unity, or null if none yet received.</summary>
     public string? LastDisplayUpdate => _lastDisplayUpdate;
+
+    /// <summary>
+    /// Whether phones should show their on-screen debug console. Tracked here (rather
+    /// than pushed only on change) so a phone that connects later still gets the
+    /// current value from GameHub.OnConnectedAsync. Defaults to on, matching Unity.
+    /// </summary>
+    public bool DebugConsoleEnabled => _debugConsoleEnabled;
 
     /// <summary>
     /// True when Unity is reachable AND in Lobby (accepting new players).
@@ -287,6 +295,15 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "debug_console":
+                {
+                    _debugConsoleEnabled = doc.RootElement.TryGetProperty("enabled", out var dcEl)
+                        && dcEl.ValueKind == JsonValueKind.True;
+                    await _hub.Clients.All.SendAsync("DebugConsole", _debugConsoleEnabled);
+                    _logger.LogInformation("[Bridge] DebugConsole → {en}", _debugConsoleEnabled);
+                    break;
+                }
+
                 case "game_paused":
                     await _hub.Clients.All.SendAsync("GamePaused");
                     break;
@@ -325,6 +342,12 @@ public class UnityBridgeService : BackgroundService
 
         bool twoPlayerModeEnabled = root.TryGetProperty("twoPlayerModeEnabled", out var tpme)
             && tpme.ValueKind == JsonValueKind.True;
+
+        // robot_list is the first thing Unity sends on bridge connect, so use it to
+        // seed the cached debug-console state. Only the explicit debug_console
+        // message pushes to clients — this just keeps the cache honest.
+        if (root.TryGetProperty("debugConsoleEnabled", out var dce))
+            _debugConsoleEnabled = dce.ValueKind == JsonValueKind.True;
 
         var robots = robotsEl
             .EnumerateArray()

@@ -25,8 +25,8 @@
          overlap the browser's own chrome (e.g. iOS Safari's landscape
          toolbar, which sits over the page rather than resizing it).
          Same value on every platform so control layout stays consistent. */
-      --ctrl-bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 20px));
-      --ctrl-right:  max(10vmax, calc(env(safe-area-inset-right)  + 60px));
+      --ctrl-bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 5.33vmin));
+      --ctrl-right:  max(10vmax, calc(env(safe-area-inset-right)  + 16vmin));
     }
 
     html, body {
@@ -296,20 +296,27 @@
       align-items: center;
       justify-content: center;
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 3.84vmin;
       background: #000;
       pointer-events: none;
     }
 
-    /* ── HP bar — pill-shaped, inset from the top edge, 70% of screen width ── */
+    /* ── HP bar — pill-shaped, inset from the top edge, 70% of screen width ──
+       NOTE: every layout dimension on the playing screen is expressed in vmin/vmax,
+       never px/rem. Safari's per-site page zoom (the aA menu) scales the CSS pixel,
+       so a px-sized HUD balloons when a player zooms — but viewport units are
+       measured against the (also-scaled) viewport, so the layout stays physically
+       identical at any zoom level. Reference viewport is 812x375, i.e. 1vmin =
+       3.75px. Borders stay in px: box-sizing is border-box so they don't affect
+       layout, and hairlines render badly at sub-pixel widths. */
     #hp-bar-wrap {
       position: absolute;
-      top: 12px;
+      top: 3.2vmin;
       left: 50%;
       transform: translateX(-50%);
       width: 70vmax;
-      height: 30px;
-      border-radius: 15px;
+      height: 8vmin;
+      border-radius: 4vmin;
       border: 2px solid rgba(255,255,255,0.9);
       background: rgba(10,10,16,0.65);
       overflow: hidden;
@@ -333,7 +340,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.85rem;
+      font-size: 3.63vmin;
       font-weight: 700;
       color: #fff;
       text-shadow: 0 1px 3px rgba(0,0,0,0.8);
@@ -342,8 +349,8 @@
     /* ── Timer (under the HP bar, right-aligned to its right edge) ── */
     #timer-label {
       position: absolute;
-      top: 50px; right: 15vmax;
-      font-size: 1rem;
+      top: 13.33vmin; right: 15vmax;
+      font-size: 4.27vmin;
       font-weight: 700;
       color: #fff;
       text-shadow: 0 1px 4px rgba(0,0,0,0.9);
@@ -354,8 +361,8 @@
     /* ── Robot callsign (under the HP bar, mirroring the timer on the left) ── */
     #robot-label {
       position: absolute;
-      top: 50px; left: 15vmax;
-      font-size: 0.85rem;
+      top: 13.33vmin; left: 15vmax;
+      font-size: 3.63vmin;
       font-weight: 600;
       color: rgba(255,255,255,0.75);
       text-shadow: 0 1px 4px rgba(0,0,0,0.9);
@@ -365,8 +372,8 @@
     /* ── Role / partner labels ── */
     #role-label {
       position: absolute;
-      top: 50px; left: 10px;
-      font-size: 0.72rem;
+      top: 13.33vmin; left: 2.67vmin;
+      font-size: 3.07vmin;
       font-weight: 700;
       color: rgba(255,200,0,0.9);
       text-shadow: 0 1px 4px rgba(0,0,0,0.9);
@@ -375,8 +382,8 @@
     }
     #partner-label {
       position: absolute;
-      top: 64px; left: 10px;
-      font-size: 0.68rem;
+      top: 17.07vmin; left: 2.67vmin;
+      font-size: 2.9vmin;
       font-weight: 600;
       color: rgba(255,255,255,0.6);
       text-shadow: 0 1px 4px rgba(0,0,0,0.9);
@@ -396,8 +403,8 @@
       position: absolute;
       left: 5vmax;
       bottom: var(--ctrl-bottom);
-      width: 221px;
-      height: 221px;
+      width: 58.93vmin;
+      height: 58.93vmin;
       border-radius: 50%;
       background: rgba(255,255,255,0.12);
       border: 2px solid rgba(255,255,255,0.3);
@@ -406,8 +413,8 @@
     }
     #joystick-thumb {
       position: absolute;
-      width: 44px;
-      height: 44px;
+      width: 11.73vmin;
+      height: 11.73vmin;
       border-radius: 50%;
       background: rgba(255,255,255,0.55);
       top: 50%; left: 50%;
@@ -423,9 +430,9 @@
       position: absolute;
       right: var(--ctrl-right);
       bottom: var(--ctrl-bottom);
-      width: 346px;
-      height: 70px;
-      border-radius: 35px;
+      width: 92.27vmin;
+      height: 18.67vmin;
+      border-radius: 9.33vmin;
       background: linear-gradient(to right,
         rgba(255,255,255,0.22)  0%,    rgba(255,255,255,0.22)  20%,
         rgba(255,255,255,0.11)  20%,   rgba(255,255,255,0.11)  42.5%,
@@ -439,8 +446,8 @@
     }
     #turret-thumb {
       position: absolute;
-      width: 58px;
-      height: 58px;
+      width: 15.47vmin;
+      height: 15.47vmin;
       border-radius: 50%;
       background: #c4c4cc;
       border: 2px solid rgba(0,0,0,0.35);
@@ -457,10 +464,10 @@
     /* ── Fire button ── */
     #fire-btn {
       position: absolute;
-      right: calc(var(--ctrl-right) + 40px);
-      bottom: calc(var(--ctrl-bottom) + 89px);
-      width: 88px;
-      height: 88px;
+      right: calc(var(--ctrl-right) + 10.67vmin);
+      bottom: calc(var(--ctrl-bottom) + 23.73vmin);
+      width: 23.47vmin;
+      height: 23.47vmin;
       border-radius: 50%;
       background: radial-gradient(circle at 38% 38%, #ff6b3d, #cc1100);
       border: 2px solid rgba(255,120,60,0.6);
@@ -477,8 +484,8 @@
     }
     #fire-btn:active       { transform: scale(0.92); }
     #fire-btn.cooldown     { opacity: 0.4; pointer-events: none; }
-    #fire-btn-text         { color: #fff; font-size: 0.75rem; font-weight: 900; letter-spacing: 0.05em; text-align: center; pointer-events: none; }
-    #fire-countdown        { display: none; font-size: 1.1rem; font-weight: 900; }
+    #fire-btn-text         { color: #fff; font-size: 3.2vmin; font-weight: 900; letter-spacing: 0.05em; text-align: center; pointer-events: none; }
+    #fire-countdown        { display: none; font-size: 4.69vmin; font-weight: 900; }
     #fire-countdown.active { display: block; }
     #fire-word             { display: block; }
     #fire-word.hidden      { display: none; }
@@ -488,7 +495,7 @@
       position: absolute;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 100px; height: 100px;
+      width: 26.67vmin; height: 26.67vmin;
       pointer-events: none;
       z-index: 8;
     }
@@ -508,14 +515,14 @@
     }
     #reticle-circle {
       position: absolute;
-      inset: 20px;
+      inset: 5.33vmin;
       border-radius: 50%;
       border: 1.5px solid rgba(255,255,255,0.5);
     }
     #reticle-dot {
       position: absolute;
       top: 50%; left: 50%;
-      width: 5px; height: 5px;
+      width: 1.33vmin; height: 1.33vmin;
       border-radius: 50%;
       background: rgba(255,255,255,0.9);
       transform: translate(-50%, -50%);
@@ -550,15 +557,15 @@
     #fire-toast {
       position: absolute;
       left: 50%;
-      top: 36px;
+      top: 9.6vmin;
       transform: translateX(-50%);
       z-index: 25;
       background: rgba(0,0,0,0.72);
       color: #fff;
-      font-size: 1.25rem;
+      font-size: 5.33vmin;
       font-weight: 700;
-      padding: 10px 22px;
-      border-radius: 24px;
+      padding: 2.67vmin 5.87vmin;
+      border-radius: 6.4vmin;
       pointer-events: none;
       white-space: nowrap;
       opacity: 0;
@@ -961,15 +968,15 @@
     #hit-by-label {
       position: absolute;
       left: 50%;
-      top: 36px;
+      top: 9.6vmin;
       transform: translateX(-50%);
       z-index: 25;
       background: rgba(160,0,0,0.88);
       color: #fff;
-      font-size: 1.1rem;
+      font-size: 4.69vmin;
       font-weight: 700;
-      padding: 9px 20px;
-      border-radius: 24px;
+      padding: 2.4vmin 5.33vmin;
+      border-radius: 6.4vmin;
       border: 1px solid rgba(255,80,60,0.55);
       pointer-events: none;
       white-space: nowrap;
@@ -1187,13 +1194,13 @@
   <div id="partner-label"></div>
 
   <!-- Fullscreen button (hidden automatically once fullscreen is active — see updateFullscreenBtnVisibility) -->
-  <div id="fullscreen-control" style="position:absolute;top:12px;left:2vmax;z-index:15;display:flex;flex-direction:column;align-items:center;gap:4px;">
+  <div id="fullscreen-control" style="position:absolute;top:3.2vmin;left:2vmax;z-index:15;display:flex;flex-direction:column;align-items:center;gap:1.07vmin;">
     <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"
-      style="width:84px;height:84px;display:flex;align-items:center;justify-content:center;
+      style="width:22.4vmin;height:22.4vmin;display:flex;align-items:center;justify-content:center;
              background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);
-             border-radius:18px;color:rgba(255,255,255,0.8);font-size:2.4rem;
+             border-radius:4.8vmin;color:rgba(255,255,255,0.8);font-size:10.24vmin;
              cursor:pointer;line-height:1;">⛶</button>
-    <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.05em;color:rgba(255,255,255,0.7);text-shadow:0 1px 3px rgba(0,0,0,0.8);">FULLSCREEN</div>
+    <div style="font-size:2.77vmin;font-weight:600;letter-spacing:0.05em;color:rgba(255,255,255,0.7);text-shadow:0 1px 3px rgba(0,0,0,0.8);">FULLSCREEN</div>
   </div>
 
   <!-- Controls -->
@@ -1327,7 +1334,13 @@ let currentHp   = 100;
 let joystickActive = false;
 let joyOriginX  = 0, joyOriginY = 0;
 let joyL = 0, joyR = 0;
-const JOY_RADIUS = 88.5; // max thumb travel in px (joystick base radius - thumb radius/2)
+// Max thumb travel in CSS px = (track size - thumb size) / 2. The controls are
+// sized in vmin so their pixel size varies with viewport AND with Safari's page
+// zoom, so these are measured from the live elements rather than hardcoded —
+// see recomputeControlRadii(). Seeded with the 812x375 reference values so the
+// first frame is sane if a drag somehow beats the first measurement.
+let JOY_RADIUS    = 88.5;
+let TURRET_RADIUS = 144;
 const DRIVE_HZ   = 20;  // max sends per second
 let lastDriveSend = 0;
 
@@ -1583,6 +1596,9 @@ function showScreen(id) {
   const inGame = id === 'screen-playing';
   document.body.classList.toggle('game-active', inGame);
   if (!inGame) { try { screen.orientation.unlock(); } catch (_) {} }
+  // Controls are only measurable once the playing screen is visible, and
+  // game-active can rotate the layout, so measure after both have applied.
+  if (inGame) requestAnimationFrame(recomputeControlRadii);
   positionDbgPanel(id);
 }
 
@@ -1696,6 +1712,7 @@ function buildConnection() {
     renderLobby();
   });
   conn.on('TwoPlayerMode', enabled => { twoPlayerMode = !!enabled; dbg('TwoPlayerMode=' + twoPlayerMode); renderLobby(); });
+  conn.on('DebugConsole',  enabled => { setDebugConsoleEnabled(enabled); });
   conn.on('TankColor',       color   => { dbg('SignalR: TankColor ' + color); myTankColor = color || ''; updateTankColorLabel(); });
   conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); hideCountdown(); onGameStarted(data); });
   conn.on('CountdownStarted', total  => { dbg('SignalR: CountdownStarted total=' + total); showCountdown(total); });
@@ -2711,6 +2728,7 @@ const joyThumb = document.getElementById('joystick-thumb');
 joyBase.addEventListener('pointerdown', e => {
   e.preventDefault();
   joyBase.setPointerCapture(e.pointerId);
+  recomputeControlRadii(); // cheap, and self-corrects if a zoom/resize event was missed
   const rect  = joyBase.getBoundingClientRect();
   joyOriginX  = rect.left + rect.width  / 2;
   joyOriginY  = rect.top  + rect.height / 2;
@@ -2775,7 +2793,29 @@ function updateJoy(cx, cy) {
 // ════════════════════════════════════════════════════════
 const turretBase  = document.getElementById('turret-buttons');
 const turretThumb = document.getElementById('turret-thumb');
-const TURRET_RADIUS = 144; // max thumb travel in px (track radius - thumb radius/2)
+
+// Measure both controls' travel radii from their rendered size. Must run whenever
+// the rendered size can change: viewport resize, orientation change, and when the
+// playing screen is first shown (the controls are display:none before that, so
+// they measure 0 — hence the >0 guards, which keep the last good value).
+function recomputeControlRadii() {
+  const prevJoy = JOY_RADIUS, prevTurret = TURRET_RADIUS;
+
+  const jb = joyBase.getBoundingClientRect().width;
+  const jt = joyThumb.getBoundingClientRect().width;
+  if (jb > 0 && jt > 0) JOY_RADIUS = (jb - jt) / 2;
+
+  const tb = turretBase.getBoundingClientRect().width;
+  const tt = turretThumb.getBoundingClientRect().width;
+  if (tb > 0 && tt > 0) TURRET_RADIUS = (tb - tt) / 2;
+
+  // Also runs on every pointerdown, so only log real changes — otherwise this
+  // would flood the debug panel with an identical line per drag.
+  if (Math.abs(JOY_RADIUS - prevJoy) > 0.5 || Math.abs(TURRET_RADIUS - prevTurret) > 0.5)
+    dbg('control radii: joy=' + JOY_RADIUS.toFixed(1) + ' turret=' + TURRET_RADIUS.toFixed(1));
+}
+window.addEventListener('resize', recomputeControlRadii);
+window.addEventListener('orientationchange', recomputeControlRadii);
 
 let turretActive  = false;
 let turretOriginX = 0, turretOriginY = 0;
@@ -2829,6 +2869,7 @@ function releaseTurretSlider() {
 turretBase.addEventListener('pointerdown', e => {
   e.preventDefault();
   turretBase.setPointerCapture(e.pointerId);
+  recomputeControlRadii(); // cheap, and self-corrects if a zoom/resize event was missed
   const rect    = turretBase.getBoundingClientRect();
   turretOriginX = rect.left + rect.width  / 2;
   turretOriginY = rect.top  + rect.height / 2;
@@ -3461,7 +3502,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v26</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v27</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
@@ -3550,7 +3591,27 @@ function positionDbgPanel(screenId) {
   }
 }
 
+// The operator can switch the console off server-side (ServerSettingsPanel in
+// Unity) so it can't get in the way mid-match. Logging continues either way —
+// only the on-screen panel and its DBG button are hidden.
+var _dbgConsoleEnabled = true;
+function setDebugConsoleEnabled(enabled) {
+  _dbgConsoleEnabled = !!enabled;
+  const panel   = document.getElementById('dbg-panel');
+  const showBtn = document.getElementById('dbg-show-btn');
+  dbg('debug console ' + (_dbgConsoleEnabled ? 'enabled' : 'disabled'));
+  if (!panel || !showBtn) return;
+  if (!_dbgConsoleEnabled) {
+    panel.style.display   = 'none';
+    showBtn.style.display = 'none';
+  } else if (panel.style.display === 'none') {
+    // Re-enabled: bring back the DBG button, leave the panel closed.
+    showBtn.style.display = 'block';
+  }
+}
+
 function toggleDbgPanel() {
+  if (!_dbgConsoleEnabled) return;
   const panel  = document.getElementById('dbg-panel');
   const showBtn = document.getElementById('dbg-show-btn');
   if (panel.style.display === 'none') {

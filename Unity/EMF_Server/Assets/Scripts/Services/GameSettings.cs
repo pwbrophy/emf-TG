@@ -106,6 +106,10 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
     public bool TwoPlayerModeEnabled = false;
 
+    [Header("Player Debug Console")]
+    [Tooltip("Show the on-screen debug log (DBG button + panel) on connected phones. Turn off during play so it can't get in the way of the controls.")]
+    public bool DebugConsoleEnabled = true;
+
     [Header("Audio")]
     [Tooltip("When disabled, no buzzer sounds play on any robot.")]
     public bool BuzzerEnabled = true;
@@ -178,6 +182,7 @@ public class GameSettings : MonoBehaviour
                 handshakeWindowTimeoutMs = HandshakeWindowTimeoutMs,
                 buzzerEnabled            = BuzzerEnabled ? 1 : 0,
                 twoPlayerModeEnabled     = TwoPlayerModeEnabled ? 1 : 0,
+                debugConsoleEnabled      = DebugConsoleEnabled ? 1 : 0,
                 slowTurretEnabled        = SlowTurretEnabled ? 1 : 0,
                 videoFps                 = VideoFps,
                 videoFrameSize           = VideoFrameSize,
@@ -224,6 +229,8 @@ public class GameSettings : MonoBehaviour
             if (data.buzzerEnabled >= 0) BuzzerEnabled = data.buzzerEnabled != 0;
             // twoPlayerModeEnabled: -1 = not yet written → keep default false
             if (data.twoPlayerModeEnabled >= 0) TwoPlayerModeEnabled = data.twoPlayerModeEnabled != 0;
+            // debugConsoleEnabled: -1 = not yet written → keep default true
+            if (data.debugConsoleEnabled  >= 0) DebugConsoleEnabled  = data.debugConsoleEnabled  != 0;
             if (data.slowTurretEnabled    >= 0) SlowTurretEnabled    = data.slowTurretEnabled    != 0;
             if (data.videoFps             > 0)  VideoFps             = data.videoFps;
             if (data.videoFrameSize       >= 0) VideoFrameSize       = data.videoFrameSize;
@@ -262,6 +269,7 @@ public class GameSettings : MonoBehaviour
         public float sideMultiplier;
         public int   buzzerEnabled = -1;         // -1 = not set (old save); 0 = off; 1 = on
         public int   twoPlayerModeEnabled = -1;
+        public int   debugConsoleEnabled = -1;   // -1 = not set (old save) → keep default true
         public int   slowTurretEnabled = -1;
         public int   videoFps;                   // 0 = not set → keep default 20
         public int   videoFrameSize = -1;        // -1 = not set → keep default (index 2, HVGA)

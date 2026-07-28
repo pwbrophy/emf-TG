@@ -1903,8 +1903,12 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         var dir = ServiceLocator.RobotDirectory;
         bool twoPlayerMode = ServiceLocator.GameSettings?.TwoPlayerModeEnabled ?? false;
+        bool debugConsole  = ServiceLocator.GameSettings?.DebugConsoleEnabled  ?? true;
         var sb = new StringBuilder("{\"cmd\":\"robot_list\"");
         sb.Append(",\"twoPlayerModeEnabled\":"); sb.Append(twoPlayerMode ? "true" : "false");
+        // Piggy-backed so a freshly-connected bridge learns the setting straight
+        // away (robot_list is sent on every bridge connect) without an extra message.
+        sb.Append(",\"debugConsoleEnabled\":"); sb.Append(debugConsole ? "true" : "false");
         sb.Append(",\"robots\":[");
         bool first = true;
         if (dir != null)
@@ -2038,6 +2042,12 @@ public class PlayerWebSocketServer : MonoBehaviour
         BroadcastRaw("{\"cmd\":\"two_player_mode\",\"enabled\":" + (enabled ? "true" : "false") + "}");
         BroadcastRobotList(); // refresh lobby so phones pick up the new setting
         Debug.Log("[PlayerWS] BroadcastTwoPlayerModeChanged: " + enabled);
+    }
+
+    public void BroadcastDebugConsoleEnabled(bool enabled)
+    {
+        BroadcastRaw("{\"cmd\":\"debug_console\",\"enabled\":" + (enabled ? "true" : "false") + "}");
+        Debug.Log("[PlayerWS] BroadcastDebugConsoleEnabled: " + enabled);
     }
 
     public void BroadcastTurretSettings()
