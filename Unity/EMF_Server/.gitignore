@@ -12,6 +12,7 @@ Recordings/
 # â”€â”€ Unity auto-generated VS solution / project files â”€â”€â”€â”€
 *.csproj
 *.sln
+*.slnx
 *.suo
 *.tmp
 *.user

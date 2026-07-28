@@ -20,6 +20,7 @@ Reference_Code/
 __pycache__/
 *.pyc
 **/Assets/_Recovery/
+**/Assets/_Recovery.meta
 
 # ── Unity generated (never commit) ───────────────────────
 **/Library/
