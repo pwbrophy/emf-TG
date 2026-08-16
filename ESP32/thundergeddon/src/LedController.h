@@ -448,7 +448,11 @@ private:
     // Draw the HP bar with proportional brightness.
     // LED 5 (front) is the last to dim; LED 0 (back) dims first.
     // Full LEDs are bright blue; the transition LED uses partial brightness.
-    // When in the last LED's territory, _pulseOn gates the whole display.
+    // Once HP drops into the last LED's territory (<=1/6 remaining), that LED
+    // pulses fully on/off (0%-100% of DIM_BRIGHTNESS) instead of fading with
+    // the exact remaining fraction — fading here made the "on" phase get
+    // dimmer as HP approached 0, until it was indistinguishable from "off"
+    // and the whole strip looked dead well before HP actually hit 0.
     void _drawHpBar()
     {
         _strip.clear();
@@ -456,11 +460,14 @@ private:
             float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
             if (ledsF > (float)LED_STRIP_COUNT) ledsF = (float)LED_STRIP_COUNT;
 
-            int fullLeds = (int)ledsF;
-            uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * (float)DIM_BRIGHTNESS);
-
             bool warning = (ledsF <= 1.0f);
-            if (!warning || _pulseOn) {
+            if (warning) {
+                if (_pulseOn)
+                    _strip.setPixelColor(LED_STRIP_COUNT - 1, _strip.Color(0, 0, DIM_BRIGHTNESS));
+            } else {
+                int fullLeds = (int)ledsF;
+                uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * (float)DIM_BRIGHTNESS);
+
                 // Full LEDs at the front (high indices: 5, 4, ... down)
                 int firstFull = LED_STRIP_COUNT - fullLeds;
                 for (int i = firstFull; i < LED_STRIP_COUNT; i++)
