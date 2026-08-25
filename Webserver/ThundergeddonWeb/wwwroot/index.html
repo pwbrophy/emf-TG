@@ -1095,7 +1095,6 @@
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="20" autocomplete="off" spellcheck="false" />
     <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
-    <button class="btn-secondary" onclick="visitThundergeddon()">VISIT THUNDERGEDDON.COM</button>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -1287,7 +1286,7 @@
     <div class="go-stat-sub"><span class="go-stat-label">from kills</span><span class="go-stat-value" id="stat-vp-kills">&#8212;</span></div>
     <div class="go-stat-row"><span class="go-stat-label">Your nemesis</span><span class="go-stat-value go-nemesis" id="stat-nemesis">&#8212;</span></div>
     <div class="go-btn-row">
-      <button class="go-btn-primary" onclick="continueToSite()">CONTINUE</button>
+      <button class="go-btn-primary" onclick="returnToJoin()">CONTINUE</button>
     </div>
   </div>
 
@@ -2385,9 +2384,6 @@ function goToStats() {
   }, 700);
 }
 
-function visitThundergeddon() {
-  window.location.href = 'https://www.thundergeddon.com/';
-}
 
 function resetGoOverlay() {
   stopGoFireworks();
@@ -2406,10 +2402,6 @@ function resetGoOverlay() {
     blackout.style.transition = '';
   }
   _pendingStats = null;
-}
-
-function continueToSite() {
-  window.location.href = 'https://www.thundergeddon.com/';
 }
 
 // ── Fireworks engine ─────────────────────────────────────────────────────────
