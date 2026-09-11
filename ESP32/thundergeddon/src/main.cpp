@@ -1306,7 +1306,10 @@ static void connectWebSocket()
                            ",\"inv_turret\":"    + String(g_inv_turret) +
                            ",\"fps\":"           + String(g_videoFps) +
                            ",\"fsize\":"         + String(g_videoFrameSizeIdx) +
-                           ",\"fquality\":"      + String(g_videoQuality) + "}";
+                           ",\"fquality\":"      + String(g_videoQuality) +
+                           ",\"rfid\":"          + String(rfid.ok() ? 1 : 0) +
+                           ",\"rfid_recoveries\":" + String((unsigned)rfid.recoveries()) + "}";
+            rfid.takeStatusChanged(); // hello already carries the current RFID state
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
             leds.setBootPhase(BootPhase::ServerDone);
@@ -1534,6 +1537,16 @@ void loop()
         if (uid.length() > 0 && g_wsOpen)
         {
             String msg = String("{\"cmd\":\"rfid\",\"uid\":\"") + uid + "\"}";
+            ws.send(msg);
+        }
+
+        // Reader lost or re-initialised — report it so it shows up in the Unity log.
+        // Only consumed while connected; after a reconnect, hello carries the state.
+        if (g_wsOpen && rfid.takeStatusChanged())
+        {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "{\"cmd\":\"rfid_status\",\"ok\":%d,\"recoveries\":%u}",
+                     rfid.ok() ? 1 : 0, (unsigned)rfid.recoveries());
             ws.send(msg);
         }
     }
