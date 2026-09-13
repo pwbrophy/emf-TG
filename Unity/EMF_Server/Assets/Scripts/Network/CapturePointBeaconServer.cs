@@ -148,12 +148,14 @@ public class CapturePointBeaconServer : MonoBehaviour
     // ===== Game event handlers =====
 
     // Alliance 0 = Desert Squad (orange), 1 = Jungle Squad (green), -1 = neutral/off.
+    // Both at 50% of the originally tuned (255,110,0) / (30,160,15) to save beacon
+    // battery — the strip is the beacon's biggest load while a point is held.
     private static void AllianceColor(int allianceIndex, out byte r, out byte g, out byte b)
     {
         switch (allianceIndex)
         {
-            case 0:  r = 255; g = 110; b = 0;   break; // Desert — deeper orange, less yellow
-            case 1:  r = 30;  g = 160; b = 15;  break; // Jungle — green, blue nearly zeroed (WS2812 blue reads strong even at low values)
+            case 0:  r = 128; g = 55;  b = 0;   break; // Desert — deeper orange, less yellow
+            case 1:  r = 15;  g = 80;  b = 8;   break; // Jungle — green, blue nearly zeroed (WS2812 blue reads strong even at low values)
             default: r = 0;   g = 0;   b = 0;   break; // neutral -> unlit
         }
     }
