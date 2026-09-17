@@ -358,6 +358,17 @@ public class RobotWebSocketServer : MonoBehaviour
 
             if (VerboseJoins) Debug.Log("[WS] Robot hello: " + id);
 
+            // RFID reader health — logged even with VerboseJoins off so a dead reader is
+            // visible. Older firmware doesn't send the field; stay quiet for those robots.
+            if (json.Contains("\"rfid\":"))
+            {
+                int rfidRecoveries = ExtractInt(json, "rfid_recoveries");
+                if (ExtractInt(json, "rfid") == 0)
+                    Debug.LogWarning($"[RFID] {RobotLabel(id)}: reader not responding");
+                else if (rfidRecoveries > 0)
+                    Debug.LogWarning($"[RFID] {RobotLabel(id)}: reader has recovered {rfidRecoveries}x since boot");
+            }
+
             // Mid-game reconnect: restore robot state and notify phone player.
             if (_flow?.Phase == GamePhase.Playing)
             {
@@ -446,6 +457,34 @@ public class RobotWebSocketServer : MonoBehaviour
             OnRfidTag?.Invoke(robotId, uid);
             return;
         }
+
+        // Firmware self-heal report: the RFID reader stopped answering, or was
+        // re-initialised after a chip reset (power dip / RST glitch). Logged as warnings
+        // so they stand out — repeated recoveries on one tank point at its wiring.
+        if (cmd == "rfid_status")
+        {
+            if (!_bySession.TryGetValue(sid, out var info)) return;
+            string robotId = info.RobotId;
+            if (string.IsNullOrEmpty(robotId)) return;
+            bool ok        = ExtractInt(json, "ok") != 0;
+            int recoveries = ExtractInt(json, "recoveries");
+            if (!ok)
+                Debug.LogWarning($"[RFID] {RobotLabel(robotId)}: reader stopped responding");
+            else if (recoveries > 0)
+                Debug.LogWarning($"[RFID] {RobotLabel(robotId)}: reader re-initialised (recovery #{recoveries} since boot)");
+            else
+                Debug.Log($"[RFID] {RobotLabel(robotId)}: reader came up after boot");
+            return;
+        }
+    }
+
+    // "Desert-03 (78F218697090)" when the robot has a callsign, otherwise just the id.
+    string RobotLabel(string robotId)
+    {
+        if (_dir != null && _dir.TryGet(robotId, out var r) &&
+            !string.IsNullOrEmpty(r.Callsign) && r.Callsign != robotId)
+            return $"{r.Callsign} ({robotId})";
+        return robotId;
     }
 
     public void HandleBinary(string sid, byte[] data)

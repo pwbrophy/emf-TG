@@ -6,6 +6,12 @@
 // poll() returns a text label read from NTAG user data ("north", "centre", "south"),
 // or an 8-char uppercase hex UID as fallback.
 //
+// Self-healing: every 2 s poll() checks the reader still answers and still holds
+// our register setup.  A power dip or RST glitch resets the MFRC522 to its defaults
+// (antenna drivers off), after which it silently never sees a tag again — before
+// this check only a reboot recovered it.  It is now re-initialised as soon as it
+// answers again, and takeStatusChanged() lets main.cpp report that to the server.
+//
 // NTAG213 (the common white NFC sticker) has a 7-byte UID and needs two cascade
 // levels of anti-collision + SELECT before a READ command will work.
 //
@@ -20,7 +26,7 @@
 class RfidController
 {
     // ---- MFRC522 register addresses ----
-    static constexpr uint8_t R_Command    = 0x01;
+    static constexpr uint8_t R_Command    = 0x01;  // bit5 = RcvOff, bit4 = PowerDown
     static constexpr uint8_t R_ComIrq     = 0x04;
     static constexpr uint8_t R_Error      = 0x06;
     static constexpr uint8_t R_FIFOData   = 0x09;
@@ -54,32 +60,26 @@ class RfidController
 
     static constexpr uint8_t ADDR = 0x28; // AD0-AD2 = GND
 
+    static constexpr uint32_t HEALTH_CHECK_MS = 2000;
+
 public:
+    // Returns false if the reader isn't answering yet.  poll() keeps retrying, so a
+    // reader that was loose at boot still comes up once it responds.
     bool begin()
     {
         uint8_t ver = rd(R_Version);
         if (ver == 0x00 || ver == 0xFF)
         {
-            Serial.printf("[RFID] Not found (ver=0x%02X) — skipping\n", ver);
+            Serial.printf("[RFID] Not found (ver=0x%02X) — will keep retrying\n", ver);
             return false;
         }
         Serial.printf("[RFID] MFRC522 detected (ver=0x%02X)\n", ver);
 
         wr(R_Command, CMD_SoftReset);
         delay(50);
+        configure();
 
-        wr(R_TMode,      0x8D);
-        wr(R_TPrescaler, 0x3E);
-        wr(R_TReloadH,   0x00);
-        wr(R_TReloadL,   0x19); // ~25 ms timeout
-
-        wr(R_TxASK, 0x40); // 100% ASK modulation
-        wr(R_Mode,  0x3D); // CRC preset 0x6363
-
-        uint8_t tx = rd(R_TxControl);
-        if (!(tx & 0x03)) wr(R_TxControl, tx | 0x03);
-
-        _ok = true;
+        _ok = _everOk = true;
         return true;
     }
 
@@ -87,6 +87,13 @@ public:
     // data, or an 8-char uppercase hex UID as fallback.  Returns "" if no new card.
     String poll(uint32_t now)
     {
+        if (now - _lastHealthCheck >= HEALTH_CHECK_MS)
+        {
+            _lastHealthCheck = now;
+            checkHealth();
+            return ""; // spread the I2C work — tag scanning resumes next loop
+        }
+
         if (!_ok) return "";
         if (now - _lastPoll < 200) return ""; // max 5 Hz
         _lastPoll = now;
@@ -132,12 +139,91 @@ public:
         return key;
     }
 
+    bool     ok()         const { return _ok; }
+    uint16_t recoveries() const { return _recoveries; } // re-inits after a reset, since boot
+
+    // True once each time the reader is lost, recovers, or first appears after boot.
+    bool takeStatusChanged()
+    {
+        bool changed = _statusChanged;
+        _statusChanged = false;
+        return changed;
+    }
+
 private:
-    bool     _ok           = false;
+    bool     _ok              = false;
+    bool     _everOk          = false; // initialised at least once, so later inits are recoveries
+    bool     _statusChanged   = false;
+    uint16_t _recoveries      = 0;
+    uint32_t _lastHealthCheck = 0;
     uint32_t _lastPoll     = 0;
     String   _lastUid;
     String   _lastUidHex;  // raw CL1 hex — used to gate tryReadLabel() independently of _lastUid
     uint8_t  _reqaFailCount = 0; // consecutive REQA failures; card gone after 5 (~1 s)
+
+    // ---- Setup + health check ----
+
+    // Register setup shared by begin() and recovery.  Safe to repeat.
+    void configure()
+    {
+        wr(R_Command,    CMD_Idle); // also clears PowerDown / RcvOff
+        wr(R_TMode,      0x8D);
+        wr(R_TPrescaler, 0x3E);
+        wr(R_TReloadH,   0x00);
+        wr(R_TReloadL,   0x19); // ~25 ms timeout
+
+        wr(R_TxASK, 0x40); // 100% ASK modulation
+        wr(R_Mode,  0x3D); // CRC preset 0x6363
+
+        setBits(R_TxControl, 0x03); // antenna drivers on — any chip reset turns them off
+    }
+
+    // A chip reset returns TReloadL to 0x00, turns the antenna drivers off and sets
+    // RcvOff; a corrupted CommandReg write can set PowerDown.  Any of these leaves
+    // the reader deaf to tags while it still answers on I2C.
+    bool isConfigured()
+    {
+        return rd(R_TReloadL) == 0x19 &&
+               (rd(R_TxControl) & 0x03) == 0x03 &&
+               (rd(R_Command) & 0x30) == 0;
+    }
+
+    void checkHealth()
+    {
+        uint8_t ver = rd(R_Version);
+        if (ver == 0x00 || ver == 0xFF) ver = rd(R_Version); // one retry — don't trip on a single NACK
+        if (ver == 0x00 || ver == 0xFF)
+        {
+            markLost("Reader stopped responding");
+            return;
+        }
+
+        if (_ok && isConfigured()) return; // healthy — the usual case
+
+        configure();
+        if (!isConfigured())
+        {
+            markLost("Reader not accepting setup");
+            return;
+        }
+
+        if (_everOk) _recoveries++;
+        Serial.printf("[RFID] %s (ver=0x%02X, recoveries=%u)\n",
+                      _everOk ? "Reader re-initialised" : "MFRC522 detected late", ver, _recoveries);
+        _ok = _everOk = true;
+        _statusChanged = true;
+
+        // Forget the last tag so one we're already parked on gets reported again.
+        _lastUid = ""; _lastUidHex = ""; _reqaFailCount = 0;
+    }
+
+    void markLost(const char* why)
+    {
+        if (!_ok) return; // already reported
+        _ok = false;
+        _statusChanged = true;
+        Serial.printf("[RFID] %s\n", why);
+    }
 
     // ---- I2C register helpers ----
 

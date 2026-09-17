@@ -295,11 +295,13 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 
 | Message | Fields | Meaning |
 |---------|--------|---------|
-| `hello` | `id`, `tok`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret` | Robot registers itself. `tok` is `WS_HELLO_TOKEN` from `secrets.h` — Unity rejects the hello if it doesn't match `ws_token.txt` (auth gate for the open port 8080; disabled if the file is absent). `name` is the human-readable name saved in NVS (empty string if never set). |
+| `hello` | `id`, `tok`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret`, `fps`, `fsize`, `fquality`, `rfid`, `rfid_recoveries` | Robot registers itself. `tok` is `WS_HELLO_TOKEN` from `secrets.h` — Unity rejects the hello if it doesn't match `ws_token.txt` (auth gate for the open port 8080; disabled if the file is absent). `name` is the human-readable name saved in NVS (empty string if never set). `rfid` is 1/0 (RFID reader answering); `rfid_recoveries` counts reader re-inits since boot — Unity logs an `[RFID]` warning if the reader is down or has recovered. |
 | `hb` | `t`, `heap` | Heartbeat (millis timestamp + free heap bytes, for monitoring robot memory health over long sessions) |
 | `pong` | — | Reply to `ping`; used by `RobotPingButton` to display RTT |
 | `ir_emit_ack` | — | Shooter acknowledges `ir_emit_left` or `ir_emit_right` |
 | `ir_window_result` | `mask` (uint8) | 8-bit bitmask of triggered IR receivers: bit 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW |
+| `rfid` | `uid` | Tag scanned: 8-char CL1 hex UID (or a text label if the tag carries one). Sent once per tag until it has been out of range ~1 s. Matched against the UID lists in `GameSettings`. |
+| `rfid_status` | `ok` (1/0), `recoveries` | RFID reader lost, re-initialised after a chip reset, or first found after boot. `RfidController` checks the reader every 2 s and re-applies its setup if a power dip / RST glitch reset it — before this, only a reboot recovered it. Unity logs these as `[RFID]` warnings. |
 
 **Directional damage:** `IrSlotScheduler.ResolveAveragedCardinal` vector-averages the `mask` bits to one of N/W/S/E. `"S"` = rear hit → `RearMultiplier` (default 3×). All other directions → 1×. A hit requires both b1 (left LED) and b2 (right LED) masks to be non-zero for the same enemy.
 
