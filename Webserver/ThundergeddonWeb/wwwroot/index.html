@@ -1101,7 +1101,7 @@
   <p class="subtitle">RC tank battle</p>
   <div class="join-box">
     <input id="name-input" type="text" placeholder="Enter your name"
-           maxlength="20" autocomplete="off" spellcheck="false" />
+           maxlength="12" autocomplete="off" spellcheck="false" />
     <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
     <div id="join-status" class="status"></div>
   </div>
@@ -1317,6 +1317,10 @@ const IS_FIREFOX = /Firefox/.test(navigator.userAgent);
 // ════════════════════════════════════════════════════════
 // State
 // ════════════════════════════════════════════════════════
+// Keep in sync with GameHub.MaxNameLength — short names keep the lobby and
+// display readable and stop long ones being cut off in the robot rows.
+const MAX_NAME_LEN = 12;
+
 let myName      = '';
 let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
 let myRobotId   = '';
@@ -1820,8 +1824,11 @@ function buildConnection() {
 // ════════════════════════════════════════════════════════
 async function joinLobby() {
   const input = document.getElementById('name-input');
-  const name  = input.value.trim();
+  // Cap before sending: the server enforces MAX_NAME_LEN too, and myName must
+  // match the name the server stores or role checks (iAmDriver/iAmGunner) fail.
+  const name  = input.value.trim().slice(0, MAX_NAME_LEN);
   if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
+  if (input.value.trim().length > MAX_NAME_LEN) input.value = name;
 
   dbg('joinLobby: name="' + name + '"');
 
@@ -3492,15 +3499,17 @@ startServerPoll();
 (function () {
   const input = document.getElementById('name-input');
   try {
+    // Setting .value programmatically bypasses maxlength, so truncate here —
+    // a name saved before the 12-char cap would otherwise be sent over-length.
     const saved = localStorage.getItem('tg_player_name');
-    if (saved) input.value = saved;
+    if (saved) input.value = saved.slice(0, MAX_NAME_LEN);
     input.addEventListener('input', () => {
       try { localStorage.setItem('tg_player_name', input.value); } catch (_) {}
     });
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v28</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v29</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
