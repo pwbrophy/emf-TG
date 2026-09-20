@@ -197,15 +197,23 @@
     .robot-row {
       display: flex;
       align-items: center;
-      padding: 10px 14px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--border);
       gap: 10px;
     }
     .robot-row:last-child { border-bottom: none; }
-    .robot-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .robot-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
     .robot-name { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .robot-player-assigned { font-size: 0.72em; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .robot-actions { flex-shrink: 0; }
+    .robot-player-assigned {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #fff;
+      margin-top: 3px;
+      line-height: 1.25;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .robot-actions { flex-shrink: 0; max-width: 38%; }
     .role-btn {
       padding: 7px 12px;
       border: none;
@@ -3492,7 +3500,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v27</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v28</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
