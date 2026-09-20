@@ -177,18 +177,22 @@
       margin-bottom: 0;
     }
 
-    .player-row {
+    /* Unassigned players carry no controls, just a name, so pack them onto
+       wrapped lines separated by | rather than giving each its own ~40px row —
+       a full lobby of them pushed the squad lists off the bottom of the screen.
+       Each name keeps its trailing separator inside one flex item, so the | can
+       never start a line and names never break mid-word. */
+    #lobby-unassigned.inline-names {
       display: flex;
-      align-items: center;
       flex-wrap: wrap;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
-      font-size: 0.95rem;
+      align-items: baseline;
+      padding: 9px 14px;
+      font-size: 0.9rem;
+      line-height: 1.5;
       text-align: left;
     }
-    .player-row:last-child { border-bottom: none; }
-    .player-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 10px; flex-shrink: 0; }
-    .player-info { display: flex; flex-direction: column; }
+    #lobby-unassigned.inline-names .un-item { white-space: nowrap; }
+    #lobby-unassigned.inline-names .un-sep  { color: var(--muted); padding: 0 7px; }
     .player-name-self { font-weight: 700; color: var(--accent2); }
     .player-robot { font-size: 0.75em; color: var(--muted); margin-top: 2px; }
     .empty-state { padding: 14px; color: var(--muted); font-size: 0.85rem; text-align: center; }
@@ -1960,18 +1964,22 @@ function renderLobby() {
   });
 
   const unEl = document.getElementById('lobby-unassigned');
-  if (unEl) unEl.innerHTML = unassigned.length
-    ? unassigned.map(p => {
+  if (unEl) {
+    if (unassigned.length) {
+      unEl.classList.add('inline-names');
+      const last = unassigned.length - 1;
+      unEl.innerHTML = unassigned.map((p, i) => {
         const name   = typeof p === 'string' ? p : (p.name ?? '');
         const isSelf = name === myName;
-        return `<div class="player-row">
-          <div class="player-dot"></div>
-          <div class="player-info">
-            <span class="${isSelf ? 'player-name-self' : ''}">${escHtml(name)}${isSelf ? ' (you)' : ''}</span>
-          </div>
-        </div>`;
-      }).join('')
-    : '<div class="empty-state">–</div>';
+        const sep    = i < last ? '<span class="un-sep">|</span>' : '';
+        return `<span class="un-item"><span class="${isSelf ? 'player-name-self' : ''}">`
+             + `${escHtml(name)}${isSelf ? ' (you)' : ''}</span>${sep}</span>`;
+      }).join('');
+    } else {
+      unEl.classList.remove('inline-names');
+      unEl.innerHTML = '<div class="empty-state">–</div>';
+    }
+  }
 
   // Robots by squad
   const desertRobots = robotList.filter(r => r.alliance === 0);
@@ -3509,7 +3517,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v29</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v30</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
