@@ -138,6 +138,10 @@
   .lobby-team-title.a0 { color: var(--blue); }
   .lobby-team-title.a1 { color: var(--red); }
   .lobby-player-name { font-size: 5.8vmin; padding: 0.35vmin 0; line-height: 1.15; }
+  /* A two-player crew is one line, up to "Name1 & Name2" = 27 chars. Step the
+     size down so both squad columns still fit across a 16:9 display. */
+  .lobby-player-name.crew { font-size: 4.8vmin; white-space: nowrap; }
+  .lobby-player-name.crew .amp { color: var(--dim); font-weight: 400; padding: 0 0.8vmin; }
   #lobby-unassigned-section { text-align: center; }
   #lobby-unassigned-title { font-size: 4.8vmin; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.03em; margin-bottom: 1.2vmin; color: var(--dim); }
@@ -357,7 +361,7 @@
 </head>
 <body>
 
-<div id="version">display v10</div>
+<div id="version">display v11</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
@@ -1577,19 +1581,75 @@ function renderLobbyOverlay() {
   document.getElementById('lobby-unassigned-section').style.display =
     unassigned.length ? '' : 'none';
 
-  unassigned.forEach(p => {
-    const div = document.createElement('div');
-    div.className = 'lobby-player-name';
-    div.textContent = p.name || '?';
-    unEl.appendChild(div);
+  renderLobbyNames(unEl, unassigned);
+  renderLobbyNames(t0, players.filter(p => p.alliance === 0));
+  renderLobbyNames(t1, players.filter(p => p.alliance === 1));
+  fitLobbyCrewLines();
+}
+
+// Crew lines are nowrap and can be up to "Name1 & Name2" = 27 characters, which
+// at the base size overflows the squad columns on a narrow display (or with wide
+// all-caps names). Shrink them — and only them — until the row fits. No-op when
+// the names are short, which is the normal case.
+function fitLobbyCrewLines() {
+  const row = document.getElementById('lobby-alliances');
+  if (!row) return;
+
+  const crews = row.querySelectorAll('.lobby-player-name.crew');
+  crews.forEach(e => { e.style.fontSize = ''; });
+  if (!crews.length) return;
+
+  const vmin  = Math.min(window.innerWidth, window.innerHeight) / 100;
+  const avail = document.documentElement.clientWidth - (6 * vmin); // overlay side padding
+
+  let size = 4.8;
+  while (row.getBoundingClientRect().width > avail && size > 2.4) {
+    size -= 0.2;
+    crews.forEach(e => { e.style.fontSize = size.toFixed(1) + 'vmin'; });
+  }
+}
+
+// Two players sharing a tank get one line, "Driver & Gunner", instead of two
+// separate entries. Pairing is only collapsed when both crew members are in the
+// same list, so a crew split across squads still shows under each squad.
+function buildCrewLabels(list) {
+  const byName  = new Map(list.map(p => [p.name, p]));
+  const seen    = new Set();
+  const entries = [];
+
+  list.forEach(p => {
+    const name = p.name || '?';
+    if (seen.has(name)) return;
+    seen.add(name);
+
+    const mate = p.partner && byName.has(p.partner) ? byName.get(p.partner) : null;
+    if (!mate) { entries.push({ crew: false, names: [name] }); return; }
+
+    seen.add(mate.name);
+    const driver = p.role === 'gunner' ? mate : p;
+    const gunner = p.role === 'gunner' ? p    : mate;
+    entries.push({ crew: true, names: [driver.name || '?', gunner.name || '?'] });
   });
 
-  players.forEach(p => {
-    if (p.alliance !== 0 && p.alliance !== 1) return;
+  return entries;
+}
+
+function renderLobbyNames(container, list) {
+  buildCrewLabels(list).forEach(e => {
     const div = document.createElement('div');
-    div.className = 'lobby-player-name';
-    div.textContent = p.name || '?';
-    (p.alliance === 0 ? t0 : t1).appendChild(div);
+    div.className = 'lobby-player-name' + (e.crew ? ' crew' : '');
+    if (!e.crew) {
+      div.textContent = e.names[0];      // textContent — names are untrusted
+    } else {
+      // Built from text nodes so names are never parsed as markup.
+      div.appendChild(document.createTextNode(e.names[0]));
+      const amp = document.createElement('span');
+      amp.className = 'amp';
+      amp.textContent = '&';
+      div.appendChild(amp);
+      div.appendChild(document.createTextNode(e.names[1]));
+    }
+    container.appendChild(div);
   });
 }
 

@@ -12,7 +12,9 @@ public class GameHub : Hub
     // callers. Names are length/character capped, and each connection gets a simple
     // per-second message budget. Legit peak is ~25 msg/s (20 Hz drive + turret + fire);
     // 60 leaves headroom while stopping floods from reaching Unity.
-    private const int MaxNameLength    = 20;
+    // 12 keeps names readable in the phone lobby rows and on the big display,
+    // where longer ones were being truncated. Mirrored by MAX_NAME_LEN in index.html.
+    private const int MaxNameLength    = 12;
     private const int MaxMsgsPerSecond = 60;
 
     // Static: hubs are transient per-invocation. Keyed by connectionId, cleaned on disconnect.
@@ -53,6 +55,18 @@ public class GameHub : Hub
     {
         if (!AllowMessage()) return false;
         name = (name ?? "").Trim();
+
+        // A phone running a cached copy of the page from before the cap will still
+        // send up to its old 20-char limit. Tell it why rather than failing silently:
+        // truncating here instead would leave the phone's own myName out of sync with
+        // the roster, so it would no longer recognise itself as driver or gunner.
+        if (name.Length > MaxNameLength)
+        {
+            await Clients.Caller.SendAsync("JoinRejected",
+                $"Names must be {MaxNameLength} characters or fewer.");
+            return false;
+        }
+
         if (!IsValidName(name)) return false;
 
         if (!_bridge.IsConnectedToUnity)

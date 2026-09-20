@@ -1973,8 +1973,27 @@ public class PlayerWebSocketServer : MonoBehaviour
         sb.Append(",\"allianceNames\":[\""); sb.Append(EscapeJson(AllianceName(0)));
         sb.Append("\",\"");                  sb.Append(EscapeJson(AllianceName(1))); sb.Append("\"]");
 
+        // Two-player crews, so the display can list a tank's pair on one line.
+        // RobotDirectory carries the live assignment in every phase, unlike the
+        // robots array below which is only populated during a match.
+        var partnerOf = new Dictionary<string, string>();
+        var roleOf    = new Dictionary<string, string>();
+        if (dir != null)
+        {
+            foreach (var robot in dir.GetAll())
+            {
+                if (!robot.TwoPlayerEnabled) continue;
+                string drv = robot.AssignedPlayer ?? "";
+                string gun = robot.GunnerPlayer   ?? "";
+                if (string.IsNullOrEmpty(drv) || string.IsNullOrEmpty(gun)) continue;
+                partnerOf[drv] = gun; roleOf[drv] = "driver";
+                partnerOf[gun] = drv; roleOf[gun] = "gunner";
+            }
+        }
+
         // Players array (name + alliance; -1 = unassigned) — used by the display's
         // lobby view to list squads and unassigned players before a match starts.
+        // role/partner are empty for solo players.
         sb.Append(",\"players\":[");
         if (players != null)
         {
@@ -1983,8 +2002,15 @@ public class PlayerWebSocketServer : MonoBehaviour
             {
                 if (!firstP) sb.Append(",");
                 firstP = false;
-                sb.Append("{\"name\":\""); sb.Append(EscapeJson(p.Name)); sb.Append("\"");
+                string pName = p.Name ?? "";
+                sb.Append("{\"name\":\""); sb.Append(EscapeJson(pName)); sb.Append("\"");
                 sb.Append(",\"alliance\":"); sb.Append(p.AllianceIndex);
+                sb.Append(",\"role\":\"");
+                sb.Append(roleOf.TryGetValue(pName, out string pRole) ? pRole : "");
+                sb.Append("\"");
+                sb.Append(",\"partner\":\"");
+                sb.Append(EscapeJson(partnerOf.TryGetValue(pName, out string pPartner) ? pPartner : ""));
+                sb.Append("\"");
                 sb.Append("}");
             }
         }
