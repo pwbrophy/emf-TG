@@ -886,12 +886,14 @@
       opacity: 0;
       /* Fallback only — overwritten by JS (computeBeamGlowFilter, called from
          updateFireEffectBounds) with radii scaled to BEAM_GLOW_FALLOFF_FRAC
-         of the video's actual rendered width once bounds are known. */
+         of the video's actual rendered width once bounds are known. Kept to
+         two layers with a modest max radius: this whole chain is re-rasterised
+         every video frame while the beam sweeps (the child's mask changes each
+         tick), and a big multi-layer Gaussian blur there is what stutters
+         lower-power phones on fire. */
       filter:
-        drop-shadow(0 0 14px #fff)
-        drop-shadow(0 0 34px #fff)
-        drop-shadow(0 0 65px rgba(255,255,255,0.9))
-        drop-shadow(0 0 120px rgba(255,255,255,0.7));
+        drop-shadow(0 0 10px #fff)
+        drop-shadow(0 0 26px rgba(255,255,255,0.72));
     }
     #fire-beam-shape {
       position: absolute;
@@ -2995,11 +2997,26 @@ const BEAM_BAND_H_START  = 14;   // % — traveling band's height when it starts
 const BEAM_BAND_H_END    = 2;    // % — band's height once it reaches the reticule (far, so "short")
 const BEAM_FEATHER_FRAC  = 0.4;  // 40% of the band's current height, feathered at both edges (motion blur)
 const BEAM_GLOW_FALLOFF_FRAC = 0.10; // glow fades to ~0 by this fraction of the video's rendered width
+const BEAM_GLOW_MAX_PX   = 44;  // hard cap on the glow's outer blur radius. Uncapped this is
+                                 // widthPx*BEAM_GLOW_FALLOFF_FRAC ≈ 80–120px on a fullscreen phone,
+                                 // and a multi-layer Gaussian blur that big, re-rasterised every
+                                 // frame the beam sweeps, is what stutters weaker phones on fire.
+const BEAM_GLOW_MAX_PX_LOWFX = 20; // tighter cap once the adaptive low-FX path latches (see _lowFx)
 const MJPEG_FRAME_MS  = 50;  // MjpegServer.h default cap: 20 fps
+const BEAM_TICK_JANK_MS = 90; // a frame-tick gap longer than this while the beam is live counts as
+                               // a jank strike; two strikes in one shot latch _lowFx for the session
 let _fireFlashActive     = false;
 let _fireBeamActive      = false;
 let _fireStartTime       = 0;  // shared: flash + beam are always triggered together
 let _fireTimerId         = null; // native <img> MJPEG path only
+// Adaptive low-FX: cheaper beam glow for phones that visibly stutter on it.
+// Latches for the session on observed jank (see noteFireTickTiming), or up
+// front via a manual localStorage override. Not persisted on auto-detect so a
+// one-off GC pause on a good phone doesn't permanently degrade the effect.
+let _lowFx = false;
+try { _lowFx = localStorage.getItem('tg_lowfx') === '1'; } catch (e) {}
+let _lastFireTickAt   = 0;
+let _fireJankStrikes  = 0;
 
 // Static barrel→reticule trapezoid outline (X taper), computed once from the
 // BEAM_* constants — the apex/base positions never change, so this doesn't
@@ -3018,18 +3035,18 @@ const BEAM_CLIP_PATH = (() => {
 // BEAM_GLOW_FALLOFF_FRAC of the video's actual rendered width (in px, not a
 // fixed value — a phone's fullscreen video and a much narrower one need
 // visibly different blur radii to both read as "glow reaches ~10% of my
-// screen"). drop-shadow's blur is a Gaussian, not a hard cutoff, so this is
-// an approximation: most layers are stacked at full opacity (#fff) rather
-// than tapering early, so the glow stays intensely bright most of the way
-// out instead of dimming gradually — only the outermost layer tapers, right
-// at the very end of the falloff distance.
+// screen"), capped at BEAM_GLOW_MAX_PX.
+// This chain re-rasterises every video frame the beam sweeps (its child's mask
+// changes each tick), so it is deliberately short: two layers — an inner
+// full-white core and a wider translucent falloff. The old five-layer version
+// with an uncapped ~100px+ outer radius was the primary fire-stutter cause on
+// lower-power phones. _lowFx tightens it further to a single soft layer.
 function computeBeamGlowFilter(widthPx) {
-  const d = widthPx * BEAM_GLOW_FALLOFF_FRAC;
-  return `drop-shadow(0 0 ${d * 0.06}px #fff)` +
-    `drop-shadow(0 0 ${d * 0.15}px #fff)` +
-    `drop-shadow(0 0 ${d * 0.3}px #fff)` +
-    `drop-shadow(0 0 ${d * 0.55}px rgba(255,255,255,0.85))` +
-    `drop-shadow(0 0 ${d}px rgba(255,255,255,0.6))`;
+  const cap = _lowFx ? BEAM_GLOW_MAX_PX_LOWFX : BEAM_GLOW_MAX_PX;
+  const d = Math.min(widthPx * BEAM_GLOW_FALLOFF_FRAC, cap);
+  if (_lowFx) return `drop-shadow(0 0 ${d}px rgba(255,255,255,0.8))`;
+  return `drop-shadow(0 0 ${d * 0.35}px #fff)` +
+    `drop-shadow(0 0 ${d}px rgba(255,255,255,0.72))`;
 }
 
 // Sizes/positions #fire-flash and #fire-beam to the video's actual rendered
@@ -3183,9 +3200,28 @@ function updateShakeTransform() {
   el.style.transform = `translate(${dx}%, ${dy}%) rotate(${rot}deg)`;
 }
 
+// Watches the wall-clock gap between frame ticks while the beam is live. Two
+// gaps over BEAM_TICK_JANK_MS in a single shot means this phone can't keep up
+// with the full-fat glow, so latch _lowFx and rebuild the filter cheaper right
+// away (it takes effect for the remainder of this same shot). Session-only —
+// see _lowFx. Called only while _fireBeamActive.
+function noteFireTickTiming() {
+  const now = performance.now();
+  if (_lastFireTickAt && !_lowFx) {
+    const gap = now - _lastFireTickAt;
+    if (gap > BEAM_TICK_JANK_MS && ++_fireJankStrikes >= 2) {
+      _lowFx = true;
+      const beamEl = document.getElementById('fire-beam');
+      if (beamEl) beamEl.style.filter = computeBeamGlowFilter(beamEl.clientWidth || 0);
+    }
+  }
+  _lastFireTickAt = now;
+}
+
 // Called once per real (or emulated) video frame while any of fire-flash,
 // fire-beam, or camera shake is active.
 function onVideoFrameTick() {
+  if (_fireBeamActive) noteFireTickTiming();
   if (_fireFlashActive) {
     const el = document.getElementById('fire-flash');
     const elapsed = performance.now() - _fireStartTime;
@@ -3226,6 +3262,8 @@ function playFireFx() {
   if (!flashEl || !beamEl || !beamShapeEl) return;
   updateFireEffectBounds();
   _fireStartTime   = performance.now();
+  _lastFireTickAt  = 0;  // don't count the pre-shot idle gap as jank
+  _fireJankStrikes = 0;
   _fireFlashActive = true;
   _fireBeamActive  = true;
   flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
