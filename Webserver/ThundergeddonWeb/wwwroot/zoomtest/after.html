@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Zoom test AFTER (fixed)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; touch-action: manipulation; }
+  html, body {
+    height: 100%; background: #0d0d14; color: #e8e8f0;
+    font-family: system-ui, -apple-system, sans-serif; font-size: 16px;
+    overflow: hidden; touch-action: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  }
+  .screen { display: none; position: absolute; inset: 0; }
+  .screen.active { display: block; }
+
+  /* ── Lobby-like screen ── */
+  #lobby { padding: 20px 16px 16px; text-align: center; overflow-y: auto; }
+  #lobby.active { display: block; }
+  #lobby h1 { font-size: 2.2rem; font-weight: 900; color: #ff4d1c; margin-bottom: 4px; }
+  #lobby .tag { display: inline-block; padding: 3px 10px; border-radius: 6px; font-weight: 800;
+                background: #2a7a2a; color: #fff; margin-bottom: 12px; }
+  #lobby p { color: #b0b0c8; font-size: 0.95rem; line-height: 1.4; margin: 0 auto 12px; max-width: 480px; text-align: left; }
+  #lobby ol { text-align: left; max-width: 480px; margin: 0 auto 14px; padding-left: 22px; color: #d0d0e0; font-size: 0.95rem; line-height: 1.45; }
+  #lobby input[type=text] { width: 100%; max-width: 360px; padding: 14px 16px; font-size: 1.1rem; border-radius: 8px;
+                   background: #1a1a28; color: #e8e8f0; border: 1px solid #2e2e50; margin-bottom: 10px; }
+  .btn { display: block; width: 100%; max-width: 360px; margin: 0 auto 10px; padding: 14px; border: none; border-radius: 8px;
+         background: #ff4d1c; color: #fff; font-size: 1.1rem; font-weight: 700; }
+  .btn.alt { background: #2e2e50; }
+  .players { max-width: 360px; margin: 6px auto 12px; text-align: left; }
+  .players div { padding: 8px 12px; background: #1a1a28; border-radius: 6px; margin-bottom: 6px; }
+  #click-count { color: #6f6; font-weight: 700; }
+
+  /* ── Game-like screen ── */
+  #game { background: #000; touch-action: none; -webkit-touch-callout: none;
+          user-select: none; -webkit-user-select: none; overflow: hidden; }
+  #video { position: absolute; inset: 0; transform: scale(1.16);
+           background: radial-gradient(circle at 50% 40%, #3a5a3a, #0a140a 70%);
+           display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.35); font-size: 5vmin; }
+  #hp { position: absolute; top: 3.2vmin; left: 50%; transform: translateX(-50%); width: 70vmax; height: 8vmin;
+        border-radius: 4vmin; border: 2px solid #fff; background: rgba(10,10,16,0.65); overflow: hidden; }
+  #hp .fill { width: 72%; height: 100%; background: #1E90FF; }
+  #hp-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 3.63vmin; font-weight: 800; }
+  .lbl { position: absolute; font-weight: 700; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+  #timer { top: 13.33vmin; right: 15vmax; font-size: 4.27vmin; line-height: 1; }
+  #robot-label { top: 13.33vmin; left: 15vmax; font-size: 3.63vmin; }
+  #role-label { top: 13.33vmin; left: 2.67vmin; font-size: 3.07vmin; }
+  #partner-label { top: 17.07vmin; left: 2.67vmin; font-size: 2.9vmin; }
+  #hit-by { left: 50%; top: 9.6vmin; transform: translateX(-50%); font-size: 4.69vmin; color: #ff6060; }
+  #vmin-probe { position: absolute; width: 100vmin; height: 0; visibility: hidden; pointer-events: none; }
+  #joy { position: absolute; left: 6vmax; bottom: 10vmin; width: 36vmin; height: 36vmin; border-radius: 50%;
+         background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.4); touch-action: none; }
+  #joy div { position: absolute; left: 50%; top: 50%; width: 14vmin; height: 14vmin; margin: -7vmin; border-radius: 50%; background: rgba(255,255,255,0.7); }
+  #turret { position: absolute; right: 6vmax; bottom: 12vmin; width: 40vmin; height: 12vmin; border-radius: 6vmin;
+            background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.4); touch-action: none; }
+  #fire { position: absolute; left: 50%; bottom: 8vmin; transform: translateX(-50%); width: 24vmin; height: 24vmin; border-radius: 50%;
+          background: #c62828; border: 3px solid #fff; display: flex; align-items: center; justify-content: center;
+          font-size: 3.2vmin; font-weight: 900; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #fire.flash { background: #fff; color: #c62828; }
+  #back { position: absolute; top: 3vmin; left: 3vmin; padding: 1.5vmin 3vmin; font-size: 3.5vmin; border-radius: 2vmin;
+          background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #888; }
+
+  /* Same portrait -> landscape rotation as the real game */
+  @media (orientation: portrait) {
+    body.game-active { position: fixed; overflow: hidden; width: 100vh; height: 100vw;
+      top: calc((100vh - 100vw) / 2); left: calc((100vw - 100vh) / 2); transform: rotate(90deg); transform-origin: center; }
+  }
+
+  /* Diagnostics panel: lives on <html>, pinned + counter-scaled to the visible area so it stays readable when zoomed */
+  #diag { position: fixed; top: 0; left: 0; transform-origin: 0 0; z-index: 99999; pointer-events: none;
+          font: 12px/1.35 ui-monospace, Menlo, monospace; color: #0f0; background: rgba(0,0,0,0.78);
+          padding: 6px 8px; border-bottom-right-radius: 8px; white-space: pre; }
+  #diag .bad { color: #ff5050; font-weight: 700; }
+  #zoom-hint {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      z-index: 100000;
+      padding: 10px 14px;
+      background: rgba(255,77,28,0.95);
+      color: #fff;
+      font: 700 16px system-ui, -apple-system, sans-serif;
+      text-align: center;
+      pointer-events: none;
+    }
+  body.game-active, body.game-active * { touch-action: none; }
+</style>
+</head>
+<body>
+<div id="lobby" class="screen active">
+  <div style="height:150px"></div>
+  <h1>THUNDERGEDDON</h1>
+  <div class="tag">AFTER (fixed)</div>
+  <input type="text" placeholder="Type a name (tests keyboard zoom)" />
+  <button class="btn" onclick="countClick()">Tap me (clicks: <span id="click-count">0</span>)</button>
+  <div class="players"><div>Alice</div><div>Bob</div><div>Charlie</div><div>Dana</div></div>
+  <button class="btn" onclick="showGame()">Go to game screen</button>
+  <button class="btn alt" onclick="resetStats()">Reset diagnostics</button>
+  <p>This page copies the game's zoom settings so we can test them on an iPhone. Please open it in <b>Safari</b>
+     (not a preview inside Messages, Mail or Files). The green box in the top-left corner tracks zoom. Please screenshot it when you're done.</p>
+  <ol>
+    <li>First, check that <b>page zoom</b> in the box shows 100%. If it doesn't, tap <b>aA</b> and set it back to 100%.</li>
+    <li>Tap <b>Go to game screen</b>. Play it like the game for a couple of minutes. Hold the joystick with your left thumb while you mash FIRE and the turret pill with your right. Double-tap FIRE, the video, the HP bar and the text labels. Try pinching. Turn the phone between upright and sideways a few times as you go.</li>
+    <li>Watch the green box. The <b>zoom</b> and <b>game text</b> lines should stay at 1.00x. If anything turns red, or the screen grows or overlaps, screenshot it straight away. Then try to get back to normal with a pinch or a double-tap, and screenshot again.</li>
+    <li>Optional: tap <b>Back</b> and double-tap around the lobby too.</li>
+  </ol>
+</div>
+
+<div id="game" class="screen">
+  <div id="video">camera feed</div>
+  <div id="hp"><div class="fill"></div><div id="hp-text">HP 72 / 100</div></div>
+  <div id="timer" class="lbl">2:47</div>
+  <div id="robot-label" class="lbl">Desert-03</div>
+  <div id="role-label" class="lbl">DRIVER + GUNNER</div>
+  <div id="partner-label" class="lbl">Team: Desert Squad</div>
+  <div id="hit-by" class="lbl">HIT BY JUNGLE-07</div>
+  <div id="vmin-probe"></div>
+  <div id="joy"><div></div></div>
+  <div id="turret"></div>
+  <div id="fire" onpointerdown="onFire()">FIRE</div>
+  <button id="back" onclick="showLobby()">&larr; Back</button>
+</div>
+
+<script>
+const LABEL = 'AFTER (fixed)';
+function dbg() {}
+function countClick() { const e = document.getElementById('click-count'); e.textContent = +e.textContent + 1; }
+function showGame()  { document.getElementById('lobby').classList.remove('active'); document.getElementById('game').classList.add('active'); document.body.classList.add('game-active'); }
+function showLobby() { document.getElementById('game').classList.remove('active'); document.getElementById('lobby').classList.add('active'); document.body.classList.remove('game-active'); }
+let fires = 0;
+function onFire() { fires++; const f = document.getElementById('fire'); f.classList.add('flash'); setTimeout(() => f.classList.remove('flash'), 120); }
+document.getElementById('joy').addEventListener('pointerdown', e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); });
+document.getElementById('turret').addEventListener('pointerdown', e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); });
+document.addEventListener('contextmenu', e => e.preventDefault(), true);
+
+// ── Diagnostics ──
+const diag = document.createElement('div'); diag.id = 'diag'; document.documentElement.appendChild(diag);
+let st, lastTouch = '-';
+function resetStats() { st = { maxScale: 1, zoomIns: 0, zoomedNow: false, zoomedAt: 0, recovered: 0, lastRecovery: '-', trigger: '-', maxText: 0 }; fires = 0; }
+resetStats();
+document.addEventListener('touchstart', e => {
+  const t = e.target, id = t.id ? '#' + t.id : t.tagName.toLowerCase();
+  lastTouch = id + (e.touches.length > 1 ? ' (' + e.touches.length + ' fingers)' : '') + ' @' + (performance.now() / 1000).toFixed(1) + 's';
+}, { passive: true, capture: true });
+function pageZoom() {
+  const portrait = window.innerHeight > window.innerWidth;
+  const sw = portrait ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+  return Math.round(sw / document.documentElement.clientWidth * 100);
+}
+function tick() {
+  const vv = window.visualViewport, sc = vv ? vv.scale : 1;
+  const b = (cond, t) => cond ? '<span class="bad">' + t + '</span>' : t;
+  const zoomed = sc > 1.02;
+  if (zoomed && !st.zoomedNow) { st.zoomIns++; st.zoomedAt = performance.now(); st.trigger = lastTouch; }
+  if (!zoomed && st.zoomedNow) { st.recovered++; st.lastRecovery = ((performance.now() - st.zoomedAt) / 1000).toFixed(1) + 's later'; }
+  st.zoomedNow = zoomed; st.maxScale = Math.max(st.maxScale, sc);
+  const pz = pageZoom();
+  const vmin = document.getElementById('vmin-probe').offsetWidth;
+  const timerEl = document.getElementById('timer');
+  let txt = '-';
+  if (timerEl.offsetHeight && vmin) {
+    const ratio = timerEl.offsetHeight / (0.0427 * vmin);
+    const fsRatio = parseFloat(getComputedStyle(timerEl).fontSize) / (0.0427 * vmin);
+    st.maxText = Math.max(st.maxText, ratio, fsRatio);
+    txt = b(ratio > 1.08 || fsRatio > 1.08, ratio.toFixed(2) + 'x') + '  (max ' + b(st.maxText > 1.08, st.maxText.toFixed(2) + 'x') + ')';
+  }
+  diag.innerHTML =
+    LABEL + '  (taps ' + document.getElementById('click-count').textContent + ', fires ' + fires + ')\n' +
+    'zoom now    : ' + b(zoomed, sc.toFixed(2) + 'x' + (zoomed ? '  ZOOMED' : '')) + '\n' +
+    'max zoom    : ' + b(st.maxScale > 1.02, st.maxScale.toFixed(2) + 'x') + '\n' +
+    'zoom-ins    : ' + b(st.zoomIns > 0, String(st.zoomIns)) + '   got back out: ' + st.recovered + ' (' + st.lastRecovery + ')\n' +
+    'triggered by: ' + st.trigger + '\n' +
+    'game text   : ' + txt + '  (text autosize, 1.00 = OK)\n' +
+    'page zoom   : ' + b(Math.abs(pz - 100) > 3, pz + '%') + '  (aA menu)\n' +
+    'layout      : ' + document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight + '  screen ' + screen.width + 'x' + screen.height + '\n' +
+    navigator.userAgent.replace(/^.*?\(/, '(').slice(0, 60);
+  if (vv) diag.style.transform = 'translate(' + vv.offsetLeft + 'px,' + vv.offsetTop + 'px) scale(' + (1 / vv.scale) + ')';
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+<script>
+// ════════ ZOOM DEFENCE UNDER TEST (AFTER (fixed)) ════════
+// Copied from the fixed game (index.html v31).
+// ── iOS Safari zoom defence ──
+// iOS 10+ ignores user-scalable=no / maximum-scale in the viewport meta tag
+// (Apple re-enabled zoom for accessibility), so zoom has to be blocked in JS.
+//
+// Past bug: if the page did get zoomed mid-game, the pinch guard below
+// stopped the player pinching back OUT and the double-tap guard stopped them
+// double-tapping back out, so they were stuck until they found the aA menu.
+// Now every guard stands down while the page is already zoomed, so the normal
+// gestures undo it. The double-tap guard also covers every screen, not just
+// gameplay. (See also text-size-adjust and touch-action in the CSS.)
+const _isZoomed = () => !!window.visualViewport && window.visualViewport.scale > 1.02;
+
+// Pinch: gesturestart/change/end are WebKit-only multi-finger events;
+// 2-finger touchstart is a backup.
+const _blockGesture = e => { if (!_isZoomed()) e.preventDefault(); };
+document.addEventListener('gesturestart',  _blockGesture, { passive: false });
+document.addEventListener('gesturechange', _blockGesture, { passive: false });
+document.addEventListener('gestureend',    _blockGesture, { passive: false });
+document.addEventListener('touchstart', e => {
+  if (e.touches.length > 1 && !_isZoomed()) e.preventDefault();
+}, { passive: false });
+
+// Double-tap: cancel the second tap's touchend. That also cancels the
+// synthetic click, so for buttons/inputs replay it ourselves (only for a
+// genuine tap — not the end of a scroll). Gameplay controls use pointerdown,
+// which has already fired by touchend, so they are unaffected.
+const _TAP_TARGETS = 'button, a, label, input, select, textarea, [onclick]';
+let _lastTouchEnd = 0, _tapStartX = 0, _tapStartY = 0;
+document.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { _tapStartX = e.touches[0].clientX; _tapStartY = e.touches[0].clientY; }
+}, { passive: true });
+document.addEventListener('touchend', e => {
+  const now = Date.now();
+  const quick = now - _lastTouchEnd < 400;
+  _lastTouchEnd = now;
+  if (!quick || _isZoomed()) return;
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (e.touches.length || !t || Math.hypot(t.clientX - _tapStartX, t.clientY - _tapStartY) > 10) return;
+  const el = e.target.closest && e.target.closest(_TAP_TARGETS);
+  if (!el || el.disabled) return;
+  if (el.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, select')) el.focus();
+  else el.click();
+}, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+
+// Recovery if zoom still sneaks through: rewriting the viewport meta can make
+// iOS re-clamp to scale 1 (debounced so it doesn't fight a gesture). If that
+// doesn't take, show a hint pinned to the visible area telling the player how
+// to undo it — the gesture guards above are already standing down.
+const _vpMeta = document.querySelector('meta[name="viewport"]');
+const _vpBase = _vpMeta.getAttribute('content');
+const _zoomHint = document.createElement('div');
+_zoomHint.id = 'zoom-hint';
+_zoomHint.textContent = 'Zoomed in — pinch or double-tap to zoom back out';
+document.documentElement.appendChild(_zoomHint);
+let _zoomResetTimer = null;
+function forceZoomReset() {
+  if (!_isZoomed()) return;
+  dbg('zoom watchdog: scale=' + window.visualViewport.scale.toFixed(2) + ' — forcing reset');
+  _vpMeta.setAttribute('content', _vpBase + ', minimum-scale=1.0');
+  setTimeout(() => _vpMeta.setAttribute('content', _vpBase), 100);
+}
+function updateZoomHint() {
+  const vv = window.visualViewport;
+  if (!_isZoomed()) { _zoomHint.style.display = 'none'; return; }
+  _zoomHint.style.display = 'block';
+  _zoomHint.style.width = (vv.width * vv.scale) + 'px';
+  _zoomHint.style.transform =
+    `translate(${vv.offsetLeft}px, ${vv.offsetTop}px) scale(${1 / vv.scale})`;
+}
+if (window.visualViewport) {
+  const onViewportChange = () => {
+    updateZoomHint();
+    if (_isZoomed()) {
+      clearTimeout(_zoomResetTimer);
+      _zoomResetTimer = setTimeout(forceZoomReset, 300);
+    }
+  };
+  window.visualViewport.addEventListener('resize', onViewportChange);
+  window.visualViewport.addEventListener('scroll', onViewportChange);
+}
+
+</script>
+</body>
+</html>

@@ -8,7 +8,14 @@
   <title>Thundergeddon</title>
   <script src="/js/signalr.min.js"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after {
+      box-sizing: border-box; margin: 0; padding: 0;
+      /* iOS Safari decides whether a double-tap zooms by looking at the tapped
+         element's touch-action. Set it explicitly on every element rather than
+         relying on it being derived from html/body (which has not been enough
+         in practice). Elements with their own touch-action: none still win. */
+      touch-action: manipulation;
+    }
 
     :root {
       --bg:       #0d0d14;
@@ -37,6 +44,37 @@
       font-size: 16px;
       overflow: hidden;
       touch-action: none;
+      /* Turn off iOS text autosizing. WebKit inflates font sizes when it
+         thinks a text column is wider than the screen — which the rotated
+         portrait game layout is (body width = 100vh) — and re-evaluates on
+         orientation and zoom changes. Text then outgrows its vmin-sized
+         boxes and the HUD overlaps itself; only a page-zoom change in the
+         aA menu forced a re-layout. */
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
+    /* During play, give every element touch-action: none directly — including
+       overlays outside #screen-playing (dead screen, pause, game over). iOS
+       checks the touched element for double-tap/pinch zoom; don't depend on
+       it deriving the value from an ancestor. Taps and clicks still work. */
+    body.game-active, body.game-active * { touch-action: none; }
+
+    /* Shown only while the page is zoomed in. Lives on <html> (not <body>) so
+       the portrait game-active rotation doesn't apply to it; JS pins it to the
+       visual viewport and counter-scales it so it reads at normal size. */
+    #zoom-hint {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      z-index: 100000;
+      padding: 10px 14px;
+      background: rgba(255,77,28,0.95);
+      color: #fff;
+      font: 700 16px system-ui, -apple-system, sans-serif;
+      text-align: center;
+      pointer-events: none;
     }
 
     /* ── Shared screen container ── */
@@ -2960,52 +2998,87 @@ turretBase.addEventListener('pointercancel', releaseTurretSlider);
 // Capture phase (true) intercepts before any element handler fires.
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
 
-// Prevent Safari pinch-zoom during gameplay.
-// iOS 10+ ignores user-scalable=no in the viewport meta tag (Apple re-enabled
-// it for accessibility), so we must suppress the gesture events directly.
-// gesturestart/gesturechange are WebKit-specific events fired when a multi-finger
-// gesture begins — blocking them stops the zoom before it starts.
-// touchstart preventDefault on 2+ fingers is a belt-and-suspenders backup.
-document.addEventListener('gesturestart',  e => e.preventDefault(), { passive: false });
-document.addEventListener('gesturechange', e => e.preventDefault(), { passive: false });
-document.addEventListener('gestureend',    e => e.preventDefault(), { passive: false });
+// ── iOS Safari zoom defence ──
+// iOS 10+ ignores user-scalable=no / maximum-scale in the viewport meta tag
+// (Apple re-enabled zoom for accessibility), so zoom has to be blocked in JS.
+//
+// Past bug: if the page did get zoomed mid-game, the pinch guard below
+// stopped the player pinching back OUT and the double-tap guard stopped them
+// double-tapping back out, so they were stuck until they found the aA menu.
+// Now every guard stands down while the page is already zoomed, so the normal
+// gestures undo it. The double-tap guard also covers every screen, not just
+// gameplay. (See also text-size-adjust and touch-action in the CSS.)
+const _isZoomed = () => !!window.visualViewport && window.visualViewport.scale > 1.02;
+
+// Pinch: gesturestart/change/end are WebKit-only multi-finger events;
+// 2-finger touchstart is a backup.
+const _blockGesture = e => { if (!_isZoomed()) e.preventDefault(); };
+document.addEventListener('gesturestart',  _blockGesture, { passive: false });
+document.addEventListener('gesturechange', _blockGesture, { passive: false });
+document.addEventListener('gestureend',    _blockGesture, { passive: false });
 document.addEventListener('touchstart', e => {
-  if (e.touches.length > 1) e.preventDefault();
+  if (e.touches.length > 1 && !_isZoomed()) e.preventDefault();
 }, { passive: false });
 
-// Double-tap zoom is NOT a gesture event, so the guards above never see it —
-// two quick taps anywhere (e.g. mashing near the fire button) zoom the page on
-// iOS Safari. During gameplay all controls use pointer events (pointerdown),
-// which have already fired by touchend, so suppressing the second tap's
-// touchend costs nothing. Scoped to game-active so lobby buttons (onclick,
-// which needs the synthetic click after touchend) keep working.
-let _lastTouchEnd = 0;
+// Double-tap: cancel the second tap's touchend. That also cancels the
+// synthetic click, so for buttons/inputs replay it ourselves (only for a
+// genuine tap — not the end of a scroll). Gameplay controls use pointerdown,
+// which has already fired by touchend, so they are unaffected.
+const _TAP_TARGETS = 'button, a, label, input, select, textarea, [onclick]';
+let _lastTouchEnd = 0, _tapStartX = 0, _tapStartY = 0;
+document.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { _tapStartX = e.touches[0].clientX; _tapStartY = e.touches[0].clientY; }
+}, { passive: true });
 document.addEventListener('touchend', e => {
-  if (!document.body.classList.contains('game-active')) return;
   const now = Date.now();
-  if (now - _lastTouchEnd < 400) e.preventDefault();
+  const quick = now - _lastTouchEnd < 400;
   _lastTouchEnd = now;
+  if (!quick || _isZoomed()) return;
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (e.touches.length || !t || Math.hypot(t.clientX - _tapStartX, t.clientY - _tapStartY) > 10) return;
+  const el = e.target.closest && e.target.closest(_TAP_TARGETS);
+  if (!el || el.disabled) return;
+  if (el.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, select')) el.focus();
+  else el.click();
 }, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 
-// Recovery watchdog: if the page still ends up pinch/double-tap zoomed
-// (visualViewport.scale > 1), rewriting the viewport meta tag makes iOS
-// re-clamp to maximum-scale and snap back to 1.0. Debounced so it doesn't
-// fight an in-progress gesture.
+// Recovery if zoom still sneaks through: rewriting the viewport meta can make
+// iOS re-clamp to scale 1 (debounced so it doesn't fight a gesture). If that
+// doesn't take, show a hint pinned to the visible area telling the player how
+// to undo it — the gesture guards above are already standing down.
 const _vpMeta = document.querySelector('meta[name="viewport"]');
 const _vpBase = _vpMeta.getAttribute('content');
+const _zoomHint = document.createElement('div');
+_zoomHint.id = 'zoom-hint';
+_zoomHint.textContent = 'Zoomed in — pinch or double-tap to zoom back out';
+document.documentElement.appendChild(_zoomHint);
 let _zoomResetTimer = null;
 function forceZoomReset() {
+  if (!_isZoomed()) return;
   dbg('zoom watchdog: scale=' + window.visualViewport.scale.toFixed(2) + ' — forcing reset');
   _vpMeta.setAttribute('content', _vpBase + ', minimum-scale=1.0');
   setTimeout(() => _vpMeta.setAttribute('content', _vpBase), 100);
 }
+function updateZoomHint() {
+  const vv = window.visualViewport;
+  if (!_isZoomed()) { _zoomHint.style.display = 'none'; return; }
+  _zoomHint.style.display = 'block';
+  _zoomHint.style.width = (vv.width * vv.scale) + 'px';
+  _zoomHint.style.transform =
+    `translate(${vv.offsetLeft}px, ${vv.offsetTop}px) scale(${1 / vv.scale})`;
+}
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => {
-    if (window.visualViewport.scale > 1.02) {
+  const onViewportChange = () => {
+    updateZoomHint();
+    if (_isZoomed()) {
       clearTimeout(_zoomResetTimer);
       _zoomResetTimer = setTimeout(forceZoomReset, 300);
     }
-  });
+  };
+  window.visualViewport.addEventListener('resize', onViewportChange);
+  window.visualViewport.addEventListener('scroll', onViewportChange);
 }
 
 // ════════════════════════════════════════════════════════
@@ -3610,7 +3683,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v30</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v31</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
