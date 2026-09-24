@@ -39,8 +39,15 @@
            display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.35); font-size: 5vmin; }
   #hp { position: absolute; top: 3.2vmin; left: 50%; transform: translateX(-50%); width: 70vmax; height: 8vmin;
         border-radius: 4vmin; border: 2px solid #fff; background: rgba(10,10,16,0.65); overflow: hidden; }
-  #hp div { width: 72%; height: 100%; background: #1E90FF; }
-  #timer { position: absolute; top: 13vmin; left: 50%; transform: translateX(-50%); font-size: 7vmin; font-weight: 800; }
+  #hp .fill { width: 72%; height: 100%; background: #1E90FF; }
+  #hp-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 3.63vmin; font-weight: 800; }
+  .lbl { position: absolute; font-weight: 700; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+  #timer { top: 13.33vmin; right: 15vmax; font-size: 4.27vmin; line-height: 1; }
+  #robot-label { top: 13.33vmin; left: 15vmax; font-size: 3.63vmin; }
+  #role-label { top: 13.33vmin; left: 2.67vmin; font-size: 3.07vmin; }
+  #partner-label { top: 17.07vmin; left: 2.67vmin; font-size: 2.9vmin; }
+  #hit-by { left: 50%; top: 9.6vmin; transform: translateX(-50%); font-size: 4.69vmin; color: #ff6060; }
+  #vmin-probe { position: absolute; width: 100vmin; height: 0; visibility: hidden; pointer-events: none; }
   #joy { position: absolute; left: 6vmax; bottom: 10vmin; width: 36vmin; height: 36vmin; border-radius: 50%;
          background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.4); touch-action: none; }
   #joy div { position: absolute; left: 50%; top: 50%; width: 14vmin; height: 14vmin; margin: -7vmin; border-radius: 50%; background: rgba(255,255,255,0.7); }
@@ -48,7 +55,7 @@
             background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.4); touch-action: none; }
   #fire { position: absolute; left: 50%; bottom: 8vmin; transform: translateX(-50%); width: 24vmin; height: 24vmin; border-radius: 50%;
           background: #c62828; border: 3px solid #fff; display: flex; align-items: center; justify-content: center;
-          font-size: 6vmin; font-weight: 900; touch-action: none; user-select: none; -webkit-user-select: none; }
+          font-size: 3.2vmin; font-weight: 900; touch-action: none; user-select: none; -webkit-user-select: none; }
   #fire.flash { background: #fff; color: #c62828; }
   #back { position: absolute; top: 3vmin; left: 3vmin; padding: 1.5vmin 3vmin; font-size: 3.5vmin; border-radius: 2vmin;
           background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #888; }
@@ -81,16 +88,21 @@
      (not a preview inside Messages, Mail or Files). The green box in the top-left corner tracks zoom. Please screenshot it when you're done.</p>
   <ol>
     <li>First, check that <b>page zoom</b> in the box shows 100%. If it doesn't, tap <b>aA</b> and set it back to 100%.</li>
-    <li>Double-tap this text, the title, the buttons and the list below, quickly and several times.</li>
-    <li>Tap <b>Go to game screen</b>, then turn the phone sideways. Double-tap and mash FIRE, the video area, the HP bar and the timer. Hold the joystick with one thumb while you tap FIRE with the other. Try pinching.</li>
-    <li>If the page zooms in, try to zoom back out with a pinch or a double-tap. Does it work?</li>
+    <li>Tap <b>Go to game screen</b>. Play it like the game for a couple of minutes. Hold the joystick with your left thumb while you mash FIRE and the turret pill with your right. Double-tap FIRE, the video, the HP bar and the text labels. Try pinching. Turn the phone between upright and sideways a few times as you go.</li>
+    <li>Watch the green box. The <b>zoom</b> and <b>game text</b> lines should stay at 1.00x. If anything turns red, or the screen grows or overlaps, screenshot it straight away. Then try to get back to normal with a pinch or a double-tap, and screenshot again.</li>
+    <li>Optional: tap <b>Back</b> and double-tap around the lobby too.</li>
   </ol>
 </div>
 
 <div id="game" class="screen">
   <div id="video">camera feed</div>
-  <div id="hp"><div></div></div>
-  <div id="timer">2:47</div>
+  <div id="hp"><div class="fill"></div><div id="hp-text">HP 72 / 100</div></div>
+  <div id="timer" class="lbl">2:47</div>
+  <div id="robot-label" class="lbl">Desert-03</div>
+  <div id="role-label" class="lbl">DRIVER + GUNNER</div>
+  <div id="partner-label" class="lbl">Team: Desert Squad</div>
+  <div id="hit-by" class="lbl">HIT BY JUNGLE-07</div>
+  <div id="vmin-probe"></div>
   <div id="joy"><div></div></div>
   <div id="turret"></div>
   <div id="fire" onpointerdown="onFire()">FIRE</div>
@@ -112,7 +124,7 @@ document.addEventListener('contextmenu', e => e.preventDefault(), true);
 // ── Diagnostics ──
 const diag = document.createElement('div'); diag.id = 'diag'; document.documentElement.appendChild(diag);
 let st, lastTouch = '-';
-function resetStats() { st = { maxScale: 1, zoomIns: 0, zoomedNow: false, zoomedAt: 0, recovered: 0, lastRecovery: '-', trigger: '-' }; fires = 0; }
+function resetStats() { st = { maxScale: 1, zoomIns: 0, zoomedNow: false, zoomedAt: 0, recovered: 0, lastRecovery: '-', trigger: '-', maxText: 0 }; fires = 0; }
 resetStats();
 document.addEventListener('touchstart', e => {
   const t = e.target, id = t.id ? '#' + t.id : t.tagName.toLowerCase();
@@ -125,18 +137,28 @@ function pageZoom() {
 }
 function tick() {
   const vv = window.visualViewport, sc = vv ? vv.scale : 1;
+  const b = (cond, t) => cond ? '<span class="bad">' + t + '</span>' : t;
   const zoomed = sc > 1.02;
   if (zoomed && !st.zoomedNow) { st.zoomIns++; st.zoomedAt = performance.now(); st.trigger = lastTouch; }
   if (!zoomed && st.zoomedNow) { st.recovered++; st.lastRecovery = ((performance.now() - st.zoomedAt) / 1000).toFixed(1) + 's later'; }
   st.zoomedNow = zoomed; st.maxScale = Math.max(st.maxScale, sc);
   const pz = pageZoom();
-  const b = (cond, txt) => cond ? '<span class="bad">' + txt + '</span>' : txt;
+  const vmin = document.getElementById('vmin-probe').offsetWidth;
+  const timerEl = document.getElementById('timer');
+  let txt = '-';
+  if (timerEl.offsetHeight && vmin) {
+    const ratio = timerEl.offsetHeight / (0.0427 * vmin);
+    const fsRatio = parseFloat(getComputedStyle(timerEl).fontSize) / (0.0427 * vmin);
+    st.maxText = Math.max(st.maxText, ratio, fsRatio);
+    txt = b(ratio > 1.08 || fsRatio > 1.08, ratio.toFixed(2) + 'x') + '  (max ' + b(st.maxText > 1.08, st.maxText.toFixed(2) + 'x') + ')';
+  }
   diag.innerHTML =
     LABEL + '  (taps ' + document.getElementById('click-count').textContent + ', fires ' + fires + ')\n' +
     'zoom now    : ' + b(zoomed, sc.toFixed(2) + 'x' + (zoomed ? '  ZOOMED' : '')) + '\n' +
     'max zoom    : ' + b(st.maxScale > 1.02, st.maxScale.toFixed(2) + 'x') + '\n' +
     'zoom-ins    : ' + b(st.zoomIns > 0, String(st.zoomIns)) + '   got back out: ' + st.recovered + ' (' + st.lastRecovery + ')\n' +
     'triggered by: ' + st.trigger + '\n' +
+    'game text   : ' + txt + '  (text autosize, 1.00 = OK)\n' +
     'page zoom   : ' + b(Math.abs(pz - 100) > 3, pz + '%') + '  (aA menu)\n' +
     'layout      : ' + document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight + '  screen ' + screen.width + 'x' + screen.height + '\n' +
     navigator.userAgent.replace(/^.*?\(/, '(').slice(0, 60);

@@ -44,10 +44,21 @@
       font-size: 16px;
       overflow: hidden;
       touch-action: none;
-      /* Stop iOS inflating text when the phone rotates to landscape. */
+      /* Turn off iOS text autosizing. WebKit inflates font sizes when it
+         thinks a text column is wider than the screen — which the rotated
+         portrait game layout is (body width = 100vh) — and re-evaluates on
+         orientation and zoom changes. Text then outgrows its vmin-sized
+         boxes and the HUD overlaps itself; only a page-zoom change in the
+         aA menu forced a re-layout. */
       -webkit-text-size-adjust: 100%;
       text-size-adjust: 100%;
     }
+
+    /* During play, give every element touch-action: none directly — including
+       overlays outside #screen-playing (dead screen, pause, game over). iOS
+       checks the touched element for double-tap/pinch zoom; don't depend on
+       it deriving the value from an ancestor. Taps and clicks still work. */
+    body.game-active, body.game-active * { touch-action: none; }
 
     /* Shown only while the page is zoomed in. Lives on <html> (not <body>) so
        the portrait game-active rotation doesn't apply to it; JS pins it to the
@@ -2936,12 +2947,12 @@ document.addEventListener('contextmenu', e => e.preventDefault(), true);
 // iOS 10+ ignores user-scalable=no / maximum-scale in the viewport meta tag
 // (Apple re-enabled zoom for accessibility), so zoom has to be blocked in JS.
 //
-// Past bug: a double-tap outside gameplay (lobby, countdown, results) zoomed
-// the page, and the zoom carried into the game. Worse, the pinch guards below
-// then stopped the player pinching back OUT, and the double-tap guard stopped
-// them double-tapping back out — so they were stuck until they found the aA
-// menu. Now: the double-tap guard covers every screen, and every guard stands
-// down while the page is already zoomed so the normal gestures undo it.
+// Past bug: if the page did get zoomed mid-game, the pinch guard below
+// stopped the player pinching back OUT and the double-tap guard stopped them
+// double-tapping back out, so they were stuck until they found the aA menu.
+// Now every guard stands down while the page is already zoomed, so the normal
+// gestures undo it. The double-tap guard also covers every screen, not just
+// gameplay. (See also text-size-adjust and touch-action in the CSS.)
 const _isZoomed = () => !!window.visualViewport && window.visualViewport.scale > 1.02;
 
 // Pinch: gesturestart/change/end are WebKit-only multi-finger events;
