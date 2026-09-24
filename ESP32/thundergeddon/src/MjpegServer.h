@@ -24,6 +24,7 @@
 #include <Arduino.h>
 #include "esp_http_server.h"
 #include "esp_camera.h"
+#include "lwip/sockets.h"
 
 class MjpegServer
 {
@@ -78,20 +79,59 @@ public:
     }
 
 private:
+    // Writes every byte of the iovec list, retrying partial writes. False if the
+    // client has gone (or stalled past httpd's 5 s send timeout).
+    static bool _writevAll(int fd, struct iovec* iov, int cnt)
+    {
+        while (cnt > 0) {
+            ssize_t n = lwip_writev(fd, iov, cnt);
+            if (n <= 0) return false;
+            while (cnt > 0 && (size_t)n >= iov->iov_len) { n -= iov->iov_len; ++iov; --cnt; }
+            if (cnt > 0) {
+                iov->iov_base = (char*)iov->iov_base + n;
+                iov->iov_len -= n;
+            }
+        }
+        return true;
+    }
+
+    // The stream is written straight to the socket rather than through
+    // httpd_resp_send_chunk(). Chunked encoding split every frame into nine
+    // small socket writes, and with Nagle on, the tail of each JPEG then sat in
+    // the robot until the viewer ACKed the rest — up to 200 ms on a Windows
+    // receiver (the web server's stream proxy). Now each frame is a single
+    // writev() of part header + JPEG + closing boundary with TCP_NODELAY set:
+    // full-size segments, no tiny packets, and nothing held back.
+    //
+    // Each part ends with the NEXT boundary line: browsers only display a
+    // multipart part once they see the boundary that closes it, so sending it
+    // straight after the JPEG shows the frame one frame-interval sooner.
     static esp_err_t _streamHandler(httpd_req_t* req)
     {
         auto* self = static_cast<MjpegServer*>(req->user_ctx);
+        const int fd = httpd_req_to_sockfd(req);
 
-        httpd_resp_set_type(req, "multipart/x-mixed-replace; boundary=frame");
-        httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-        httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache");
-        httpd_resp_set_hdr(req, "Pragma", "no-cache");
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 
-        char header[128];
-        esp_err_t res = ESP_OK;
+        static const char kResponseHead[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Cache-Control: no-store, no-cache\r\n"
+            "Pragma: no-cache\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "--frame\r\n";
+        static const char kEndBoundary[] = "\r\n--frame\r\n";
+
+        struct iovec head = { (void*)kResponseHead, sizeof(kResponseHead) - 1 };
+        if (!_writevAll(fd, &head, 1)) return ESP_FAIL;
+
+        char header[96];
         uint32_t lastFrameMs = 0;
 
-        while (res == ESP_OK) {
+        for (;;) {
             if (!self->_enabled) {
                 // Stream is paused (stream_off or lobby); wait rather than disconnect
                 vTaskDelay(pdMS_TO_TICKS(100));
@@ -113,28 +153,28 @@ private:
                 continue;
             }
 
-            // MJPEG part header
+            // MJPEG part: header, JPEG, then the boundary that closes this part
             int hlen = snprintf(header, sizeof(header),
-                "--frame\r\n"
                 "Content-Type: image/jpeg\r\n"
                 "Content-Length: %u\r\n"
                 "\r\n",
                 (unsigned)fb->len);
 
-            res = httpd_resp_send_chunk(req, header, hlen);
-            if (res == ESP_OK) {
-                res = httpd_resp_send_chunk(req, (const char*)fb->buf, fb->len);
-            }
-            if (res == ESP_OK) {
-                res = httpd_resp_send_chunk(req, "\r\n", 2);
-            }
+            struct iovec iov[3] = {
+                { header,              (size_t)hlen },
+                { fb->buf,             fb->len },
+                { (void*)kEndBoundary, sizeof(kEndBoundary) - 1 },
+            };
+            bool ok = _writevAll(fd, iov, 3);
 
             esp_camera_fb_return(fb);
+            if (!ok) break;
             // No explicit delay; esp_camera_fb_get() naturally paces at the sensor rate
         }
 
-        // Client disconnected (res != ESP_OK) — that's normal; just return
-        return ESP_OK;
+        // Client disconnected — normal. ESP_FAIL tells httpd to close the socket
+        // (the response was hand-written, so it can't be reused for keep-alive).
+        return ESP_FAIL;
     }
 
     httpd_handle_t   _server  = nullptr;

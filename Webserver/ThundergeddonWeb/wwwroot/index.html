@@ -1541,28 +1541,54 @@ function startWsVideoDecoder(robotUrl) {
       }, 1500);
     }
   };
-  _videoWs.onmessage = e => {
-    const blob    = new Blob([e.data], { type: 'image/jpeg' });
-    const blobUrl = URL.createObjectURL(blob);
-    const img     = new Image();
-    img.onload = () => {
-      if (img.naturalWidth)  canvas.width  = img.naturalWidth;
-      if (img.naturalHeight) canvas.height = img.naturalHeight;
+  // Decode one frame at a time and hold only the newest waiting frame. When the
+  // phone decodes slower than frames arrive, stale frames are skipped instead of
+  // queuing behind each other and pushing the picture further and further behind.
+  let decoding = false;
+  let pending  = null;
+  const drawNext = () => {
+    if (decoding || !pending) return;
+    const data = pending;
+    pending  = null;
+    decoding = true;
+    decodeJpegFrame(data).then(img => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      // Assigning canvas width/height (even to the same value) clears and
+      // reallocates the canvas, so only do it when the frame size changes.
+      if (w && canvas.width  !== w) canvas.width  = w;
+      if (h && canvas.height !== h) canvas.height = h;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(blobUrl);
+      if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
       frameCount++;
       onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
       if (!gotFirstFrame) {
         gotFirstFrame        = true;
         canvas.style.display = '';
         ph.style.display     = 'none';
-        dbg('WS first frame! ' + img.naturalWidth + 'x' + img.naturalHeight);
+        dbg('WS first frame! ' + w + 'x' + h);
       } else if (frameCount === 10) {
         dbg('WS stream OK, 10 frames received');
       }
-    };
-    img.src = blobUrl;
+    }).catch(() => { /* corrupt frame — skip it */ })
+      .finally(() => { decoding = false; drawNext(); });
   };
+  _videoWs.onmessage = e => { pending = e.data; drawNext(); };
+}
+
+// Decodes one JPEG (ArrayBuffer) off the main thread where the browser supports
+// createImageBitmap (iOS 15+, all current desktop/Android browsers); falls back
+// to an <img> + blob URL on older ones. Resolves with something drawImage accepts.
+function decodeJpegFrame(buf) {
+  const blob = new Blob([buf], { type: 'image/jpeg' });
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('jpeg decode')); };
+    img.src = url;
+  });
 }
 
 function startGameStream(url) {
@@ -2723,16 +2749,42 @@ function gameLoop(ts) {
 
   if (myRole === 'gunner') return; // gunners never send drive
 
-  // Drive at up to DRIVE_HZ
-  if (now - lastDriveSend >= 1000 / DRIVE_HZ) {
-    lastDriveSend = now;
-    if (connection && joystickActive) {
-      connection.invoke('SendDrive', roundF(joyL), roundF(joyR)).catch(() => {});
-    }
-  }
+  maybeSendDrive(now);
 }
 
 const roundF = v => Math.round(v * 1000) / 1000;
+
+// Drive sends are change-driven with a steady refresh:
+//  - a change the tank can actually act on goes out straight away (rate-capped
+//    at DRIVE_FAST_HZ), so pushing the stick isn't held back until the next
+//    20 Hz tick — that wait used to add up to 50 ms to every stick movement;
+//  - otherwise the current value is re-sent at DRIVE_HZ, which the robot's
+//    500 ms drive watchdog relies on while the stick is held still.
+// The robot quantises speed to 1/DRIVE_LEVELS steps (MotorController PWM_STEPS),
+// so smaller wobbles of the thumb don't count as a change.
+const DRIVE_FAST_HZ = 30; // with gamepad turret (20 Hz) + fire, stays under GameHub.MaxMsgsPerSecond (60)
+const DRIVE_LEVELS  = 8;
+let lastDriveLevelL = 0, lastDriveLevelR = 0;
+
+function maybeSendDrive(now) {
+  if (!joystickActive) {
+    // Stops are sent directly by the release paths; start the next push from 0
+    // so it counts as a change and goes out immediately.
+    lastDriveLevelL = lastDriveLevelR = 0;
+    return;
+  }
+  if (!connection) return;
+  const lvlL = Math.round(joyL * DRIVE_LEVELS);
+  const lvlR = Math.round(joyR * DRIVE_LEVELS);
+  const since   = now - lastDriveSend;
+  const changed = lvlL !== lastDriveLevelL || lvlR !== lastDriveLevelR;
+  if (since >= 1000 / DRIVE_HZ || (changed && since >= 1000 / DRIVE_FAST_HZ)) {
+    lastDriveSend   = now;
+    lastDriveLevelL = lvlL;
+    lastDriveLevelR = lvlR;
+    connection.send('SendDrive', roundF(joyL), roundF(joyR)).catch(() => {});
+  }
+}
 
 // ════════════════════════════════════════════════════════
 // Joystick
@@ -2765,7 +2817,7 @@ function releaseJoy(e) {
   joystickActive  = false;
   joyL = joyR = 0;
   joyThumb.style.transform = 'translate(-50%, -50%)';
-  if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+  if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
 }
 
 function updateJoy(cx, cy) {
@@ -2799,6 +2851,9 @@ function updateJoy(cx, cy) {
   const tx = nx * 0.50;
   joyL = clamp(ny + tx, -1, 1);
   joyR = clamp(ny - tx, -1, 1);
+
+  // Send from the pointer event itself rather than waiting for the next rAF tick.
+  if (!isDead && myRole !== 'gunner') maybeSendDrive(performance.now());
 }
 
 // ════════════════════════════════════════════════════════
@@ -2867,7 +2922,7 @@ function updateTurretSlider(cx, cy) {
 
   if (speed !== turretSentSpeed) {
     turretSentSpeed = speed;
-    if (connection) connection.invoke('SendTurret', speed).catch(() => {});
+    if (connection) connection.send('SendTurret', speed).catch(() => {});
   }
 }
 
@@ -2877,7 +2932,7 @@ function releaseTurretSlider() {
   turretThumb.classList.remove('zone-fast', 'zone-slow');
   if (turretSentSpeed !== 0) {
     turretSentSpeed = 0;
-    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
   }
 }
 
@@ -3296,7 +3351,7 @@ function onFire() {
 
   fireCooldownUntil = now + fireCooldownMs;
   haptic([15, 10, 25, 10, 60]); // rising smooth pulse
-  if (connection) connection.invoke('Fire').catch(() => {});
+  if (connection) connection.send('Fire').catch(() => {});
 
   startFireCooldownUI();
 }
@@ -3395,7 +3450,7 @@ function _updateKbDrive() {
     if (joystickActive) {
       joystickActive = false;
       joyL = joyR = 0;
-      if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+      if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
     }
   } else {
     joystickActive = true;
@@ -3407,7 +3462,7 @@ function _updateKbDrive() {
 function _updateKbTurret() {
   if (!connection || myRole === 'driver') return;
   const speed = _kbHeld[','] ? 1 : (_kbHeld['.'] ? -1 : 0);
-  connection.invoke('SendTurret', speed).catch(() => {});
+  connection.send('SendTurret', speed).catch(() => {});
 }
 
 document.addEventListener('keydown', e => {
@@ -3449,7 +3504,7 @@ window.addEventListener('blur', () => {
   for (const k of Object.keys(_kbHeld)) delete _kbHeld[k];
   if (_kbGameActive()) {
     _updateKbDrive();
-    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
   }
 });
 
@@ -3502,10 +3557,10 @@ function _gpPoll(now) {
     if (tx !== 0 && now - _gpTurretSendLast >= 1000 / GP_TURRET_HZ) {
       _gpTurretSendLast = now;
       _gpTurretActive   = true;
-      if (connection) connection.invoke('SendTurret', roundF(-tx)).catch(() => {});
+      if (connection) connection.send('SendTurret', roundF(-tx)).catch(() => {});
     } else if (tx === 0 && _gpTurretActive) {
       _gpTurretActive = false;
-      if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+      if (connection) connection.send('SendTurret', 0).catch(() => {});
     }
   }
 
@@ -3527,9 +3582,9 @@ window.addEventListener('gamepaddisconnected', e => {
     if (!_anyKbDriveHeld() && joystickActive) {
       joystickActive = false;
       joyL = joyR = 0;
-      if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+      if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
     }
-    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
   }
 });
 

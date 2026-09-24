@@ -897,6 +897,20 @@ function videoWsUrl(robotUrl) {
   return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}`;
 }
 
+// Decodes one JPEG (ArrayBuffer) off the main thread via createImageBitmap where
+// supported, falling back to <img> + blob URL. Same helper as index.html.
+function decodeJpegFrame(buf) {
+  const blob = new Blob([buf], { type: 'image/jpeg' });
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('jpeg decode')); };
+    img.src = url;
+  });
+}
+
 // ── Fire effect overlay: two pieces per tank's video cell, both
 // overlay-blended (see .grid-cell-fireflash / .grid-cell-firebeam CSS) and
 // masked around the gun barrel. Triggered by the server-broadcast FireEvent,
@@ -1297,22 +1311,31 @@ function startGridStream(index, robotUrl) {
   _gridWs[index] = ws;
 
   ws.onopen  = () => { _gridLastFrame[index] = Date.now(); if (noVid) noVid.style.display = 'none'; };
+  // One decode in flight per cell, holding only the newest waiting frame, so a
+  // busy display PC skips stale frames rather than queuing them and lagging.
+  let decoding = false;
+  let pending  = null;
+  const drawNext = () => {
+    if (decoding || !pending) return;
+    const data = pending;
+    pending  = null;
+    decoding = true;
+    decodeJpegFrame(data).then(img => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!canvas.width  || canvas.width  !== w) canvas.width  = w || canvas.offsetWidth;
+      if (!canvas.height || canvas.height !== h) canvas.height = h || canvas.offsetHeight;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
+      onGridVideoFrameTick(index); // step this cell's fire-flash decay in lockstep with real decoded frames
+    }).catch(() => { /* corrupt frame — skip it */ })
+      .finally(() => { decoding = false; drawNext(); });
+  };
   ws.onmessage = (e) => {
     _gridLastFrame[index] = Date.now();
     if (noVid && noVid.style.display !== 'none') noVid.style.display = 'none';
-    const blob    = new Blob([e.data], { type: 'image/jpeg' });
-    const blobUrl = URL.createObjectURL(blob);
-    const img     = new Image();
-    img.onload = () => {
-      if (!canvas.width  || canvas.width  !== img.naturalWidth)
-        canvas.width  = img.naturalWidth  || canvas.offsetWidth;
-      if (!canvas.height || canvas.height !== img.naturalHeight)
-        canvas.height = img.naturalHeight || canvas.offsetHeight;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(blobUrl);
-      onGridVideoFrameTick(index); // step this cell's fire-flash decay in lockstep with real decoded frames
-    };
-    img.src = blobUrl;
+    pending = e.data;
+    drawNext();
   };
   ws.onerror = () => { if (noVid) { noVid.textContent = 'no stream'; noVid.style.display = ''; } };
   ws.onclose = () => {

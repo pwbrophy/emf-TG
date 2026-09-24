@@ -215,6 +215,7 @@ public class RobotWebSocketServer : MonoBehaviour
 
         protected override void OnOpen()
         {
+            PetersUtils.DisableNagle(Context); // drive/turret must not wait on the robot's delayed ACKs
             if (Parent != null) Parent.PostMain(() => Parent.OnOpened(ID));
         }
 
