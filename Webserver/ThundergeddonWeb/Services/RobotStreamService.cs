@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
 namespace ThundergeddonWeb.Services;
 
@@ -35,6 +36,18 @@ public class RobotStreamService
     {
         if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
             bodyFeature.DisableBuffering();
+
+        // No minimum send rate for video. Kestrel's default (240 B/s after a 5 s
+        // grace) aborts this response during any Wi-Fi blip longer than ~5 s,
+        // because video always has a write pending. The abort's FIN/RST is sent
+        // while the phone is unreachable, so the phone never learns the stream
+        // is dead: its <img> sits on a half-open socket forever and the picture
+        // goes black, while SignalR (a WebSocket, exempt from this limit) just
+        // retransmits and carries on — controls work, video doesn't. Without the
+        // limit the stream rides out the blip exactly like SignalR does; a phone
+        // that is really gone still ends via TCP retransmission timeout.
+        if (response.HttpContext.Features.Get<IHttpMinResponseDataRateFeature>() is { } rate)
+            rate.MinDataRate = null;
 
         response.ContentType                  = "multipart/x-mixed-replace; boundary=frame";
         response.Headers["Cache-Control"]     = "no-cache";

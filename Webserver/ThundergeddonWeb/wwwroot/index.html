@@ -1600,6 +1600,7 @@ function startWsVideoDecoder(robotUrl) {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
       frameCount++;
+      _lastVideoFrameAt = performance.now(); // feeds the stall watchdog
       onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
       if (!gotFirstFrame) {
         gotFirstFrame        = true;
@@ -1630,9 +1631,73 @@ function decodeJpegFrame(buf) {
   });
 }
 
+// ── Video stall watchdog ───────────────────────────────────────────────────
+// A feed can die without any error reaching the page: a Wi-Fi blip can leave
+// the stream on a half-open socket that never delivers another byte, and the
+// browser may then drop the last decoded frame, leaving the video black while
+// SignalR (controls, HUD) carries on. Refreshing fixed it because it opens a
+// fresh stream — this does the same automatically. Once a second it checks
+// when a new frame last arrived and restarts the feed if none has for
+// VIDEO_STALL_MS. WS decoder path: every decoded frame stamps
+// _lastVideoFrameAt. Native <img> path: an MJPEG <img> fires no per-frame
+// events, so a tiny copy of the current frame is compared with the previous
+// one — sensor noise makes consecutive live frames always differ slightly.
+const VIDEO_STALL_MS = 5000;
+let _videoUrl         = '';    // robot stream URL of the current game
+let _videoWanted      = false; // true from game start until the video is torn down
+let _lastVideoFrameAt = 0;     // performance.now() of the last new frame seen
+let _vSampleCtx       = null;
+let _vSamplePrev      = null;
+
+function sampleImgFrame() {
+  const img = document.getElementById('stream');
+  if (!img.naturalWidth) return; // no frame decoded yet
+  if (!_vSampleCtx) {
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 24;
+    _vSampleCtx = c.getContext('2d', { willReadFrequently: true });
+  }
+  let px;
+  try {
+    _vSampleCtx.drawImage(img, 0, 0, 32, 24);
+    px = _vSampleCtx.getImageData(0, 0, 32, 24).data;
+  } catch (_) { return; } // broken image — let the stall timer run out
+  const prev = _vSamplePrev;
+  _vSamplePrev = px;
+  if (!prev) { _lastVideoFrameAt = performance.now(); return; }
+  for (let i = 0; i < px.length; i++) {
+    if (px[i] !== prev[i]) { _lastVideoFrameAt = performance.now(); return; }
+  }
+}
+
+setInterval(() => {
+  // Not expecting frames (no game, paused = robot stream_off, page hidden):
+  // hold the baseline so the stall window starts fresh when we resume.
+  if (!_videoWanted || gamePaused || document.visibilityState !== 'visible') {
+    _lastVideoFrameAt = performance.now();
+    return;
+  }
+  if (!_videoWs) sampleImgFrame();
+  const stalledMs = performance.now() - _lastVideoFrameAt;
+  if (stalledMs > VIDEO_STALL_MS) {
+    dbg('video watchdog: no new frame for ' + Math.round(stalledMs / 1000) + 's — restarting feed');
+    startGameStream(_videoUrl);
+  }
+}, 1000);
+
+function stopGameStream() {
+  _videoWanted = false;
+  document.getElementById('stream').src = '';
+  stopVideoWs();
+}
+
 function startGameStream(url) {
   dbg('startGameStream url=' + url);
   if (!url) { dbg('startGameStream: no url, aborting'); return; }
+  _videoUrl         = url;
+  _videoWanted      = true;
+  _lastVideoFrameAt = performance.now();
+  _vSamplePrev      = null;
   // Route through the server-side fanout proxy so the robot only has one HTTP
   // streaming client regardless of how many viewers (phone + display) are watching.
   const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url);
@@ -1721,8 +1786,7 @@ function returnToJoin(message) {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
   fireCooldownPauseLeft = 0;
-  document.getElementById('stream').src = '';
-  stopVideoWs();
+  stopGameStream();
   releaseWakeLock();
   const _sc = document.getElementById('stream-canvas');
   _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
@@ -2417,8 +2481,7 @@ function onGameOver(data) {
 
     // After 2 s (fade complete): stop video, hold GAME OVER on black for 2 more seconds
     setTimeout(() => {
-      document.getElementById('stream').src = '';
-      stopVideoWs();
+      stopGameStream();
       // p1 stays visible — GAME OVER text on pure black background
 
       setTimeout(() => {
