@@ -38,6 +38,8 @@ public:
         cfg.stack_size      = 8192;
         cfg.max_open_sockets = 3;     // player phone + spectator display + spare slot
 
+        _stopping = false;
+
         if (httpd_start(&_server, &cfg) != ESP_OK) {
             Serial.println("[MJPEG] httpd_start failed");
             _server = nullptr;
@@ -58,6 +60,10 @@ public:
     void stop()
     {
         if (_server) {
+            // httpd_stop() waits for the server task to exit, and that task is
+            // inside _streamHandler for as long as a viewer is connected — so
+            // tell the handler to return first, or OTA would hang here.
+            _stopping = true;
             httpd_stop(_server);
             _server = nullptr;
             Serial.println("[MJPEG] stopped");
@@ -147,6 +153,8 @@ private:
         uint32_t lastPeerCheckMs = millis();
 
         for (;;) {
+            if (self->_stopping) break;
+
             if (!self->_enabled) {
                 // Stream is paused (stream_off or lobby); wait rather than disconnect.
                 // httpd runs every handler in one task, so a viewer that leaves
@@ -202,5 +210,6 @@ private:
 
     httpd_handle_t   _server  = nullptr;
     volatile bool    _enabled = false;
+    volatile bool    _stopping = false;
     volatile uint32_t _minFrameIntervalMs = 50; // 50 ms = 20 fps default cap
 };
