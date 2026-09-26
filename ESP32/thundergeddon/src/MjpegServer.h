@@ -95,6 +95,20 @@ private:
         return true;
     }
 
+    static constexpr uint32_t kPeerCheckIntervalMs = 500;
+
+    // True if the viewer has closed the connection. Peeks one byte without
+    // blocking or consuming it: 0 = orderly close (FIN), EAGAIN = still open
+    // with nothing to read, any other error = connection reset/gone.
+    static bool _peerClosed(int fd)
+    {
+        char b;
+        ssize_t n = lwip_recv(fd, &b, 1, MSG_PEEK | MSG_DONTWAIT);
+        if (n > 0) return false;
+        if (n == 0) return true;
+        return errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR;
+    }
+
     // The stream is written straight to the socket rather than through
     // httpd_resp_send_chunk(). Chunked encoding split every frame into nine
     // small socket writes, and with Nagle on, the tail of each JPEG then sat in
@@ -130,11 +144,20 @@ private:
 
         char header[96];
         uint32_t lastFrameMs = 0;
+        uint32_t lastPeerCheckMs = millis();
 
         for (;;) {
             if (!self->_enabled) {
-                // Stream is paused (stream_off or lobby); wait rather than disconnect
+                // Stream is paused (stream_off or lobby); wait rather than disconnect.
+                // httpd runs every handler in one task, so a viewer that leaves
+                // during the pause must be noticed here — otherwise this handler
+                // holds the task until the next stream_on and every new client
+                // (e.g. the web server's stream proxy reconnecting) gets no reply.
                 vTaskDelay(pdMS_TO_TICKS(100));
+                if (millis() - lastPeerCheckMs >= kPeerCheckIntervalMs) {
+                    lastPeerCheckMs = millis();
+                    if (_peerClosed(fd)) break;
+                }
                 continue;
             }
 
