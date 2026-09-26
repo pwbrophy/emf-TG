@@ -2199,7 +2199,11 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         public PlayerWebSocketServer Parent;
 
-        protected override void OnOpen()    { Parent?.OnSessionOpened(ID); }
+        protected override void OnOpen()
+        {
+            PetersUtils.DisableNagle(Context); // state/fire/hit pushes to phones go out immediately
+            Parent?.OnSessionOpened(ID);
+        }
         protected override void OnMessage(MessageEventArgs e) { if (e.IsText) Parent?.OnSessionMessage(ID, e.Data); }
         protected override void OnClose(CloseEventArgs e)     { Parent?.OnSessionClosed(ID); }
         protected override void OnError(ErrorEventArgs e)     { Debug.LogWarning("[PlayerWS] Error: " + e.Message); }

@@ -8,7 +8,14 @@
   <title>Thundergeddon</title>
   <script src="/js/signalr.min.js"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after {
+      box-sizing: border-box; margin: 0; padding: 0;
+      /* iOS Safari decides whether a double-tap zooms by looking at the tapped
+         element's touch-action. Set it explicitly on every element rather than
+         relying on it being derived from html/body (which has not been enough
+         in practice). Elements with their own touch-action: none still win. */
+      touch-action: manipulation;
+    }
 
     :root {
       --bg:       #0d0d14;
@@ -37,6 +44,37 @@
       font-size: 16px;
       overflow: hidden;
       touch-action: none;
+      /* Turn off iOS text autosizing. WebKit inflates font sizes when it
+         thinks a text column is wider than the screen — which the rotated
+         portrait game layout is (body width = 100vh) — and re-evaluates on
+         orientation and zoom changes. Text then outgrows its vmin-sized
+         boxes and the HUD overlaps itself; only a page-zoom change in the
+         aA menu forced a re-layout. */
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
+    /* During play, give every element touch-action: none directly — including
+       overlays outside #screen-playing (dead screen, pause, game over). iOS
+       checks the touched element for double-tap/pinch zoom; don't depend on
+       it deriving the value from an ancestor. Taps and clicks still work. */
+    body.game-active, body.game-active * { touch-action: none; }
+
+    /* Shown only while the page is zoomed in. Lives on <html> (not <body>) so
+       the portrait game-active rotation doesn't apply to it; JS pins it to the
+       visual viewport and counter-scales it so it reads at normal size. */
+    #zoom-hint {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      z-index: 100000;
+      padding: 10px 14px;
+      background: rgba(255,77,28,0.95);
+      color: #fff;
+      font: 700 16px system-ui, -apple-system, sans-serif;
+      text-align: center;
+      pointer-events: none;
     }
 
     /* ── Shared screen container ── */
@@ -1109,6 +1147,7 @@
     <input id="name-input" type="text" placeholder="Enter your name"
            maxlength="12" autocomplete="off" spellcheck="false" />
     <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
+    <button class="btn-secondary" onclick="visitThundergeddon()">VISIT THUNDERGEDDON.COM</button>
     <div id="join-status" class="status"></div>
   </div>
 </div>
@@ -1300,7 +1339,7 @@
     <div class="go-stat-sub"><span class="go-stat-label">from kills</span><span class="go-stat-value" id="stat-vp-kills">&#8212;</span></div>
     <div class="go-stat-row"><span class="go-stat-label">Your nemesis</span><span class="go-stat-value go-nemesis" id="stat-nemesis">&#8212;</span></div>
     <div class="go-btn-row">
-      <button class="go-btn-primary" onclick="returnToJoin()">CONTINUE</button>
+      <button class="go-btn-primary" onclick="continueToSite()">CONTINUE</button>
     </div>
   </div>
 
@@ -1541,33 +1580,124 @@ function startWsVideoDecoder(robotUrl) {
       }, 1500);
     }
   };
-  _videoWs.onmessage = e => {
-    const blob    = new Blob([e.data], { type: 'image/jpeg' });
-    const blobUrl = URL.createObjectURL(blob);
-    const img     = new Image();
-    img.onload = () => {
-      if (img.naturalWidth)  canvas.width  = img.naturalWidth;
-      if (img.naturalHeight) canvas.height = img.naturalHeight;
+  // Decode one frame at a time and hold only the newest waiting frame. When the
+  // phone decodes slower than frames arrive, stale frames are skipped instead of
+  // queuing behind each other and pushing the picture further and further behind.
+  let decoding = false;
+  let pending  = null;
+  const drawNext = () => {
+    if (decoding || !pending) return;
+    const data = pending;
+    pending  = null;
+    decoding = true;
+    decodeJpegFrame(data).then(img => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      // Assigning canvas width/height (even to the same value) clears and
+      // reallocates the canvas, so only do it when the frame size changes.
+      if (w && canvas.width  !== w) canvas.width  = w;
+      if (h && canvas.height !== h) canvas.height = h;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(blobUrl);
+      if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
       frameCount++;
+      _lastVideoFrameAt = performance.now(); // feeds the stall watchdog
       onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
       if (!gotFirstFrame) {
         gotFirstFrame        = true;
         canvas.style.display = '';
         ph.style.display     = 'none';
-        dbg('WS first frame! ' + img.naturalWidth + 'x' + img.naturalHeight);
+        dbg('WS first frame! ' + w + 'x' + h);
       } else if (frameCount === 10) {
         dbg('WS stream OK, 10 frames received');
       }
-    };
-    img.src = blobUrl;
+    }).catch(() => { /* corrupt frame — skip it */ })
+      .finally(() => { decoding = false; drawNext(); });
   };
+  _videoWs.onmessage = e => { pending = e.data; drawNext(); };
+}
+
+// Decodes one JPEG (ArrayBuffer) off the main thread where the browser supports
+// createImageBitmap (iOS 15+, all current desktop/Android browsers); falls back
+// to an <img> + blob URL on older ones. Resolves with something drawImage accepts.
+function decodeJpegFrame(buf) {
+  const blob = new Blob([buf], { type: 'image/jpeg' });
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('jpeg decode')); };
+    img.src = url;
+  });
+}
+
+// ── Video stall watchdog ───────────────────────────────────────────────────
+// A feed can die without any error reaching the page: a Wi-Fi blip can leave
+// the stream on a half-open socket that never delivers another byte, and the
+// browser may then drop the last decoded frame, leaving the video black while
+// SignalR (controls, HUD) carries on. Refreshing fixed it because it opens a
+// fresh stream — this does the same automatically. Once a second it checks
+// when a new frame last arrived and restarts the feed if none has for
+// VIDEO_STALL_MS. WS decoder path: every decoded frame stamps
+// _lastVideoFrameAt. Native <img> path: an MJPEG <img> fires no per-frame
+// events, so a tiny copy of the current frame is compared with the previous
+// one — sensor noise makes consecutive live frames always differ slightly.
+const VIDEO_STALL_MS = 5000;
+let _videoUrl         = '';    // robot stream URL of the current game
+let _videoWanted      = false; // true from game start until the video is torn down
+let _lastVideoFrameAt = 0;     // performance.now() of the last new frame seen
+let _vSampleCtx       = null;
+let _vSamplePrev      = null;
+
+function sampleImgFrame() {
+  const img = document.getElementById('stream');
+  if (!img.naturalWidth) return; // no frame decoded yet
+  if (!_vSampleCtx) {
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 24;
+    _vSampleCtx = c.getContext('2d', { willReadFrequently: true });
+  }
+  let px;
+  try {
+    _vSampleCtx.drawImage(img, 0, 0, 32, 24);
+    px = _vSampleCtx.getImageData(0, 0, 32, 24).data;
+  } catch (_) { return; } // broken image — let the stall timer run out
+  const prev = _vSamplePrev;
+  _vSamplePrev = px;
+  if (!prev) { _lastVideoFrameAt = performance.now(); return; }
+  for (let i = 0; i < px.length; i++) {
+    if (px[i] !== prev[i]) { _lastVideoFrameAt = performance.now(); return; }
+  }
+}
+
+setInterval(() => {
+  // Not expecting frames (no game, paused = robot stream_off, page hidden):
+  // hold the baseline so the stall window starts fresh when we resume.
+  if (!_videoWanted || gamePaused || document.visibilityState !== 'visible') {
+    _lastVideoFrameAt = performance.now();
+    return;
+  }
+  if (!_videoWs) sampleImgFrame();
+  const stalledMs = performance.now() - _lastVideoFrameAt;
+  if (stalledMs > VIDEO_STALL_MS) {
+    dbg('video watchdog: no new frame for ' + Math.round(stalledMs / 1000) + 's — restarting feed');
+    startGameStream(_videoUrl);
+  }
+}, 1000);
+
+function stopGameStream() {
+  _videoWanted = false;
+  document.getElementById('stream').src = '';
+  stopVideoWs();
 }
 
 function startGameStream(url) {
   dbg('startGameStream url=' + url);
   if (!url) { dbg('startGameStream: no url, aborting'); return; }
+  _videoUrl         = url;
+  _videoWanted      = true;
+  _lastVideoFrameAt = performance.now();
+  _vSamplePrev      = null;
   // Route through the server-side fanout proxy so the robot only has one HTTP
   // streaming client regardless of how many viewers (phone + display) are watching.
   const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url);
@@ -1656,8 +1786,7 @@ function returnToJoin(message) {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   clearInterval(fireCooldownTimer);
   fireCooldownPauseLeft = 0;
-  document.getElementById('stream').src = '';
-  stopVideoWs();
+  stopGameStream();
   releaseWakeLock();
   const _sc = document.getElementById('stream-canvas');
   _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
@@ -2352,8 +2481,7 @@ function onGameOver(data) {
 
     // After 2 s (fade complete): stop video, hold GAME OVER on black for 2 more seconds
     setTimeout(() => {
-      document.getElementById('stream').src = '';
-      stopVideoWs();
+      stopGameStream();
       // p1 stays visible — GAME OVER text on pure black background
 
       setTimeout(() => {
@@ -2409,6 +2537,9 @@ function goToStats() {
   }, 700);
 }
 
+function visitThundergeddon() {
+  window.location.href = 'https://www.thundergeddon.com/';
+}
 
 function resetGoOverlay() {
   stopGoFireworks();
@@ -2427,6 +2558,10 @@ function resetGoOverlay() {
     blackout.style.transition = '';
   }
   _pendingStats = null;
+}
+
+function continueToSite() {
+  window.location.href = 'https://www.thundergeddon.com/';
 }
 
 // ── Fireworks engine ─────────────────────────────────────────────────────────
@@ -2723,16 +2858,42 @@ function gameLoop(ts) {
 
   if (myRole === 'gunner') return; // gunners never send drive
 
-  // Drive at up to DRIVE_HZ
-  if (now - lastDriveSend >= 1000 / DRIVE_HZ) {
-    lastDriveSend = now;
-    if (connection && joystickActive) {
-      connection.invoke('SendDrive', roundF(joyL), roundF(joyR)).catch(() => {});
-    }
-  }
+  maybeSendDrive(now);
 }
 
 const roundF = v => Math.round(v * 1000) / 1000;
+
+// Drive sends are change-driven with a steady refresh:
+//  - a change the tank can actually act on goes out straight away (rate-capped
+//    at DRIVE_FAST_HZ), so pushing the stick isn't held back until the next
+//    20 Hz tick — that wait used to add up to 50 ms to every stick movement;
+//  - otherwise the current value is re-sent at DRIVE_HZ, which the robot's
+//    500 ms drive watchdog relies on while the stick is held still.
+// The robot quantises speed to 1/DRIVE_LEVELS steps (MotorController PWM_STEPS),
+// so smaller wobbles of the thumb don't count as a change.
+const DRIVE_FAST_HZ = 30; // with gamepad turret (20 Hz) + fire, stays under GameHub.MaxMsgsPerSecond (60)
+const DRIVE_LEVELS  = 8;
+let lastDriveLevelL = 0, lastDriveLevelR = 0;
+
+function maybeSendDrive(now) {
+  if (!joystickActive) {
+    // Stops are sent directly by the release paths; start the next push from 0
+    // so it counts as a change and goes out immediately.
+    lastDriveLevelL = lastDriveLevelR = 0;
+    return;
+  }
+  if (!connection) return;
+  const lvlL = Math.round(joyL * DRIVE_LEVELS);
+  const lvlR = Math.round(joyR * DRIVE_LEVELS);
+  const since   = now - lastDriveSend;
+  const changed = lvlL !== lastDriveLevelL || lvlR !== lastDriveLevelR;
+  if (since >= 1000 / DRIVE_HZ || (changed && since >= 1000 / DRIVE_FAST_HZ)) {
+    lastDriveSend   = now;
+    lastDriveLevelL = lvlL;
+    lastDriveLevelR = lvlR;
+    connection.send('SendDrive', roundF(joyL), roundF(joyR)).catch(() => {});
+  }
+}
 
 // ════════════════════════════════════════════════════════
 // Joystick
@@ -2765,7 +2926,7 @@ function releaseJoy(e) {
   joystickActive  = false;
   joyL = joyR = 0;
   joyThumb.style.transform = 'translate(-50%, -50%)';
-  if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+  if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
 }
 
 function updateJoy(cx, cy) {
@@ -2799,6 +2960,9 @@ function updateJoy(cx, cy) {
   const tx = nx * 0.50;
   joyL = clamp(ny + tx, -1, 1);
   joyR = clamp(ny - tx, -1, 1);
+
+  // Send from the pointer event itself rather than waiting for the next rAF tick.
+  if (!isDead && myRole !== 'gunner') maybeSendDrive(performance.now());
 }
 
 // ════════════════════════════════════════════════════════
@@ -2867,7 +3031,7 @@ function updateTurretSlider(cx, cy) {
 
   if (speed !== turretSentSpeed) {
     turretSentSpeed = speed;
-    if (connection) connection.invoke('SendTurret', speed).catch(() => {});
+    if (connection) connection.send('SendTurret', speed).catch(() => {});
   }
 }
 
@@ -2877,7 +3041,7 @@ function releaseTurretSlider() {
   turretThumb.classList.remove('zone-fast', 'zone-slow');
   if (turretSentSpeed !== 0) {
     turretSentSpeed = 0;
-    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
   }
 }
 
@@ -2905,52 +3069,87 @@ turretBase.addEventListener('pointercancel', releaseTurretSlider);
 // Capture phase (true) intercepts before any element handler fires.
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
 
-// Prevent Safari pinch-zoom during gameplay.
-// iOS 10+ ignores user-scalable=no in the viewport meta tag (Apple re-enabled
-// it for accessibility), so we must suppress the gesture events directly.
-// gesturestart/gesturechange are WebKit-specific events fired when a multi-finger
-// gesture begins — blocking them stops the zoom before it starts.
-// touchstart preventDefault on 2+ fingers is a belt-and-suspenders backup.
-document.addEventListener('gesturestart',  e => e.preventDefault(), { passive: false });
-document.addEventListener('gesturechange', e => e.preventDefault(), { passive: false });
-document.addEventListener('gestureend',    e => e.preventDefault(), { passive: false });
+// ── iOS Safari zoom defence ──
+// iOS 10+ ignores user-scalable=no / maximum-scale in the viewport meta tag
+// (Apple re-enabled zoom for accessibility), so zoom has to be blocked in JS.
+//
+// Past bug: if the page did get zoomed mid-game, the pinch guard below
+// stopped the player pinching back OUT and the double-tap guard stopped them
+// double-tapping back out, so they were stuck until they found the aA menu.
+// Now every guard stands down while the page is already zoomed, so the normal
+// gestures undo it. The double-tap guard also covers every screen, not just
+// gameplay. (See also text-size-adjust and touch-action in the CSS.)
+const _isZoomed = () => !!window.visualViewport && window.visualViewport.scale > 1.02;
+
+// Pinch: gesturestart/change/end are WebKit-only multi-finger events;
+// 2-finger touchstart is a backup.
+const _blockGesture = e => { if (!_isZoomed()) e.preventDefault(); };
+document.addEventListener('gesturestart',  _blockGesture, { passive: false });
+document.addEventListener('gesturechange', _blockGesture, { passive: false });
+document.addEventListener('gestureend',    _blockGesture, { passive: false });
 document.addEventListener('touchstart', e => {
-  if (e.touches.length > 1) e.preventDefault();
+  if (e.touches.length > 1 && !_isZoomed()) e.preventDefault();
 }, { passive: false });
 
-// Double-tap zoom is NOT a gesture event, so the guards above never see it —
-// two quick taps anywhere (e.g. mashing near the fire button) zoom the page on
-// iOS Safari. During gameplay all controls use pointer events (pointerdown),
-// which have already fired by touchend, so suppressing the second tap's
-// touchend costs nothing. Scoped to game-active so lobby buttons (onclick,
-// which needs the synthetic click after touchend) keep working.
-let _lastTouchEnd = 0;
+// Double-tap: cancel the second tap's touchend. That also cancels the
+// synthetic click, so for buttons/inputs replay it ourselves (only for a
+// genuine tap — not the end of a scroll). Gameplay controls use pointerdown,
+// which has already fired by touchend, so they are unaffected.
+const _TAP_TARGETS = 'button, a, label, input, select, textarea, [onclick]';
+let _lastTouchEnd = 0, _tapStartX = 0, _tapStartY = 0;
+document.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { _tapStartX = e.touches[0].clientX; _tapStartY = e.touches[0].clientY; }
+}, { passive: true });
 document.addEventListener('touchend', e => {
-  if (!document.body.classList.contains('game-active')) return;
   const now = Date.now();
-  if (now - _lastTouchEnd < 400) e.preventDefault();
+  const quick = now - _lastTouchEnd < 400;
   _lastTouchEnd = now;
+  if (!quick || _isZoomed()) return;
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (e.touches.length || !t || Math.hypot(t.clientX - _tapStartX, t.clientY - _tapStartY) > 10) return;
+  const el = e.target.closest && e.target.closest(_TAP_TARGETS);
+  if (!el || el.disabled) return;
+  if (el.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, select')) el.focus();
+  else el.click();
 }, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 
-// Recovery watchdog: if the page still ends up pinch/double-tap zoomed
-// (visualViewport.scale > 1), rewriting the viewport meta tag makes iOS
-// re-clamp to maximum-scale and snap back to 1.0. Debounced so it doesn't
-// fight an in-progress gesture.
+// Recovery if zoom still sneaks through: rewriting the viewport meta can make
+// iOS re-clamp to scale 1 (debounced so it doesn't fight a gesture). If that
+// doesn't take, show a hint pinned to the visible area telling the player how
+// to undo it — the gesture guards above are already standing down.
 const _vpMeta = document.querySelector('meta[name="viewport"]');
 const _vpBase = _vpMeta.getAttribute('content');
+const _zoomHint = document.createElement('div');
+_zoomHint.id = 'zoom-hint';
+_zoomHint.textContent = 'Zoomed in — pinch or double-tap to zoom back out';
+document.documentElement.appendChild(_zoomHint);
 let _zoomResetTimer = null;
 function forceZoomReset() {
+  if (!_isZoomed()) return;
   dbg('zoom watchdog: scale=' + window.visualViewport.scale.toFixed(2) + ' — forcing reset');
   _vpMeta.setAttribute('content', _vpBase + ', minimum-scale=1.0');
   setTimeout(() => _vpMeta.setAttribute('content', _vpBase), 100);
 }
+function updateZoomHint() {
+  const vv = window.visualViewport;
+  if (!_isZoomed()) { _zoomHint.style.display = 'none'; return; }
+  _zoomHint.style.display = 'block';
+  _zoomHint.style.width = (vv.width * vv.scale) + 'px';
+  _zoomHint.style.transform =
+    `translate(${vv.offsetLeft}px, ${vv.offsetTop}px) scale(${1 / vv.scale})`;
+}
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => {
-    if (window.visualViewport.scale > 1.02) {
+  const onViewportChange = () => {
+    updateZoomHint();
+    if (_isZoomed()) {
       clearTimeout(_zoomResetTimer);
       _zoomResetTimer = setTimeout(forceZoomReset, 300);
     }
-  });
+  };
+  window.visualViewport.addEventListener('resize', onViewportChange);
+  window.visualViewport.addEventListener('scroll', onViewportChange);
 }
 
 // ════════════════════════════════════════════════════════
@@ -3296,7 +3495,7 @@ function onFire() {
 
   fireCooldownUntil = now + fireCooldownMs;
   haptic([15, 10, 25, 10, 60]); // rising smooth pulse
-  if (connection) connection.invoke('Fire').catch(() => {});
+  if (connection) connection.send('Fire').catch(() => {});
 
   startFireCooldownUI();
 }
@@ -3395,7 +3594,7 @@ function _updateKbDrive() {
     if (joystickActive) {
       joystickActive = false;
       joyL = joyR = 0;
-      if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+      if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
     }
   } else {
     joystickActive = true;
@@ -3407,7 +3606,7 @@ function _updateKbDrive() {
 function _updateKbTurret() {
   if (!connection || myRole === 'driver') return;
   const speed = _kbHeld[','] ? 1 : (_kbHeld['.'] ? -1 : 0);
-  connection.invoke('SendTurret', speed).catch(() => {});
+  connection.send('SendTurret', speed).catch(() => {});
 }
 
 document.addEventListener('keydown', e => {
@@ -3449,7 +3648,7 @@ window.addEventListener('blur', () => {
   for (const k of Object.keys(_kbHeld)) delete _kbHeld[k];
   if (_kbGameActive()) {
     _updateKbDrive();
-    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
   }
 });
 
@@ -3502,10 +3701,10 @@ function _gpPoll(now) {
     if (tx !== 0 && now - _gpTurretSendLast >= 1000 / GP_TURRET_HZ) {
       _gpTurretSendLast = now;
       _gpTurretActive   = true;
-      if (connection) connection.invoke('SendTurret', roundF(-tx)).catch(() => {});
+      if (connection) connection.send('SendTurret', roundF(-tx)).catch(() => {});
     } else if (tx === 0 && _gpTurretActive) {
       _gpTurretActive = false;
-      if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+      if (connection) connection.send('SendTurret', 0).catch(() => {});
     }
   }
 
@@ -3527,9 +3726,9 @@ window.addEventListener('gamepaddisconnected', e => {
     if (!_anyKbDriveHeld() && joystickActive) {
       joystickActive = false;
       joyL = joyR = 0;
-      if (connection) connection.invoke('SendDrive', 0.0, 0.0).catch(() => {});
+      if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
     }
-    if (connection) connection.invoke('SendTurret', 0).catch(() => {});
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
   }
 });
 
@@ -3555,7 +3754,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v30</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v32</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

@@ -1,6 +1,9 @@
+using System.Buffers;
 using System.Net.WebSockets;
+using System.Text;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
 namespace ThundergeddonWeb.Services;
 
@@ -11,6 +14,13 @@ namespace ThundergeddonWeb.Services;
 /// </summary>
 public class RobotStreamService
 {
+    // Every part is closed by the NEXT boundary line. Browsers only display a
+    // multipart part once they see the boundary that ends it, so writing the
+    // boundary straight after each JPEG (rather than before the next one) shows
+    // each frame as soon as it arrives instead of one frame interval late.
+    internal static readonly byte[] FirstBoundary = Encoding.ASCII.GetBytes("--frame\r\n");
+    internal static readonly byte[] EndBoundary   = Encoding.ASCII.GetBytes("\r\n--frame\r\n");
+
     private readonly IHttpClientFactory _factory;
     private readonly ILogger<RobotStreamService> _log;
     private readonly object _lock = new();
@@ -27,9 +37,28 @@ public class RobotStreamService
         if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
             bodyFeature.DisableBuffering();
 
+        // No minimum send rate for video. Kestrel's default (240 B/s after a 5 s
+        // grace) aborts this response during any Wi-Fi blip longer than ~5 s,
+        // because video always has a write pending. The abort's FIN/RST is sent
+        // while the phone is unreachable, so the phone never learns the stream
+        // is dead: its <img> sits on a half-open socket forever and the picture
+        // goes black, while SignalR (a WebSocket, exempt from this limit) just
+        // retransmits and carries on — controls work, video doesn't. Without the
+        // limit the stream rides out the blip exactly like SignalR does; a phone
+        // that is really gone still ends via TCP retransmission timeout.
+        if (response.HttpContext.Features.Get<IHttpMinResponseDataRateFeature>() is { } rate)
+            rate.MinDataRate = null;
+
         response.ContentType                  = "multipart/x-mixed-replace; boundary=frame";
         response.Headers["Cache-Control"]     = "no-cache";
         response.Headers["X-Accel-Buffering"] = "no";
+
+        try
+        {
+            response.BodyWriter.Write(FirstBoundary);
+            await response.BodyWriter.FlushAsync(ct);
+        }
+        catch (OperationCanceledException) { return; }
 
         // Keep the client's response open across robot-side drops: if the robot's
         // camera restarts (e.g. stream_off/stream_on between games) the broadcaster
@@ -44,7 +73,6 @@ public class RobotStreamService
             }
             finally
             {
-                broadcaster.Unsubscribe(response);
                 Release(robotUrl, broadcaster);
             }
             if (ct.IsCancellationRequested) break;
@@ -53,10 +81,9 @@ public class RobotStreamService
     }
 
     /// <summary>
-    /// Subscribes a WebSocket client to the robot stream.  Individual JPEG frames
-    /// are parsed server-side from the MJPEG multipart stream and sent as binary
-    /// WebSocket messages.  This bypasses iOS Safari's inability to stream-read
-    /// fetch response bodies (multipart/x-mixed-replace).
+    /// Subscribes a WebSocket client to the robot stream.  Each JPEG frame is sent
+    /// as one binary WebSocket message.  This bypasses iOS Safari's inability to
+    /// stream-read fetch response bodies (multipart/x-mixed-replace).
     /// Like the HTTP path, reconnects to the robot while the client stays open.
     /// </summary>
     public async Task StreamFramesToWebSocket(string robotUrl, WebSocket ws, CancellationToken ct)
@@ -107,9 +134,14 @@ public class RobotStreamService
 }
 
 /// <summary>
-/// Opens one streaming connection to a robot and fans raw MJPEG chunks to HTTP
-/// subscribers and parsed JPEG frames to WebSocket subscribers.
-/// Each subscriber gets its own Channel so a slow client never blocks the others.
+/// Opens one streaming connection to a robot, splits it into complete JPEG
+/// frames once, and hands each frame to every subscriber.
+///
+/// Each subscriber has a one-slot "latest frame" mailbox: if a viewer can't keep
+/// up (weak Wi-Fi, slow decode), the stale frame is replaced by the newest one
+/// rather than queued. Latency therefore stays at roughly one frame however slow
+/// the viewer is — it just sees a lower frame rate — and frames are never torn,
+/// because whole frames are dropped rather than arbitrary network chunks.
 /// </summary>
 internal class StreamBroadcaster
 {
@@ -118,15 +150,14 @@ internal class StreamBroadcaster
     private readonly ILogger _log;
 
     private readonly object _subLock = new();
-    private readonly Dictionary<HttpResponse, Channel<byte[]>> _channels = new();
-    private readonly Dictionary<Guid, Channel<byte[]>>         _wsChannels = new();
+    private readonly Dictionary<object, Channel<byte[]>> _subs = new();
     private Task? _readTask;
     private CancellationTokenSource? _readCts;
     private bool _dead; // read loop finished — this broadcaster never streams again
 
     public bool HasSubscribers
     {
-        get { lock (_subLock) return _channels.Count > 0 || _wsChannels.Count > 0; }
+        get { lock (_subLock) return _subs.Count > 0; }
     }
 
     public bool IsDead
@@ -143,94 +174,83 @@ internal class StreamBroadcaster
 
     // ── HTTP subscriber ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Writes frames as multipart parts. The caller has already written the
+    /// opening boundary; every part written here ends with the next boundary.
+    /// </summary>
     public async Task Subscribe(HttpResponse response, CancellationToken clientCt)
     {
-        var ch = MakeChannel();
-        lock (_subLock)
-        {
-            if (_dead) return; // caller retries with a fresh broadcaster
-            _channels[response] = ch;
-            EnsureReadLoop();
-        }
+        var key = new object();
+        var ch  = AddSubscriber(key);
+        if (ch == null) return; // dead — caller retries with a fresh broadcaster
 
+        var writer = response.BodyWriter;
         try
         {
-            await foreach (var chunk in ch.Reader.ReadAllAsync(clientCt))
+            await foreach (var frame in ch.Reader.ReadAllAsync(clientCt))
             {
-                await response.Body.WriteAsync(chunk, clientCt);
-                await response.Body.FlushAsync(clientCt);
+                // Header, JPEG and closing boundary go out in a single flush so
+                // Kestrel sends them as one burst of full-size TCP segments.
+                writer.Write(Encoding.ASCII.GetBytes(
+                    $"Content-Type: image/jpeg\r\nContent-Length: {frame.Length}\r\n\r\n"));
+                writer.Write(frame);
+                writer.Write(RobotStreamService.EndBoundary);
+                var flush = await writer.FlushAsync(clientCt);
+                if (flush.IsCompleted || flush.IsCanceled) break;
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _log.LogDebug("[Stream] HTTP write error: {msg}", ex.Message); }
-    }
-
-    public void Unsubscribe(HttpResponse response)
-    {
-        lock (_subLock)
-        {
-            if (_channels.Remove(response, out var ch)) ch.Writer.TryComplete();
-            if (!HasSubscribers) _readCts?.Cancel();
-        }
+        finally { RemoveSubscriber(key); }
     }
 
     // ── WebSocket subscriber ─────────────────────────────────────────────────
 
     public async Task SubscribeWs(WebSocket ws, CancellationToken ct)
     {
-        var id = Guid.NewGuid();
-        var ch = MakeChannel();
-        lock (_subLock)
-        {
-            if (_dead) return; // caller retries with a fresh broadcaster
-            _wsChannels[id] = ch;
-            EnsureReadLoop();
-        }
+        var key = new object();
+        var ch  = AddSubscriber(key);
+        if (ch == null) return; // dead — caller retries with a fresh broadcaster
 
-        // Buffer incoming raw MJPEG chunks, extract complete JPEG frames,
-        // and send each frame as a binary WebSocket message.
-        var buf = Array.Empty<byte>();
         try
         {
-            await foreach (var chunk in ch.Reader.ReadAllAsync(ct))
+            await foreach (var frame in ch.Reader.ReadAllAsync(ct))
             {
-                // A corrupt stream that never delivers an EOI marker would otherwise
-                // grow this buffer forever. Frames are <100 KB even at VGA, so at
-                // 512 KB the accumulated data is garbage — drop it and resync on the
-                // next SOI marker.
-                if (buf.Length > 512 * 1024)
-                {
-                    _log.LogWarning("[VideoWs] frame buffer overflow ({len} bytes) — resyncing", buf.Length);
-                    buf = Array.Empty<byte>();
-                }
-
-                // Append chunk to running buffer
-                var merged = new byte[buf.Length + chunk.Length];
-                buf.CopyTo(merged, 0);
-                chunk.CopyTo(merged, buf.Length);
-                buf = merged;
-
-                // Send every complete JPEG frame found in the buffer
-                while (buf.Length > 3)
-                {
-                    var (frame, remaining) = ExtractJpegFrame(buf);
-                    if (frame is null) break;
-                    buf = remaining;
-                    if (ws.State != WebSocketState.Open) return;
-                    await ws.SendAsync(new ArraySegment<byte>(frame),
-                        WebSocketMessageType.Binary, endOfMessage: true, ct);
-                }
+                if (ws.State != WebSocketState.Open) return;
+                await ws.SendAsync(new ArraySegment<byte>(frame),
+                    WebSocketMessageType.Binary, endOfMessage: true, ct);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _log.LogDebug("[VideoWs] send error: {msg}", ex.Message); }
-        finally
+        finally { RemoveSubscriber(key); }
+    }
+
+    // ── Subscriber bookkeeping ───────────────────────────────────────────────
+
+    private Channel<byte[]>? AddSubscriber(object key)
+    {
+        var ch = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1)
         {
-            lock (_subLock)
-            {
-                if (_wsChannels.Remove(id)) ch.Writer.TryComplete();
-                if (!HasSubscribers) _readCts?.Cancel();
-            }
+            FullMode     = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = true,
+        });
+        lock (_subLock)
+        {
+            if (_dead) return null;
+            _subs[key] = ch;
+            EnsureReadLoop();
+        }
+        return ch;
+    }
+
+    private void RemoveSubscriber(object key)
+    {
+        lock (_subLock)
+        {
+            if (_subs.Remove(key, out var ch)) ch.Writer.TryComplete();
+            if (_subs.Count == 0) _readCts?.Cancel();
         }
     }
 
@@ -267,6 +287,7 @@ internal class StreamBroadcaster
 
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             var buffer = new byte[32768];
+            var parser = new JpegFrameParser(_log);
 
             while (!ct.IsCancellationRequested)
             {
@@ -280,7 +301,16 @@ internal class StreamBroadcaster
                     using var linked      = CancellationTokenSource
                         .CreateLinkedTokenSource(ct, readTimeout.Token);
 
-                    read = await stream.ReadAsync(buffer, 0, buffer.Length, linked.Token);
+                    // Zero-byte read first: it completes as soon as ANY data has
+                    // arrived; the real read then takes whatever is there. A plain
+                    // read with a large buffer doesn't do that on Windows — it only
+                    // completes when the buffer fills or a segment carries the TCP
+                    // PSH flag, and the robot's lwIP stack often omits PSH on the
+                    // last segment of a frame. That held frames back until ~3 had
+                    // piled up (bursts every ~150 ms), which the latest-frame
+                    // mailboxes below then collapsed to ~7 fps.
+                    await stream.ReadAsync(Memory<byte>.Empty, linked.Token);
+                    read = await stream.ReadAsync(buffer, linked.Token);
 
                     if (readTimeout.IsCancellationRequested)
                     {
@@ -299,13 +329,7 @@ internal class StreamBroadcaster
 
                 if (read == 0) break; // graceful stream end
 
-                byte[] chunk = buffer[..read].ToArray();
-
-                List<Channel<byte[]>> all;
-                lock (_subLock) all = [.. _channels.Values, .. _wsChannels.Values];
-
-                foreach (var ch in all)
-                    ch.Writer.TryWrite(chunk);
+                parser.Append(buffer.AsSpan(0, read), Publish);
             }
         }
         catch (OperationCanceledException) { }
@@ -322,38 +346,95 @@ internal class StreamBroadcaster
         lock (_subLock)
         {
             _dead = true;
-            foreach (var ch in _channels.Values)  ch.Writer.TryComplete();
-            foreach (var ch in _wsChannels.Values) ch.Writer.TryComplete();
+            foreach (var ch in _subs.Values) ch.Writer.TryComplete();
         }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    private static Channel<byte[]> MakeChannel() =>
-        Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4)
-        {
-            FullMode     = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = false,
-        });
-
-    /// <summary>
-    /// Scans <paramref name="buf"/> for the first complete JPEG (SOI FF D8 … EOI FF D9).
-    /// Returns (frame bytes, remaining buffer) on success, or (null, original buf) if the
-    /// frame is incomplete.
-    /// </summary>
-    private static (byte[]? frame, byte[] remaining) ExtractJpegFrame(byte[] buf)
+    private void Publish(byte[] frame)
     {
-        int soi = -1;
-        for (int i = 0; i < buf.Length - 1; i++)
-            if (buf[i] == 0xFF && buf[i + 1] == 0xD8) { soi = i; break; }
-        if (soi < 0) return (null, Array.Empty<byte>());
+        lock (_subLock)
+        {
+            foreach (var ch in _subs.Values) ch.Writer.TryWrite(frame);
+        }
+    }
+}
 
-        int eoi = -1;
-        for (int i = soi + 2; i < buf.Length - 1; i++)
-            if (buf[i] == 0xFF && buf[i + 1] == 0xD9) { eoi = i + 2; break; }
-        if (eoi < 0) return (null, buf[soi..]);
+/// <summary>
+/// Incrementally splits an MJPEG byte stream into complete JPEG images by
+/// scanning for SOI (FF D8) … EOI (FF D9). Everything between frames — multipart
+/// boundaries, part headers, HTTP chunk framing — is discarded. FF D9 cannot
+/// occur inside JPEG entropy-coded data (0xFF bytes there are stuffed as FF 00),
+/// so the first EOI after an SOI ends the frame.
+/// </summary>
+internal sealed class JpegFrameParser
+{
+    private static readonly byte[] Soi = { 0xFF, 0xD8 };
+    private static readonly byte[] Eoi = { 0xFF, 0xD9 };
 
-        return (buf[soi..eoi], buf[eoi..]);
+    // Frames are <100 KB even at VGA. A "frame" bigger than this means the stream
+    // is corrupt and never delivered an EOI — drop it and resync on the next SOI.
+    private const int MaxFrameBytes = 512 * 1024;
+
+    private readonly ILogger _log;
+    private byte[] _buf = new byte[64 * 1024];
+    private int  _len;      // valid bytes in _buf
+    private bool _inFrame;  // _buf starts with the SOI of the frame being collected
+    private int  _scan;     // where the next marker search resumes
+
+    public JpegFrameParser(ILogger log) { _log = log; }
+
+    public void Append(ReadOnlySpan<byte> data, Action<byte[]> onFrame)
+    {
+        if (_len + data.Length > _buf.Length)
+            Array.Resize(ref _buf, Math.Max(_buf.Length * 2, _len + data.Length));
+        data.CopyTo(_buf.AsSpan(_len));
+        _len += data.Length;
+
+        while (true)
+        {
+            if (!_inFrame)
+            {
+                int soi = _buf.AsSpan(_scan, _len - _scan).IndexOf(Soi);
+                if (soi < 0)
+                {
+                    // Keep a trailing 0xFF: it may be the first half of an SOI.
+                    bool keepLast = _len > 0 && _buf[_len - 1] == 0xFF;
+                    if (keepLast) _buf[0] = 0xFF;
+                    _len  = keepLast ? 1 : 0;
+                    _scan = 0;
+                    return;
+                }
+                Discard(_scan + soi); // SOI now at _buf[0]
+                _inFrame = true;
+                _scan    = 2;
+            }
+
+            int eoi = _buf.AsSpan(_scan, _len - _scan).IndexOf(Eoi);
+            if (eoi < 0)
+            {
+                if (_len > MaxFrameBytes)
+                {
+                    _log.LogWarning("[Stream] frame buffer overflow ({len} bytes) — resyncing", _len);
+                    _len = 0; _scan = 0; _inFrame = false;
+                    return;
+                }
+                _scan = Math.Max(2, _len - 1); // an EOI may straddle this read and the next
+                return;
+            }
+
+            int end = _scan + eoi + 2;
+            onFrame(_buf.AsSpan(0, end).ToArray());
+            Discard(end);
+            _inFrame = false;
+            _scan    = 0;
+        }
+    }
+
+    // Drops the first n bytes, shifting the rest to the front of the buffer.
+    private void Discard(int n)
+    {
+        if (n <= 0) return;
+        Buffer.BlockCopy(_buf, n, _buf, 0, _len - n);
+        _len -= n;
     }
 }
