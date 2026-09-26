@@ -5230,6 +5230,7 @@ RectTransform:
   - {fileID: 1982390632}
   - {fileID: 450799857}
   - {fileID: 1773263750}
+  - {fileID: 1646157477}
   m_Father: {fileID: 1522999465}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -5694,6 +5695,7 @@ MonoBehaviour:
   TurretAcceleration: 0
   TurretDeceleration: 0
   TwoPlayerModeEnabled: 0
+  DebugConsoleEnabled: 1
   BuzzerEnabled: 1
   VideoFps: 20
   VideoFrameSize: 2
@@ -11982,7 +11984,7 @@ RectTransform:
   - {fileID: 145652087}
   m_Father: {fileID: 332448205}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.67, y: 0.14}
+  m_AnchorMin: {x: 0.67, y: 0.23}
   m_AnchorMax: {x: 1, y: 0.93}
   m_AnchoredPosition: {x: -2, y: 1}
   m_SizeDelta: {x: -12, y: -6}
@@ -21848,6 +21850,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1619890874}
   m_CullTransparentMesh: 1
+--- !u!1 &1646157476
+GameObject:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1646157477}
+  m_Layer: 0
+  m_Name: __llb_v3
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1646157477
+Transform:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1646157476}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 332448205}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1664297872
 GameObject:
   m_ObjectHideFlags: 0
