@@ -56,14 +56,19 @@ public class GameSettingsPanel : MonoBehaviour
 
     // ── Build ────────────────────────────────────────────────────────────────
 
+    // Rows are parented here (the ScrollRect's Content), not directly to the panel,
+    // so the list scrolls when it's taller than the lobby column.
+    private Transform _rows;
+
     void BuildRows()
     {
         // DestroyImmediate so the VLG never sees stale scene children alongside new rows.
         for (int i = transform.childCount - 1; i >= 0; i--)
             DestroyImmediate(transform.GetChild(i).gameObject);
 
-        var vlg = GetComponent<VerticalLayoutGroup>();
-        if (vlg == null) vlg = gameObject.AddComponent<VerticalLayoutGroup>();
+        BuildScrollArea();
+
+        var vlg = _rows.gameObject.AddComponent<VerticalLayoutGroup>();
         // childControlHeight = false: VLG uses each child's existing sizeDelta.y (set explicitly
         // below) instead of trying to recalculate heights, which can fight inner HLG constraints.
         vlg.childControlHeight     = false;
@@ -188,13 +193,82 @@ public class GameSettingsPanel : MonoBehaviour
     void OnVideoFps(string v)     { if (_settings != null && int.TryParse(v, out int n) && n >= 1 && n <= 30) { _settings.VideoFps = n; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastVideoConfigToAll(_settings); } }
     void OnVideoQuality(string v) { if (_settings != null && int.TryParse(v, out int n) && n >= 8 && n <= 40) { _settings.VideoJpegQuality = n; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastVideoConfigToAll(_settings); } }
 
+    // ── Scroll area ──────────────────────────────────────────────────────────
+
+    // Panel (Image + ScrollRect) → Viewport (RectMask2D) → Content (VLG + ContentSizeFitter),
+    // plus a slim vertical scrollbar that auto-hides when everything fits.
+    void BuildScrollArea()
+    {
+        // The scene copy of this panel carries a VerticalLayoutGroup from before it scrolled;
+        // it would try to lay out Viewport/Scrollbar, so remove it.
+        var oldVlg = GetComponent<VerticalLayoutGroup>();
+        if (oldVlg != null) DestroyImmediate(oldVlg);
+
+        var scroll = GetComponent<ScrollRect>();
+        if (scroll == null) scroll = gameObject.AddComponent<ScrollRect>();
+        scroll.horizontal        = false;
+        scroll.vertical          = true;
+        scroll.movementType      = ScrollRect.MovementType.Clamped;
+        scroll.scrollSensitivity = 25f;
+
+        var vp = new GameObject("Viewport");
+        var vpRT = vp.AddComponent<RectTransform>();
+        vp.transform.SetParent(transform, false);
+        vpRT.anchorMin = Vector2.zero; vpRT.anchorMax = Vector2.one;
+        vpRT.pivot     = new Vector2(0f, 1f);
+        vpRT.offsetMin = vpRT.offsetMax = Vector2.zero;
+        vp.AddComponent<RectMask2D>();
+
+        var content = new GameObject("Content");
+        var cRT = content.AddComponent<RectTransform>();
+        content.transform.SetParent(vp.transform, false);
+        cRT.anchorMin = new Vector2(0f, 1f); cRT.anchorMax = new Vector2(1f, 1f);
+        cRT.pivot     = new Vector2(0.5f, 1f);
+        cRT.anchoredPosition = Vector2.zero;
+        cRT.sizeDelta = Vector2.zero;
+        content.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        var sb = new GameObject("Scrollbar");
+        var sbRT = sb.AddComponent<RectTransform>();
+        sb.transform.SetParent(transform, false);
+        sbRT.anchorMin = new Vector2(1f, 0f); sbRT.anchorMax = Vector2.one;
+        sbRT.pivot     = new Vector2(1f, 1f);
+        sbRT.offsetMin = new Vector2(-8f, 2f); sbRT.offsetMax = new Vector2(-2f, -2f);
+        sb.AddComponent<Image>().color = new Color(0.15f, 0.15f, 0.2f);
+        var scrollbar = sb.AddComponent<Scrollbar>();
+        scrollbar.direction = Scrollbar.Direction.BottomToTop;
+
+        var area = new GameObject("Sliding Area");
+        var areaRT = area.AddComponent<RectTransform>();
+        area.transform.SetParent(sb.transform, false);
+        areaRT.anchorMin = Vector2.zero; areaRT.anchorMax = Vector2.one;
+        areaRT.offsetMin = areaRT.offsetMax = Vector2.zero;
+
+        var handle = new GameObject("Handle");
+        var hRT = handle.AddComponent<RectTransform>();
+        handle.transform.SetParent(area.transform, false);
+        hRT.offsetMin = hRT.offsetMax = Vector2.zero;
+        var hImg = handle.AddComponent<Image>();
+        hImg.color = new Color(0.45f, 0.45f, 0.55f);
+        scrollbar.handleRect    = hRT;
+        scrollbar.targetGraphic = hImg;
+
+        scroll.viewport = vpRT;
+        scroll.content  = cRT;
+        scroll.verticalScrollbar           = scrollbar;
+        scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
+        scroll.verticalScrollbarSpacing    = 2f;
+
+        _rows = cRT;
+    }
+
     // ── Row builders ─────────────────────────────────────────────────────────
 
     void AddHeader(string text)
     {
         var go = new GameObject("Header");
         var rt = go.AddComponent<RectTransform>();
-        go.transform.SetParent(transform, false);
+        go.transform.SetParent(_rows, false);
         rt.sizeDelta = new Vector2(0, 28f);
         go.AddComponent<LayoutElement>().preferredHeight = 28f;
         var tmp = go.AddComponent<TextMeshProUGUI>();
@@ -208,7 +282,7 @@ public class GameSettingsPanel : MonoBehaviour
     {
         var go = new GameObject("Section");
         var rt = go.AddComponent<RectTransform>();
-        go.transform.SetParent(transform, false);
+        go.transform.SetParent(_rows, false);
         rt.sizeDelta = new Vector2(0, 18f);
         go.AddComponent<LayoutElement>().preferredHeight = 18f;
         var tmp = go.AddComponent<TextMeshProUGUI>();
@@ -222,7 +296,7 @@ public class GameSettingsPanel : MonoBehaviour
     {
         var row = new GameObject(label.Replace(":", "") + "Row");
         var rowRT = row.AddComponent<RectTransform>();
-        row.transform.SetParent(transform, false);
+        row.transform.SetParent(_rows, false);
         rowRT.sizeDelta = new Vector2(0, 26f);
         row.AddComponent<LayoutElement>().preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
@@ -278,7 +352,7 @@ public class GameSettingsPanel : MonoBehaviour
     {
         var row = new GameObject(label.Replace(":", "") + "Row");
         var rowRT = row.AddComponent<RectTransform>();
-        row.transform.SetParent(transform, false);
+        row.transform.SetParent(_rows, false);
         rowRT.sizeDelta = new Vector2(0, 26f);
         row.AddComponent<LayoutElement>().preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
@@ -319,7 +393,7 @@ public class GameSettingsPanel : MonoBehaviour
     {
         var row = new GameObject(label + "Row");
         var rowRT = row.AddComponent<RectTransform>();
-        row.transform.SetParent(transform, false);
+        row.transform.SetParent(_rows, false);
         rowRT.sizeDelta = new Vector2(0, 26f);
         row.AddComponent<LayoutElement>().preferredHeight = 26f;
         var hlg = row.AddComponent<HorizontalLayoutGroup>();
