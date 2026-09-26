@@ -288,7 +288,16 @@ internal class StreamBroadcaster
                     using var linked      = CancellationTokenSource
                         .CreateLinkedTokenSource(ct, readTimeout.Token);
 
-                    read = await stream.ReadAsync(buffer, 0, buffer.Length, linked.Token);
+                    // Zero-byte read first: it completes as soon as ANY data has
+                    // arrived; the real read then takes whatever is there. A plain
+                    // read with a large buffer doesn't do that on Windows — it only
+                    // completes when the buffer fills or a segment carries the TCP
+                    // PSH flag, and the robot's lwIP stack often omits PSH on the
+                    // last segment of a frame. That held frames back until ~3 had
+                    // piled up (bursts every ~150 ms), which the latest-frame
+                    // mailboxes below then collapsed to ~7 fps.
+                    await stream.ReadAsync(Memory<byte>.Empty, linked.Token);
+                    read = await stream.ReadAsync(buffer, linked.Token);
 
                     if (readTimeout.IsCancellationRequested)
                     {
