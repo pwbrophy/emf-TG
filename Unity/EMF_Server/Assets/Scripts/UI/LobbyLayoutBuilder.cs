@@ -15,7 +15,7 @@ using UnityEditor.SceneManagement;
 [ExecuteAlways]
 public class LobbyLayoutBuilder : MonoBehaviour
 {
-    const string SENTINEL = "__llb_v2";
+    const string SENTINEL = "__llb_v3";
 
     void Awake()
     {
@@ -91,11 +91,13 @@ public class LobbyLayoutBuilder : MonoBehaviour
         Stretch("PlayersScrollView", cL, 0.08f, cR, 0.88f, 4f, 2f, 4f, 2f);
         Stretch("AddPlayerButton",   cL, 0.01f, cR, 0.08f, 4f, 2f, 4f, 2f);
 
-        // ── RIGHT — Game Settings + Start Game ─────────────────────────────────
-        Stretch("GameSettingsPanel", cR,          0.14f, 1f,    0.93f, 4f, 4f, 8f, 2f);
+        // ── RIGHT — Game Settings (scrolls) above Back + Start Game ────────────
+        // Panel bottom must clear LobbyBackButton's top (0.22) or the button
+        // covers the last settings rows and blocks clicks on them.
+        Stretch("GameSettingsPanel", cR,          0.23f, 1f,    0.93f, 4f, 4f, 8f, 2f);
         Stretch("StartGameButton",   cR + 0.01f,  0.01f, 0.99f, 0.13f, 4f, 4f, 4f, 4f);
 
-        // Back button sits below Start Game if present
+        // Back button sits between the settings panel and Start Game
         Stretch("LobbyBackButton",   cR + 0.01f,  0.14f, 0.99f, 0.22f, 4f, 2f, 4f, 2f);
     }
 
