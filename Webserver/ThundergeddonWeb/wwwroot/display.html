@@ -42,14 +42,15 @@
   #teambar-wrap { background: var(--panel); border-radius: 8px; padding: 14px 22px; flex-shrink: 0; }
   #teambar-labels { display: flex; justify-content: space-between; margin-bottom: 8px;
     font-size: 1.3em; font-weight: 700; }
-  #tp-label-0 { color: var(--blue); }
-  #tp-label-1 { color: var(--red); text-align: right; }
+  /* Jungle (alliance 1) on the left, Desert (alliance 0) on the right — matches the battlefield */
+  #tp-label-1 { color: var(--red); }
+  #tp-label-0 { color: var(--blue); text-align: right; }
   #teambar-victory-marker { text-align: center; font-size: 0.9em; font-weight: 700;
     letter-spacing: 2px; text-transform: uppercase; color: #f0c040; margin-bottom: 6px; }
   #teambar-track { position: relative; height: 90px; background: #111; border-radius: 45px; }
-  #teambar-fill-0 { position: absolute; left: 0; top: 0; height: 100%; background: var(--blue);
+  #teambar-fill-1 { position: absolute; left: 0; top: 0; height: 100%; background: var(--red);
     border-radius: 45px 0 0 45px; transition: width 0.4s ease; }
-  #teambar-fill-1 { position: absolute; right: 0; top: 0; height: 100%; background: var(--red);
+  #teambar-fill-0 { position: absolute; right: 0; top: 0; height: 100%; background: var(--blue);
     border-radius: 0 45px 45px 0; transition: width 0.4s ease; }
   #teambar-centre { position: absolute; left: 50%; top: 0; width: 4px; height: 100%;
     background: #fff; transform: translateX(-50%); z-index: 1; }
@@ -373,8 +374,8 @@
   <!-- Team points bar -->
   <div id="teambar-wrap">
     <div id="teambar-labels">
-      <span id="tp-label-0">Desert Squad — 0 pts</span>
-      <span id="tp-label-1">0 pts — Jungle Squad</span>
+      <span id="tp-label-1">Jungle Squad — 0 pts</span>
+      <span id="tp-label-0">0 pts — Desert Squad</span>
     </div>
     <div id="teambar-victory-marker">&#127942; Victory &#127942;</div>
     <div id="teambar-track">
@@ -1697,8 +1698,9 @@ function renderTeamBar() {
   document.getElementById('teambar-fill-0').style.width = w0 + '%';
   document.getElementById('teambar-fill-1').style.width = w1 + '%';
   const an2 = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
-  document.getElementById('tp-label-0').textContent = `${an2[0]} — ${tp[0]} pts`;
-  document.getElementById('tp-label-1').textContent = `${tp[1]} pts — ${an2[1]}`;
+  // Jungle (1) label on the left, Desert (0) label on the right
+  document.getElementById('tp-label-1').textContent = `${an2[1]} — ${tp[1]} pts`;
+  document.getElementById('tp-label-0').textContent = `${tp[0]} pts — ${an2[0]}`;
 }
 
 function renderCapturePoints() {
