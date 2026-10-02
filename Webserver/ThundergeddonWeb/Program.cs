@@ -16,7 +16,16 @@ var app = builder.Build();
 
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // Phones otherwise heuristically cache the HTML pages and keep showing a stale
+    // layout after an edit. no-cache = always revalidate (cheap 304 via ETag).
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+    }
+});
 app.MapHub<GameHub>("/gamehub");
 
 app.MapGet("/api/serverip", () =>
