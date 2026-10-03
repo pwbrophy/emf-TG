@@ -59,6 +59,7 @@ public class RobotWebSocketServer : MonoBehaviour
         public int  HeapMin = -1;     // lowest free heap seen this interval
         public int  MaxBlock = -1;    // largest free internal block (fragmentation), newer firmware only
         public int  Hellos;           // hello count this interval (> 1 = reconnecting)
+        public bool Seen;             // sent hb or hello this interval
     }
     private readonly Dictionary<string, RobotHealth> _health = new Dictionary<string, RobotHealth>();
     private float _healthNextLog;
@@ -232,17 +233,23 @@ public class RobotWebSocketServer : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         float avgMs = _frameCount > 0 ? _frameTimeSum / _frameCount * 1000f : 0f;
         sb.Append($"[Health] frame avg={avgMs:F1}ms worst={_frameTimeMax * 1000f:F0}ms");
-        sb.Append($" | mono={UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() / (1024 * 1024)}MB");
+        sb.Append($" | managed heap={UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() / (1024 * 1024)}MB");
         sb.Append($" | robots connected={_sessionByRobot.Count}");
+        var gone = new List<string>();
         foreach (var kv in _health)
         {
             var h = kv.Value;
+            // A robot silent for a whole interval has gone (switched off / timed
+            // out): drop it rather than repeating its last numbers forever.
+            if (!h.Seen) { gone.Add(kv.Key); continue; }
+            h.Seen = false;
             sb.Append($" | {RobotLabel(kv.Key)} heap={h.Heap / 1024}k min={h.HeapMin / 1024}k");
             if (h.MaxBlock >= 0) sb.Append($" blk={h.MaxBlock / 1024}k");
             if (h.Hellos > 0) sb.Append($" hellos={h.Hellos}");
             h.HeapMin = h.Heap;
             h.Hellos  = 0;
         }
+        foreach (var id in gone) _health.Remove(id);
         var beacons = ServiceLocator.BeaconServer;
         if (beacons != null) sb.Append(" | ").Append(beacons.TakeHealthSummary());
         Debug.Log(sb.ToString());
@@ -402,7 +409,9 @@ public class RobotWebSocketServer : MonoBehaviour
             info.NumFrames = 0;
 
             _sessionByRobot[id] = sid;
-            HealthFor(id).Hellos++;
+            var hh = HealthFor(id);
+            hh.Hellos++;
+            hh.Seen = true;
 
             string helloIp   = ExtractString(json, "ip")   ?? "";
             string helloName = ExtractString(json, "name") ?? "";
@@ -488,6 +497,7 @@ public class RobotWebSocketServer : MonoBehaviour
                 if (!string.IsNullOrEmpty(info.RobotId) && json.Contains("\"heap\":"))
                 {
                     var h = HealthFor(info.RobotId);
+                    h.Seen = true;
                     h.Heap = ExtractInt(json, "heap");
                     if (h.HeapMin < 0 || h.Heap < h.HeapMin) h.HeapMin = h.Heap;
                     if (json.Contains("\"maxblk\":")) h.MaxBlock = ExtractInt(json, "maxblk");
