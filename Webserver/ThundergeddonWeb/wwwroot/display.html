@@ -362,7 +362,7 @@
 </head>
 <body>
 
-<div id="version">display v11</div>
+<div id="version">display v12</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
@@ -875,14 +875,22 @@ conn.on('GameResumed', () => {
   speak('Game resumed');
 });
 
+// Display-only traffic (DisplayUpdate, DisplayEvent, HitEvent, KillEvent) is sent
+// only to the "display" group, so join it on every (re)connect — a reconnect is a
+// new connection id and loses group membership.
+function joinDisplayGroup() {
+  conn.invoke('JoinDisplay').catch(e => console.error('JoinDisplay failed', e));
+}
+
 conn.onreconnecting(() => setBanner('Reconnecting…'));
-conn.onreconnected(() => setBanner('Connected'));
+conn.onreconnected(() => { setBanner('Connected'); joinDisplayGroup(); });
 conn.onclose(() => setBanner('Disconnected — refresh to reconnect'));
 
 async function startConnection() {
   try {
     await conn.start();
     setBanner('Connected');
+    joinDisplayGroup();
     // Do NOT call JoinLobby — display page is read-only
   } catch(e) {
     setBanner('Connection failed — retrying…');

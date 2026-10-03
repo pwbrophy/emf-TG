@@ -1296,7 +1296,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         string json = "{\"cmd\":\"fire_event\",\"robotId\":\"" + EscapeJson(shooterRobotId) +
                       "\",\"callsign\":\"" + EscapeJson(callsign) + "\"}";
         BroadcastRaw(json);
-        Debug.Log($"[PlayerWS] fire_event → all (robot={shooterRobotId}, callsign={callsign})");
+        NetLog.Log($"[PlayerWS] fire_event → all (robot={shooterRobotId}, callsign={callsign})");
     }
 
     public void SendFireResult(string shooterRobotId, string resultText)
@@ -1308,7 +1308,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                           ",\"connectionId\":\"" + EscapeJson(kvp.Key) + "\"" +
                           ",\"text\":\"" + EscapeJson(resultText) + "\"}";
             BroadcastRaw(json);
-            Debug.Log($"[PlayerWS] fire_result → {kvp.Value}: {resultText}");
+            NetLog.Log($"[PlayerWS] fire_result → {kvp.Value}: {resultText}");
         }
     }
 

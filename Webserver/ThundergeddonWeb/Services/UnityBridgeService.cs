@@ -80,7 +80,7 @@ public class UnityBridgeService : BackgroundService
             {
                 _connectedToUnity = false;
                 _joinAllowed      = false;
-                await _hub.Clients.All.SendAsync("ServerDisconnected", CancellationToken.None);
+                Post(_hub.Clients.All.SendAsync("ServerDisconnected", CancellationToken.None));
             }
 
             if (!ct.IsCancellationRequested)
@@ -120,13 +120,13 @@ public class UnityBridgeService : BackgroundService
 
             string json = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
             ms.SetLength(0);
-            await HandleUnityMessage(json);
+            HandleUnityMessage(json);
         }
     }
 
     // ── Inbound (Unity → phones) ─────────────────────────────────────────────────
 
-    private async Task HandleUnityMessage(string json)
+    private void HandleUnityMessage(string json)
     {
         try
         {
@@ -138,7 +138,7 @@ public class UnityBridgeService : BackgroundService
             switch (cmd)
             {
                 case "player_list":
-                    await HandlePlayerList(doc.RootElement);
+                    HandlePlayerList(doc.RootElement);
                     break;
 
                 case "join_rejected":
@@ -146,75 +146,75 @@ public class UnityBridgeService : BackgroundService
                     string? connId = GetString(doc.RootElement, "connectionId");
                     string? reason = GetString(doc.RootElement, "reason") ?? "Name already taken.";
                     if (!string.IsNullOrEmpty(connId))
-                        await _hub.Clients.Client(connId).SendAsync("JoinRejected", reason);
+                        Post(_hub.Clients.Client(connId).SendAsync("JoinRejected", reason));
                     break;
                 }
 
                 case "robot_list":
-                    await HandleRobotList(doc.RootElement);
+                    HandleRobotList(doc.RootElement);
                     break;
 
                 case "game_started":
-                    await HandleGameStarted(doc.RootElement);
+                    HandleGameStarted(doc.RootElement);
                     break;
 
                 case "state_update":
-                    await HandleStateUpdate(doc.RootElement);
+                    HandleStateUpdate(doc.RootElement);
                     break;
 
                 case "you_are_dead":
-                    await HandleYouAreDead(doc.RootElement);
+                    HandleYouAreDead(doc.RootElement);
                     break;
 
                 case "you_are_alive":
-                    await HandleYouAreAlive(doc.RootElement);
+                    HandleYouAreAlive(doc.RootElement);
                     break;
 
                 case "game_over":
-                    await HandleGameOver(doc.RootElement);
+                    HandleGameOver(doc.RootElement);
                     break;
 
                 case "return_to_join":
-                    await _hub.Clients.All.SendAsync("ReturnToJoin");
+                    Post(_hub.Clients.All.SendAsync("ReturnToJoin"));
                     _logger.LogInformation("[Bridge] ReturnToJoin broadcast");
                     break;
 
                 case "rfid_notification":
-                    await HandleRfidNotification(doc.RootElement);
+                    HandleRfidNotification(doc.RootElement);
                     break;
 
                 case "display_update":
                     _lastDisplayUpdate = json;
-                    await _hub.Clients.All.SendAsync("DisplayUpdate", json);
+                    Post(_hub.Clients.Group(GameHub.DisplayGroup).SendAsync("DisplayUpdate", json));
                     break;
 
                 case "display_event":
                     string? evtText = GetString(doc.RootElement, "text");
                     if (!string.IsNullOrEmpty(evtText))
-                        await _hub.Clients.All.SendAsync("DisplayEvent", evtText);
+                        Post(_hub.Clients.Group(GameHub.DisplayGroup).SendAsync("DisplayEvent", evtText));
                     break;
 
                 case "turret_settings":
                     if (doc.RootElement.TryGetProperty("slowSpeed", out var ssEl)
                         && ssEl.TryGetSingle(out float ss))
-                        await _hub.Clients.All.SendAsync("TurretSettings", ss);
+                        Post(_hub.Clients.All.SendAsync("TurretSettings", ss));
                     break;
 
                 case "fire_result":
-                    await HandleFireResult(doc.RootElement);
+                    HandleFireResult(doc.RootElement);
                     break;
 
                 case "fire_event":
                 {
                     string? robotId  = GetString(doc.RootElement, "robotId");
                     string? callsign = GetString(doc.RootElement, "callsign");
-                    await _hub.Clients.All.SendAsync("FireEvent",
-                        new { robotId = robotId ?? "", callsign = callsign ?? "" });
+                    Post(_hub.Clients.All.SendAsync("FireEvent",
+                        new { robotId = robotId ?? "", callsign = callsign ?? "" }));
                     break;
                 }
 
                 case "hit_taken":
-                    await HandleHitTaken(doc.RootElement);
+                    HandleHitTaken(doc.RootElement);
                     break;
 
                 case "hit_event":
@@ -222,8 +222,8 @@ public class UnityBridgeService : BackgroundService
                     string? robotId  = GetString(doc.RootElement, "robotId");
                     string? callsign = GetString(doc.RootElement, "callsign");
                     string? dir      = GetString(doc.RootElement, "dir");
-                    await _hub.Clients.All.SendAsync("HitEvent",
-                        new { robotId = robotId ?? "", callsign = callsign ?? "", dir = dir ?? "" });
+                    Post(_hub.Clients.Group(GameHub.DisplayGroup).SendAsync("HitEvent",
+                        new { robotId = robotId ?? "", callsign = callsign ?? "", dir = dir ?? "" }));
                     break;
                 }
 
@@ -242,7 +242,7 @@ public class UnityBridgeService : BackgroundService
                                    : phase == "playing" ? "GameInProgress"
                                    : "ServerNotReady";
                         _logger.LogInformation("[Bridge] phase_changed → {phase}, event={evt}", phase, evt);
-                        await _hub.Clients.All.SendAsync(evt, CancellationToken.None);
+                        Post(_hub.Clients.All.SendAsync(evt, CancellationToken.None));
                     }
                     else
                     {
@@ -254,7 +254,7 @@ public class UnityBridgeService : BackgroundService
                 case "countdown_start":
                 {
                     int total = GetInt(doc.RootElement, "total", 5);
-                    await _hub.Clients.All.SendAsync("CountdownStarted", total);
+                    Post(_hub.Clients.All.SendAsync("CountdownStarted", total));
                     _logger.LogInformation("[Bridge] countdown_start total={total}", total);
                     break;
                 }
@@ -263,7 +263,7 @@ public class UnityBridgeService : BackgroundService
                 {
                     int count = GetInt(doc.RootElement, "count", 1);
                     int total = GetInt(doc.RootElement, "total", 5);
-                    await _hub.Clients.All.SendAsync("CountdownTick", count, total);
+                    Post(_hub.Clients.All.SendAsync("CountdownTick", count, total));
                     break;
                 }
 
@@ -272,8 +272,8 @@ public class UnityBridgeService : BackgroundService
                     int    teamIndex       = GetInt(doc.RootElement, "teamIndex", -1);
                     string? targetCallsign = GetString(doc.RootElement, "targetCallsign");
                     int    points          = GetInt(doc.RootElement, "points");
-                    await _hub.Clients.All.SendAsync("KillEvent",
-                        new { teamIndex, targetCallsign = targetCallsign ?? "", points });
+                    Post(_hub.Clients.Group(GameHub.DisplayGroup).SendAsync("KillEvent",
+                        new { teamIndex, targetCallsign = targetCallsign ?? "", points }));
                     break;
                 }
 
@@ -282,7 +282,7 @@ public class UnityBridgeService : BackgroundService
                     string? connId    = GetString(doc.RootElement, "connectionId");
                     string? colorName = GetString(doc.RootElement, "colorName");
                     if (!string.IsNullOrEmpty(connId) && !string.IsNullOrEmpty(colorName))
-                        await _hub.Clients.Client(connId).SendAsync("TankColor", colorName);
+                        Post(_hub.Clients.Client(connId).SendAsync("TankColor", colorName));
                     break;
                 }
 
@@ -290,7 +290,7 @@ public class UnityBridgeService : BackgroundService
                 {
                     bool enabled = doc.RootElement.TryGetProperty("enabled", out var tpEl)
                         && tpEl.ValueKind == JsonValueKind.True;
-                    await _hub.Clients.All.SendAsync("TwoPlayerMode", enabled);
+                    Post(_hub.Clients.All.SendAsync("TwoPlayerMode", enabled));
                     _logger.LogInformation("[Bridge] TwoPlayerMode → {en}", enabled);
                     break;
                 }
@@ -299,17 +299,17 @@ public class UnityBridgeService : BackgroundService
                 {
                     _debugConsoleEnabled = doc.RootElement.TryGetProperty("enabled", out var dcEl)
                         && dcEl.ValueKind == JsonValueKind.True;
-                    await _hub.Clients.All.SendAsync("DebugConsole", _debugConsoleEnabled);
+                    Post(_hub.Clients.All.SendAsync("DebugConsole", _debugConsoleEnabled));
                     _logger.LogInformation("[Bridge] DebugConsole → {en}", _debugConsoleEnabled);
                     break;
                 }
 
                 case "game_paused":
-                    await _hub.Clients.All.SendAsync("GamePaused");
+                    Post(_hub.Clients.All.SendAsync("GamePaused"));
                     break;
 
                 case "game_resumed":
-                    await _hub.Clients.All.SendAsync("GameResumed");
+                    Post(_hub.Clients.All.SendAsync("GameResumed"));
                     break;
             }
         }
@@ -319,7 +319,7 @@ public class UnityBridgeService : BackgroundService
         }
     }
 
-    private async Task HandlePlayerList(JsonElement root)
+    private void HandlePlayerList(JsonElement root)
     {
         var players = root.GetProperty("players")
             .EnumerateArray()
@@ -333,10 +333,10 @@ public class UnityBridgeService : BackgroundService
             .Where(p => p.name.Length > 0)
             .ToList();
 
-        await _hub.Clients.All.SendAsync("LobbyUpdate", players);
+        Post(_hub.Clients.All.SendAsync("LobbyUpdate", players));
     }
 
-    private async Task HandleRobotList(JsonElement root)
+    private void HandleRobotList(JsonElement root)
     {
         if (!root.TryGetProperty("robots", out var robotsEl)) return;
 
@@ -364,10 +364,10 @@ public class UnityBridgeService : BackgroundService
             })
             .ToList();
 
-        await _hub.Clients.All.SendAsync("RobotListUpdate", new { robots, twoPlayerModeEnabled });
+        Post(_hub.Clients.All.SendAsync("RobotListUpdate", new { robots, twoPlayerModeEnabled }));
     }
 
-    private async Task HandleGameStarted(JsonElement root)
+    private void HandleGameStarted(JsonElement root)
     {
         string? connId   = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
@@ -381,14 +381,14 @@ public class UnityBridgeService : BackgroundService
         string role              = GetString(root, "role")             ?? "solo";
         string partnerName       = GetString(root, "partnerName")      ?? "";
 
-        await _hub.Clients.Client(connId).SendAsync("GameStarted",
-            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed, cooldownDuration, role, partnerName });
+        Post(_hub.Clients.Client(connId).SendAsync("GameStarted",
+            new { callsign, videoUrl, hp, maxHp, slowTurretSpeed, cooldownDuration, role, partnerName }));
 
         _logger.LogInformation("[Bridge] GameStarted → conn {c} (robot={r}, role={role})",
             connId, callsign, role);
     }
 
-    private async Task HandleStateUpdate(JsonElement root)
+    private void HandleStateUpdate(JsonElement root)
     {
         string? connId = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
@@ -399,58 +399,58 @@ public class UnityBridgeService : BackgroundService
         float cooldown         = GetFloat(root, "cooldown");
         float cooldownDuration = GetFloat(root, "cooldownDuration", 3f);
 
-        await _hub.Clients.Client(connId).SendAsync("StateUpdate",
-            new { hp, maxHp, timer, cooldown, cooldownDuration });
+        Post(_hub.Clients.Client(connId).SendAsync("StateUpdate",
+            new { hp, maxHp, timer, cooldown, cooldownDuration }));
     }
 
-    private async Task HandleYouAreDead(JsonElement root)
+    private void HandleYouAreDead(JsonElement root)
     {
         string? connId = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        await _hub.Clients.Client(connId).SendAsync("YouAreDead");
+        Post(_hub.Clients.Client(connId).SendAsync("YouAreDead"));
         _logger.LogInformation("[Bridge] YouAreDead → conn {c}", connId);
     }
 
-    private async Task HandleYouAreAlive(JsonElement root)
+    private void HandleYouAreAlive(JsonElement root)
     {
         string? connId = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
-        await _hub.Clients.Client(connId).SendAsync("YouAreAlive");
+        Post(_hub.Clients.Client(connId).SendAsync("YouAreAlive"));
         _logger.LogInformation("[Bridge] YouAreAlive → conn {c}", connId);
     }
 
-    private async Task HandleRfidNotification(JsonElement root)
+    private void HandleRfidNotification(JsonElement root)
     {
         string? connId = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
 
         string text = GetString(root, "text") ?? "";
         // Reuse the existing RfidTag SignalR event so cached browser clients also receive it.
-        await _hub.Clients.Client(connId).SendAsync("RfidTag", text);
+        Post(_hub.Clients.Client(connId).SendAsync("RfidTag", text));
         _logger.LogInformation("[Bridge] RfidTag (notification) text={text} → conn {c}", text, connId);
     }
 
-    private async Task HandleFireResult(JsonElement root)
+    private void HandleFireResult(JsonElement root)
     {
         string? connId = GetString(root, "connectionId");
         string? text   = GetString(root, "text");
         if (string.IsNullOrEmpty(connId) || string.IsNullOrEmpty(text)) return;
-        await _hub.Clients.Client(connId).SendAsync("FireResult", text);
+        Post(_hub.Clients.Client(connId).SendAsync("FireResult", text));
         _logger.LogDebug("[Bridge] FireResult → conn {c}: {t}", connId, text);
     }
 
-    private async Task HandleHitTaken(JsonElement root)
+    private void HandleHitTaken(JsonElement root)
     {
         string? connId  = GetString(root, "connectionId");
         if (string.IsNullOrEmpty(connId)) return;
         string shooter = GetString(root, "shooter") ?? "";
         string dir     = GetString(root, "dir") ?? "";
-        await _hub.Clients.Client(connId).SendAsync("HitTaken", new { shooter, dir });
+        Post(_hub.Clients.Client(connId).SendAsync("HitTaken", new { shooter, dir }));
     }
 
-    private async Task HandleGameOver(JsonElement root)
+    private void HandleGameOver(JsonElement root)
     {
         string winnerTeam = GetString(root, "winnerTeam") ?? "Unknown";
         string reason     = GetString(root, "reason")     ?? "";
@@ -495,7 +495,7 @@ public class UnityBridgeService : BackgroundService
             };
         }
 
-        await _hub.Clients.All.SendAsync("GameOver", new { winnerTeam, reason, stats = displayStats });
+        Post(_hub.Clients.All.SendAsync("GameOver", new { winnerTeam, reason, stats = displayStats }));
 
         // ── Route per-player stats to individual phone connections ────────────────
         if (hasStats)
@@ -511,8 +511,8 @@ public class UnityBridgeService : BackgroundService
                 int    vpFromCaptures = GetInt(stat,    "vpFromCaptures");
                 int    vpFromKills    = GetInt(stat,    "vpFromKills");
                 string nemesis        = GetString(stat, "nemesis") ?? "";
-                await _hub.Clients.Client(connId).SendAsync("PlayerStats",
-                    new { kills, deaths, damage, victoryPoints, vpFromCaptures, vpFromKills, nemesis });
+                Post(_hub.Clients.Client(connId).SendAsync("PlayerStats",
+                    new { kills, deaths, damage, victoryPoints, vpFromCaptures, vpFromKills, nemesis }));
             }
         }
 
@@ -549,6 +549,20 @@ public class UnityBridgeService : BackgroundService
         {
             _sendLock.Release();
         }
+    }
+
+    // ── Outbound sends (Unity → phones) ──────────────────────────────────────────
+
+    // Sends from the Unity receive loop are never awaited. A SignalR send only
+    // completes once every target connection has accepted the bytes, so awaiting
+    // let one phone on a bad link (or a locked screen, until SignalR's 30 s timeout
+    // dropped it) stall HP, hit and fire updates for every player and the display.
+    // SignalR still queues per connection in order; a failed send is just logged.
+    private void Post(Task send)
+    {
+        if (send.IsCompletedSuccessfully) return;
+        send.ContinueWith(t => _logger.LogDebug("[Bridge] send failed: {msg}", t.Exception?.GetBaseException().Message),
+            TaskContinuationOptions.OnlyOnFaulted);
     }
 
     // ── JSON helpers ─────────────────────────────────────────────────────────────

@@ -42,6 +42,22 @@ public class CapturePointBeaconServer : MonoBehaviour
 
     private float _nextSweepTime = 0f;
 
+    // Hellos per point since the last health line. More than one a minute means the
+    // beacon is reconnecting repeatedly (old firmware could loop forever after a
+    // Wi-Fi drop, stuck on the white idle bounce).
+    private readonly int[] _hellosByPoint = new int[3];
+
+    public string TakeHealthSummary()
+    {
+        var sb = new System.Text.StringBuilder("beacons connected=" + _sessionByPoint.Count);
+        for (int i = 0; i < _hellosByPoint.Length; i++)
+        {
+            if (_hellosByPoint[i] > 0) sb.Append(" p" + i + " hellos=" + _hellosByPoint[i]);
+            _hellosByPoint[i] = 0;
+        }
+        return sb.ToString();
+    }
+
     // Mirrors display.html's round-robin per-tick flash selection exactly
     // (same algorithm, same reset-on-Playing timing) so the physical beacon
     // and the spectator display flash the same capture point in sync.
@@ -289,6 +305,7 @@ public class CapturePointBeaconServer : MonoBehaviour
             info.PointIndex   = point;
             info.LastSeenTime = Time.time;
             _sessionByPoint[point] = sid;
+            _hellosByPoint[point]++;
 
             string id = ExtractString(json, "id") ?? "";
             string ip = ExtractString(json, "ip") ?? "";
@@ -347,7 +364,9 @@ public class CapturePointBeaconServer : MonoBehaviour
         {
             if (!_bySession.TryGetValue(sid, out var info)) continue;
 
-            try { ServiceSessions()?.CloseSession(sid); } catch { /* ignore */ }
+            // Off the main thread: a dead beacon never answers the close frame, and
+            // websocket-sharp waits 1 s for it (see RobotWebSocketServer).
+            RobotWebSocketServer.CloseSessionInBackground(ServiceSessions(), sid);
             _bySession.Remove(sid);
 
             if (info.PointIndex >= 0)
@@ -411,9 +430,8 @@ public class CapturePointBeaconServer : MonoBehaviour
     public bool SendVpRipple(int pointIndex)
     {
         bool ok = SendJsonToBeacon(pointIndex, "{\"cmd\":\"vp_ripple\"}");
-        Debug.Log(ok
-            ? $"[BeaconWS] vp_ripple -> point {pointIndex}"
-            : $"[BeaconWS] FAILED vp_ripple -> point {pointIndex} (not connected)");
+        if (ok) NetLog.Log($"[BeaconWS] vp_ripple -> point {pointIndex}"); // every score tick
+        else    Debug.Log($"[BeaconWS] FAILED vp_ripple -> point {pointIndex} (not connected)");
         return ok;
     }
 

@@ -30,6 +30,11 @@ public class AppBootstrap : MonoBehaviour
         QualitySettings.vSyncCount  = 0;
         Application.targetFrameRate = 120;
 
+        // Info logs without stack traces: capturing one per Debug.Log is the expensive
+        // part, and the Editor Console keeps every entry for the whole session. Warnings
+        // and errors keep their traces. Per-message logs are behind NetLog.Verbose.
+        Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
+
         // Services
         Debug.Log("Creating Services");
         var lobby = new LobbyService();

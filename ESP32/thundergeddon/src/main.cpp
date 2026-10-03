@@ -1279,6 +1279,13 @@ static void connectWebSocket()
 {
     if (g_wsUrl.isEmpty()) return;
 
+    // Detach the old event handler BEFORE closing. After a Wi-Fi drop the old socket
+    // still counts as open, and close() fires ConnectionClosed synchronously — the
+    // old handler then ran onWsClose(), wiping the g_wsUrl we just discovered. The
+    // new connection still opened and sent hello, but with g_wsUrl empty loop()
+    // never called ws.poll() again: no commands, no heartbeat, and a fresh
+    // reconnect + hello every discovery reply (~2 s) until power-cycled.
+    ws.onEvent([](WebsocketsEvent, String) {});
     ws.close();
     delay(100);
 
@@ -1599,9 +1606,12 @@ void loop()
             // Stack buffer instead of String concat — this runs every 2s for hours,
             // and repeated small heap allocs fragment the ESP32 heap over a long
             // event day. heap field lets the server monitor robot memory health.
-            char hb[96];
-            snprintf(hb, sizeof(hb), "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u}",
-                     (unsigned long)now, (unsigned)ESP.getFreeHeap());
+            // maxblk = largest free internal block: falls over a long day if the
+            // heap is fragmenting even while total free heap looks healthy.
+            char hb[112];
+            snprintf(hb, sizeof(hb), "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u,\"maxblk\":%u}",
+                     (unsigned long)now, (unsigned)ESP.getFreeHeap(),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
             ws.send(hb);
         }
     } else {

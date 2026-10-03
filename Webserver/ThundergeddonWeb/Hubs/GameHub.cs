@@ -17,6 +17,10 @@ public class GameHub : Hub
     private const int MaxNameLength    = 12;
     private const int MaxMsgsPerSecond = 60;
 
+    // Spectator display pages join this group; display-only traffic (DisplayUpdate,
+    // DisplayEvent, HitEvent, KillEvent — ~3 KB/s) goes only to it, not to phones.
+    public const string DisplayGroup = "display";
+
     // Static: hubs are transient per-invocation. Keyed by connectionId, cleaned on disconnect.
     private static readonly ConcurrentDictionary<string, (long Window, int Count)> _rate = new();
 
@@ -204,11 +208,21 @@ public class GameHub : Hub
         // operator toggled it still matches everyone else.
         await Clients.Caller.SendAsync("DebugConsole", _bridge.DebugConsoleEnabled);
 
+        await base.OnConnectedAsync();
+    }
+
+    /// <summary>
+    /// Called by display.html on every (re)connect — group membership does not
+    /// survive a reconnect, since that is a new connection id.
+    /// </summary>
+    public async Task JoinDisplay()
+    {
+        if (!AllowMessage()) return;
+        await Groups.AddToGroupAsync(Context.ConnectionId, DisplayGroup);
+
         // Replay last display state so the display page can resume mid-game on refresh
         if (_bridge.LastDisplayUpdate != null)
             await Clients.Caller.SendAsync("DisplayUpdate", _bridge.LastDisplayUpdate);
-
-        await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

@@ -64,7 +64,7 @@ public class IrSlotScheduler : MonoBehaviour
     {
         if (string.IsNullOrEmpty(shooterId)) return;
         _queue.Enqueue((shooterId, Time.time));
-        Debug.Log($"[IrHs] >>> FIRE REQUEST queued for {shooterId} (queue depth: {_queue.Count})");
+        NetLog.Log($"[IrHs] >>> FIRE REQUEST queued for {shooterId} (queue depth: {_queue.Count})");
     }
 
     private void Update()
@@ -98,7 +98,7 @@ public class IrSlotScheduler : MonoBehaviour
         _busy = true;
         int slotId = _nextSlotId++;
 
-        Debug.Log($"[IrHs] ===== SHOT {slotId} START — shooter={shooterId} =====");
+        NetLog.Log($"[IrHs] ===== SHOT {slotId} START — shooter={shooterId} =====");
 
         var server   = ServiceLocator.RobotServer;
         var dir      = ServiceLocator.RobotDirectory;
@@ -152,7 +152,7 @@ public class IrSlotScheduler : MonoBehaviour
             if (deadSet != null && deadSet.Contains(r.RobotId)) continue;
             int ally = GetAllianceIndex(r.AssignedPlayer);
             if (ally < 0 || ally == shooterAlliance) continue;
-            Debug.Log($"[IrHs]   enemy: {r.Callsign ?? r.RobotId}");
+            NetLog.Log($"[IrHs]   enemy: {r.Callsign ?? r.RobotId}");
             enemies.Add(r);
         }
 
@@ -188,7 +188,7 @@ public class IrSlotScheduler : MonoBehaviour
             else
                 b2Masks[robotId] = mask;
 
-            Debug.Log($"[IrHs]   window result from {robotId}: mask=0x{mask:X2} ({(collectingB2 ? "b2" : "b1")})");
+            NetLog.Log($"[IrHs]   window result from {robotId}: mask=0x{mask:X2} ({(collectingB2 ? "b2" : "b1")})");
         }
 
         server.OnIrEmitAck      += OnAck;
@@ -205,7 +205,7 @@ public class IrSlotScheduler : MonoBehaviour
         // ── Phase 1: left LED ─────────────────────────────────────────────────
         ackReceived = false;
         server.SendIrEmitLeft(shooterId);
-        Debug.Log($"[IrHs] Shot {slotId} — ir_emit_left sent, waiting for ack ({ackTimeoutMs}ms)...");
+        NetLog.Log($"[IrHs] Shot {slotId} — ir_emit_left sent, waiting for ack ({ackTimeoutMs}ms)...");
 
         float ackDeadline = Time.time + ackTimeoutMs / 1000f;
         while (!ackReceived && Time.time < ackDeadline) yield return null;
@@ -218,13 +218,13 @@ public class IrSlotScheduler : MonoBehaviour
         }
         else
         {
-            Debug.Log($"[IrHs] Shot {slotId} — ir_emit_ack received; sending ir_listen_window to {enemies.Count} enemy(ies)");
+            NetLog.Log($"[IrHs] Shot {slotId} — ir_emit_ack received; sending ir_listen_window to {enemies.Count} enemy(ies)");
             for (int i = 0; i < enemies.Count; i++)
                 server.SendIrListenWindow(enemies[i].RobotId, windowMs);
 
             float winDeadline = Time.time + (windowMs + windowTimeoutMs) / 1000f;
             while (b1Masks.Count < enemies.Count && Time.time < winDeadline) yield return null;
-            Debug.Log($"[IrHs] Shot {slotId} — b1 done: {b1Masks.Count}/{enemies.Count} results");
+            NetLog.Log($"[IrHs] Shot {slotId} — b1 done: {b1Masks.Count}/{enemies.Count} results");
         }
 
         // Build b2Enemies: only enemies that detected the left LED.
@@ -238,7 +238,7 @@ public class IrSlotScheduler : MonoBehaviour
             }
             if (b2Enemies.Count == 0)
             {
-                Debug.Log($"[IrHs] Shot {slotId} — all b1 == 0, early exit (miss)");
+                NetLog.Log($"[IrHs] Shot {slotId} — all b1 == 0, early exit (miss)");
                 server.SendIrEmitStop(shooterId);
                 aborted = true;
             }
@@ -252,11 +252,11 @@ public class IrSlotScheduler : MonoBehaviour
             server.SendIrEmitRight(shooterId);
             for (int i = 0; i < b2Enemies.Count; i++)
                 server.SendIrListenWindow(b2Enemies[i].RobotId, windowMs);
-            Debug.Log($"[IrHs] Shot {slotId} — ir_emit_right + b2 listen_window to {b2Enemies.Count} enemy(ies)");
+            NetLog.Log($"[IrHs] Shot {slotId} — ir_emit_right + b2 listen_window to {b2Enemies.Count} enemy(ies)");
 
             float winDeadline = Time.time + (windowMs + windowTimeoutMs) / 1000f;
             while (b2Masks.Count < b2Enemies.Count && Time.time < winDeadline) yield return null;
-            Debug.Log($"[IrHs] Shot {slotId} — b2 done: {b2Masks.Count}/{b2Enemies.Count} results");
+            NetLog.Log($"[IrHs] Shot {slotId} — b2 done: {b2Masks.Count}/{b2Enemies.Count} results");
 
             server.SendIrEmitStop(shooterId);
         }
@@ -267,7 +267,7 @@ public class IrSlotScheduler : MonoBehaviour
             int maxHp    = settings != null ? settings.MaxHp : 100;
             int hitCount = 0;
 
-            Debug.Log($"[IrHs] ---- Shot {slotId} RESOLVING ----");
+            NetLog.Log($"[IrHs] ---- Shot {slotId} RESOLVING ----");
             for (int i = 0; i < enemies.Count; i++)
             {
                 string enemyId   = enemies[i].RobotId;
@@ -279,25 +279,25 @@ public class IrSlotScheduler : MonoBehaviour
                 b2Masks.TryGetValue(enemyId, out byte b2);
 
                 byte detMask = (byte)(b1 | b2);
-                Debug.Log($"[IrHs]   {enemyName}: b1=0x{b1:X2} b2=0x{b2:X2} det=0x{detMask:X2} " +
+                NetLog.Log($"[IrHs]   {enemyName}: b1=0x{b1:X2} b2=0x{b2:X2} det=0x{detMask:X2} " +
                            $"({MaskToDirs(detMask)}) → {(b1 != 0 && b2 != 0 ? "HIT" : "miss")}");
 
                 if (b1 == 0 || b2 == 0) continue;
 
                 string cardinalDir = ResolveAveragedCardinal(detMask);
-                Debug.Log($"[IrHs] *** HIT: {enemyName} cardinal={cardinalDir} {(cardinalDir == "S" ? "(REAR — 3×)" : "")} ***");
+                Debug.Log($"[IrHs] *** HIT: shooter={shooterId} -> {enemyName} cardinal={cardinalDir} {(cardinalDir == "S" ? "(REAR — 3×)" : "")} ***");
                 hitCount++;
 
                 var state = game?.State;
                 if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId) || state.InvulnerableRobots.Contains(enemyId)))
                 {
-                    Debug.Log($"[IrHs]   {enemyName} is dead/respawning/invulnerable — skipping");
+                    NetLog.Log($"[IrHs]   {enemyName} is dead/respawning/invulnerable — skipping");
                     continue;
                 }
 
                 int damage = game != null ? game.ApplyDamage(shooterId, enemyId, detMask, cardinalDir, players, dir) : 0;
                 int newHp  = game?.State?.RobotHp.GetValueOrDefault(enemyId, 0) ?? 0;
-                Debug.Log($"[IrHs]   damage={damage} newHp={newHp}/{maxHp}");
+                NetLog.Log($"[IrHs]   damage={damage} newHp={newHp}/{maxHp}");
 
                 if (damage > 0 && newHp > 0)
                     server.SendFlashHit(enemyId, cardinalDir == "S");
@@ -308,11 +308,11 @@ public class IrSlotScheduler : MonoBehaviour
                 string dirLabel = cardinalDir == "S" ? "rear" : (cardinalDir == "N" ? "front" : "flank");
                 hitParts.Add(isKill ? $"You killed {enemyName}!" : $"Hit {enemyName} on {dirLabel}");
             }
-            Debug.Log($"[IrHs] ===== Shot {slotId} DONE — {hitCount} hit(s) of {enemies.Count} =====");
+            NetLog.Log($"[IrHs] ===== Shot {slotId} DONE — {hitCount} hit(s) of {enemies.Count} =====");
         }
         else
         {
-            Debug.Log($"[IrHs] ===== Shot {slotId} DONE — aborted ======");
+            NetLog.Log($"[IrHs] ===== Shot {slotId} DONE — aborted ======");
         }
 
         if (hitParts.Count > 0)

@@ -46,6 +46,31 @@ public class RobotWebSocketServer : MonoBehaviour
         public int NumFrames;
     }
 
+    // ── Health log ── one line per minute so a long event day leaves a record of
+    // whether Unity, the robots' memory or their connections degraded over time.
+    [Header("Health log")]
+    public float HealthLogIntervalSeconds = 60f;
+    // A single frame longer than this is logged straight away as a main-thread stall.
+    public float StallWarnSeconds = 0.5f;
+
+    private class RobotHealth
+    {
+        public int  Heap = -1;        // free internal heap from the latest hb (bytes)
+        public int  HeapMin = -1;     // lowest free heap seen this interval
+        public int  MaxBlock = -1;    // largest free internal block (fragmentation), newer firmware only
+        public int  Hellos;           // hello count this interval (> 1 = reconnecting)
+    }
+    private readonly Dictionary<string, RobotHealth> _health = new Dictionary<string, RobotHealth>();
+    private float _healthNextLog;
+    private float _frameTimeSum, _frameTimeMax;
+    private int   _frameCount;
+
+    RobotHealth HealthFor(string robotId)
+    {
+        if (!_health.TryGetValue(robotId, out var h)) _health[robotId] = h = new RobotHealth();
+        return h;
+    }
+
     // Robots currently streaming camera video (maintained by SendStreamOn/Off)
     private readonly HashSet<string> _activeStreams = new HashSet<string>();
 
@@ -184,6 +209,52 @@ public class RobotWebSocketServer : MonoBehaviour
             _nextSweepTime = Time.time + SweepIntervalSeconds;
             SweepForTimeouts();
         }
+
+        UpdateHealthLog();
+    }
+
+    private void UpdateHealthLog()
+    {
+        // unscaledDeltaTime is the real wall-clock gap (Time.deltaTime is capped by
+        // maximumDeltaTime, so it would hide exactly the long stalls we want to see).
+        float dt = Time.unscaledDeltaTime;
+        _frameTimeSum += dt;
+        _frameCount++;
+        if (dt > _frameTimeMax) _frameTimeMax = dt;
+        if (dt > StallWarnSeconds && Time.frameCount > 10)
+            Debug.LogWarning($"[Health] main thread stalled for {dt:F1} s");
+
+        float now = Time.realtimeSinceStartup;
+        if (_healthNextLog == 0f) _healthNextLog = now + HealthLogIntervalSeconds;
+        if (now < _healthNextLog) return;
+        _healthNextLog = now + HealthLogIntervalSeconds;
+
+        var sb = new System.Text.StringBuilder();
+        float avgMs = _frameCount > 0 ? _frameTimeSum / _frameCount * 1000f : 0f;
+        sb.Append($"[Health] frame avg={avgMs:F1}ms worst={_frameTimeMax * 1000f:F0}ms");
+        sb.Append($" | mono={UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() / (1024 * 1024)}MB");
+        sb.Append($" | robots connected={_sessionByRobot.Count}");
+        foreach (var kv in _health)
+        {
+            var h = kv.Value;
+            sb.Append($" | {RobotLabel(kv.Key)} heap={h.Heap / 1024}k min={h.HeapMin / 1024}k");
+            if (h.MaxBlock >= 0) sb.Append($" blk={h.MaxBlock / 1024}k");
+            if (h.Hellos > 0) sb.Append($" hellos={h.Hellos}");
+            h.HeapMin = h.Heap;
+            h.Hellos  = 0;
+        }
+        var beacons = ServiceLocator.BeaconServer;
+        if (beacons != null) sb.Append(" | ").Append(beacons.TakeHealthSummary());
+        Debug.Log(sb.ToString());
+
+        _frameTimeSum = 0f; _frameTimeMax = 0f; _frameCount = 0;
+    }
+
+    // Successful sends are only logged when NetLog.Verbose; failures always are.
+    static void LogSend(bool ok, string success, string failure)
+    {
+        if (ok) NetLog.Log(success);
+        else    Debug.Log(failure);
     }
 
     public void PostMain(Action a)
@@ -331,6 +402,7 @@ public class RobotWebSocketServer : MonoBehaviour
             info.NumFrames = 0;
 
             _sessionByRobot[id] = sid;
+            HealthFor(id).Hellos++;
 
             string helloIp   = ExtractString(json, "ip")   ?? "";
             string helloName = ExtractString(json, "name") ?? "";
@@ -412,6 +484,14 @@ public class RobotWebSocketServer : MonoBehaviour
                 info.LastSeenTime = Time.time;
                 if (VerboseHeartbeats && info.NumFrames % 30 == 0)
                     Debug.Log("[WS] hb from " + (info.RobotId ?? sid));
+
+                if (!string.IsNullOrEmpty(info.RobotId) && json.Contains("\"heap\":"))
+                {
+                    var h = HealthFor(info.RobotId);
+                    h.Heap = ExtractInt(json, "heap");
+                    if (h.HeapMin < 0 || h.Heap < h.HeapMin) h.HeapMin = h.Heap;
+                    if (json.Contains("\"maxblk\":")) h.MaxBlock = ExtractInt(json, "maxblk");
+                }
             }
             return;
         }
@@ -421,7 +501,7 @@ public class RobotWebSocketServer : MonoBehaviour
             if (!_bySession.TryGetValue(sid, out var pongInfo)) return;
             string pongRobotId = pongInfo.RobotId;
             if (string.IsNullOrEmpty(pongRobotId)) return;
-            Debug.Log($"[WS<-Robot] pong from {pongRobotId}");
+            NetLog.Log($"[WS<-Robot] pong from {pongRobotId}");
             OnPong?.Invoke(pongRobotId);
             return;
         }
@@ -431,7 +511,7 @@ public class RobotWebSocketServer : MonoBehaviour
             if (!_bySession.TryGetValue(sid, out var info)) return;
             string robotId = info.RobotId;
             if (string.IsNullOrEmpty(robotId)) return;
-            Debug.Log($"[WS<-Robot] ir_emit_ack -> {robotId}");
+            NetLog.Log($"[WS<-Robot] ir_emit_ack -> {robotId}");
             OnIrEmitAck?.Invoke(robotId);
             return;
         }
@@ -442,7 +522,7 @@ public class RobotWebSocketServer : MonoBehaviour
             string robotId = info.RobotId;
             if (string.IsNullOrEmpty(robotId)) return;
             byte mask = (byte)ExtractInt(json, "mask");
-            Debug.Log($"[WS<-Robot] ir_window_result mask=0x{mask:X2} -> {robotId}");
+            NetLog.Log($"[WS<-Robot] ir_window_result mask=0x{mask:X2} -> {robotId}");
             OnIrWindowResult?.Invoke(robotId, mask);
             return;
         }
@@ -521,7 +601,7 @@ public class RobotWebSocketServer : MonoBehaviour
             {
                 var rid = info.RobotId;
 
-                try { ServiceSessions()?.CloseSession(sid); } catch { /* ignore */ }
+                CloseSessionInBackground(ServiceSessions(), sid);
                 _bySession.Remove(sid);
 
                 if (!string.IsNullOrEmpty(rid))
@@ -550,6 +630,20 @@ public class RobotWebSocketServer : MonoBehaviour
         }
     }
 
+    // websocket-sharp's CloseSession sends a close frame and then waits up to 1 s for
+    // the peer to answer. A timed-out robot never answers, so on the main thread each
+    // one froze the whole game for a second — ten robots dropping together after a
+    // Wi-Fi blip froze it for ~10 s. The session is already forgotten here (and the
+    // OnClose it triggers finds nothing), so closing it off-thread is safe.
+    internal static void CloseSessionInBackground(WebSocketSessionManager sessions, string sid)
+    {
+        if (sessions == null) return;
+        System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { sessions.CloseSession(sid); } catch { /* already gone */ }
+        });
+    }
+
     // ===== Public send helpers for UI code =====
 
     public bool SendJsonToRobot(string robotId, string json)
@@ -571,7 +665,7 @@ public class RobotWebSocketServer : MonoBehaviour
     public bool SendPing(string robotId)
     {
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"ping\"}");
-        Debug.Log(ok ? $"[WS->Robot] ping -> {robotId}" : $"[WS->Robot] FAILED ping -> {robotId}");
+        LogSend(ok, $"[WS->Robot] ping -> {robotId}", $"[WS->Robot] FAILED ping -> {robotId}");
         return ok;
     }
 
@@ -613,9 +707,7 @@ public class RobotWebSocketServer : MonoBehaviour
         string json = $"{{\"cmd\":\"set_drive_config\",\"inv_throttle\":{(invThrottle ? 1 : 0)}" +
                       $",\"inv_steer\":{(invSteer ? 1 : 0)},\"inv_turret\":{(invTurret ? 1 : 0)}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] set_drive_config th={invThrottle} st={invSteer} tu={invTurret} -> {robotId}"
-            : $"[WS->Robot] FAILED set_drive_config -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_drive_config th={invThrottle} st={invSteer} tu={invTurret} -> {robotId}", $"[WS->Robot] FAILED set_drive_config -> {robotId}");
         return ok;
     }
 
@@ -625,9 +717,7 @@ public class RobotWebSocketServer : MonoBehaviour
         string escaped = name.Replace("\\", "\\\\").Replace("\"", "\\\"");
         string json = "{\"cmd\":\"set_name\",\"name\":\"" + escaped + "\"}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] set_name '{name}' -> {robotId}"
-            : $"[WS->Robot] FAILED set_name -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_name '{name}' -> {robotId}", $"[WS->Robot] FAILED set_name -> {robotId}");
         return ok;
     }
 
@@ -637,23 +727,21 @@ public class RobotWebSocketServer : MonoBehaviour
         string json = "{\"cmd\":\"set_video_flip\",\"h\":" + (hflip ? 1 : 0) +
                       ",\"v\":" + (vflip ? 1 : 0) + "}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] set_video_flip h={hflip} v={vflip} -> {robotId}"
-            : $"[WS->Robot] FAILED set_video_flip -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_video_flip h={hflip} v={vflip} -> {robotId}", $"[WS->Robot] FAILED set_video_flip -> {robotId}");
         return ok;
     }
 
     public bool SendMotorsOn(string robotId)
     {
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"motors_on\"}");
-        Debug.Log(ok ? $"[WS->Robot] motors_on -> {robotId}" : $"[WS->Robot] FAILED motors_on -> {robotId}");
+        LogSend(ok, $"[WS->Robot] motors_on -> {robotId}", $"[WS->Robot] FAILED motors_on -> {robotId}");
         return ok;
     }
 
     public bool SendMotorsOff(string robotId)
     {
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"motors_off\"}");
-        Debug.Log(ok ? $"[WS->Robot] motors_off -> {robotId}" : $"[WS->Robot] FAILED motors_off -> {robotId}");
+        LogSend(ok, $"[WS->Robot] motors_off -> {robotId}", $"[WS->Robot] FAILED motors_off -> {robotId}");
         return ok;
     }
 
@@ -698,9 +786,7 @@ public class RobotWebSocketServer : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"set_buzzer\",\"enabled\":{(enabled ? 1 : 0)}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] set_buzzer enabled={enabled} -> {robotId}"
-            : $"[WS->Robot] FAILED set_buzzer -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_buzzer enabled={enabled} -> {robotId}", $"[WS->Robot] FAILED set_buzzer -> {robotId}");
         return ok;
     }
 
@@ -715,9 +801,7 @@ public class RobotWebSocketServer : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"set_video\",\"fps\":{fps},\"framesize\":{frameSize},\"quality\":{quality}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] set_video fps={fps} fsize={frameSize} q={quality} -> {robotId}"
-            : $"[WS->Robot] FAILED set_video -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_video fps={fps} fsize={frameSize} q={quality} -> {robotId}", $"[WS->Robot] FAILED set_video -> {robotId}");
         return ok;
     }
 
@@ -737,9 +821,7 @@ public class RobotWebSocketServer : MonoBehaviour
         }
         string json = "{\"cmd\":\"ir_emit_stop\"}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok
-            ? $"[WS->Robot] ir_emit_stop -> {robotId}"
-            : $"[WS->Robot] FAILED ir_emit_stop -> {robotId}");
+        LogSend(ok, $"[WS->Robot] ir_emit_stop -> {robotId}", $"[WS->Robot] FAILED ir_emit_stop -> {robotId}");
         return ok;
     }
 
@@ -750,7 +832,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"ir_emit_left\"}");
-        Debug.Log(ok ? $"[WS->Robot] ir_emit_left -> {robotId}" : $"[WS->Robot] FAILED ir_emit_left -> {robotId}");
+        LogSend(ok, $"[WS->Robot] ir_emit_left -> {robotId}", $"[WS->Robot] FAILED ir_emit_left -> {robotId}");
         return ok;
     }
 
@@ -758,7 +840,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"ir_emit_right\"}");
-        Debug.Log(ok ? $"[WS->Robot] ir_emit_right -> {robotId}" : $"[WS->Robot] FAILED ir_emit_right -> {robotId}");
+        LogSend(ok, $"[WS->Robot] ir_emit_right -> {robotId}", $"[WS->Robot] FAILED ir_emit_right -> {robotId}");
         return ok;
     }
 
@@ -767,7 +849,7 @@ public class RobotWebSocketServer : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"ir_listen_window\",\"ms\":{ms}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] ir_listen_window ms={ms} -> {robotId}" : $"[WS->Robot] FAILED ir_listen_window -> {robotId}");
+        LogSend(ok, $"[WS->Robot] ir_listen_window ms={ms} -> {robotId}", $"[WS->Robot] FAILED ir_listen_window -> {robotId}");
         return ok;
     }
 
@@ -777,7 +859,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_fire\"}");
-        Debug.Log(ok ? $"[WS->Robot] flash_fire -> {robotId}" : $"[WS->Robot] FAILED flash_fire -> {robotId}");
+        LogSend(ok, $"[WS->Robot] flash_fire -> {robotId}", $"[WS->Robot] FAILED flash_fire -> {robotId}");
         return ok;
     }
 
@@ -786,7 +868,7 @@ public class RobotWebSocketServer : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = isRear ? "{\"cmd\":\"flash_hit\",\"rear\":true}" : "{\"cmd\":\"flash_hit\"}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] flash_hit{(isRear ? " (rear)" : "")} -> {robotId}" : $"[WS->Robot] FAILED flash_hit -> {robotId}");
+        LogSend(ok, $"[WS->Robot] flash_hit{(isRear ? " (rear)" : "")} -> {robotId}", $"[WS->Robot] FAILED flash_hit -> {robotId}");
         return ok;
     }
 
@@ -794,7 +876,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_heal\"}");
-        Debug.Log(ok ? $"[WS->Robot] flash_heal -> {robotId}" : $"[WS->Robot] FAILED flash_heal -> {robotId}");
+        LogSend(ok, $"[WS->Robot] flash_heal -> {robotId}", $"[WS->Robot] FAILED flash_heal -> {robotId}");
         return ok;
     }
 
@@ -802,7 +884,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_capture\"}");
-        Debug.Log(ok ? $"[WS->Robot] flash_capture -> {robotId}" : $"[WS->Robot] FAILED flash_capture -> {robotId}");
+        LogSend(ok, $"[WS->Robot] flash_capture -> {robotId}", $"[WS->Robot] FAILED flash_capture -> {robotId}");
         return ok;
     }
 
@@ -810,7 +892,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"flash_death\"}");
-        Debug.Log(ok ? $"[WS->Robot] flash_death -> {robotId}" : $"[WS->Robot] FAILED flash_death -> {robotId}");
+        LogSend(ok, $"[WS->Robot] flash_death -> {robotId}", $"[WS->Robot] FAILED flash_death -> {robotId}");
         return ok;
     }
 
@@ -818,7 +900,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"invuln_start\"}");
-        Debug.Log(ok ? $"[WS->Robot] invuln_start -> {robotId}" : $"[WS->Robot] FAILED invuln_start -> {robotId}");
+        LogSend(ok, $"[WS->Robot] invuln_start -> {robotId}", $"[WS->Robot] FAILED invuln_start -> {robotId}");
         return ok;
     }
 
@@ -826,7 +908,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"invuln_end\"}");
-        Debug.Log(ok ? $"[WS->Robot] invuln_end -> {robotId}" : $"[WS->Robot] FAILED invuln_end -> {robotId}");
+        LogSend(ok, $"[WS->Robot] invuln_end -> {robotId}", $"[WS->Robot] FAILED invuln_end -> {robotId}");
         return ok;
     }
 
@@ -835,7 +917,7 @@ public class RobotWebSocketServer : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"set_hp\",\"hp\":{hp},\"max\":{maxHp}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] set_hp hp={hp}/{maxHp} -> {robotId}" : $"[WS->Robot] FAILED set_hp -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_hp hp={hp}/{maxHp} -> {robotId}", $"[WS->Robot] FAILED set_hp -> {robotId}");
         return ok;
     }
 
@@ -856,7 +938,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"reset_idle\"}");
-        Debug.Log(ok ? $"[WS->Robot] reset_idle -> {robotId}" : $"[WS->Robot] FAILED reset_idle -> {robotId}");
+        LogSend(ok, $"[WS->Robot] reset_idle -> {robotId}", $"[WS->Robot] FAILED reset_idle -> {robotId}");
         return ok;
     }
 
@@ -871,7 +953,7 @@ public class RobotWebSocketServer : MonoBehaviour
         if (string.IsNullOrEmpty(robotId)) return false;
         string json = $"{{\"cmd\":\"set_player_color\",\"r\":{r},\"g\":{g},\"b\":{b}}}";
         bool ok = SendJsonToRobot(robotId, json);
-        Debug.Log(ok ? $"[WS->Robot] set_player_color r={r} g={g} b={b} -> {robotId}" : $"[WS->Robot] FAILED set_player_color -> {robotId}");
+        LogSend(ok, $"[WS->Robot] set_player_color r={r} g={g} b={b} -> {robotId}", $"[WS->Robot] FAILED set_player_color -> {robotId}");
         return ok;
     }
 
@@ -879,7 +961,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (string.IsNullOrEmpty(robotId)) return false;
         bool ok = SendJsonToRobot(robotId, "{\"cmd\":\"clear_player_color\"}");
-        Debug.Log(ok ? $"[WS->Robot] clear_player_color -> {robotId}" : $"[WS->Robot] FAILED clear_player_color -> {robotId}");
+        LogSend(ok, $"[WS->Robot] clear_player_color -> {robotId}", $"[WS->Robot] FAILED clear_player_color -> {robotId}");
         return ok;
     }
 
