@@ -148,6 +148,11 @@ public class RobotWebSocketServer : MonoBehaviour
         Debug.Log("[WS] Starting server on 0.0.0.0:" + Port + Path + "  (LAN IP: " + ip + ")");
 
         _wss = new WebSocketServer(Port);
+        // websocket-sharp's own "keep clean" sweep pings every session once a minute
+        // and drops any that don't pong within 1 s. On congested event Wi-Fi a healthy
+        // robot can miss that, get kicked, and restart its camera. Our own
+        // heartbeat sweep (TimeoutSeconds) already removes genuinely dead sessions.
+        _wss.KeepClean = false;
 
         var parent = this;
         _wss.AddWebSocketService<ESP32Service>(Path, () => new ESP32Service { Parent = parent });

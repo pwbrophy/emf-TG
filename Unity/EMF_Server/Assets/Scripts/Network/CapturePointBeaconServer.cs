@@ -104,6 +104,11 @@ public class CapturePointBeaconServer : MonoBehaviour
         Debug.Log("[BeaconWS] Starting server on 0.0.0.0:" + Port + Path + "  (LAN IP: " + ip + ")");
 
         _wss = new WebSocketServer(Port);
+        // websocket-sharp's own "keep clean" sweep pings every session once a minute
+        // and drops any that don't pong within 1 s. On congested event Wi-Fi a healthy
+        // beacon can miss that and get kicked. Our own
+        // heartbeat sweep (TimeoutSeconds) already removes genuinely dead sessions.
+        _wss.KeepClean = false;
 
         var parent = this;
         _wss.AddWebSocketService<BeaconService>(Path, () => new BeaconService { Parent = parent });
