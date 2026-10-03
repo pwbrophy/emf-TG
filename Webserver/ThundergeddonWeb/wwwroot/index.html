@@ -1561,9 +1561,17 @@ function startServerPoll() {
 
 function stopVideoWs() {
   if (_videoWs) {
-    _videoWs.onclose = null; // prevent onclose firing returnToJoin side-effects
-    _videoWs.close();
+    // Detach EVERY handler before closing, not just onclose. A socket closed
+    // while still connecting — or one whose connection has silently died,
+    // which is exactly what the stall watchdog replaces — fires 'error' later,
+    // sometimes seconds later. Its old onerror then put "No video stream" over
+    // the replacement stream, which had already shown its first frame and so
+    // never hid the placeholder again: black screen + "No video stream" while
+    // video was arriving fine underneath, until a refresh.
+    const ws = _videoWs;
     _videoWs = null;
+    ws.onopen = ws.onerror = ws.onmessage = ws.onclose = null;
+    ws.close();
   }
 }
 
@@ -1580,16 +1588,17 @@ function startWsVideoDecoder(robotUrl) {
               + '/api/video-ws?url=' + encodeURIComponent(robotUrl);
   dbg('WS video: ' + wsUrl);
 
-  _videoWs = new WebSocket(wsUrl);
-  _videoWs.binaryType = 'arraybuffer';
+  const ws = new WebSocket(wsUrl);
+  _videoWs = ws;
+  ws.binaryType = 'arraybuffer';
 
-  _videoWs.onopen  = () => dbg('WS video open');
-  _videoWs.onerror = () => {
+  ws.onopen  = () => dbg('WS video open');
+  ws.onerror = () => {
     dbg('WS video error');
     ph.textContent   = 'No video stream';
     ph.style.display = 'flex';
   };
-  _videoWs.onclose = e => {
+  ws.onclose = e => {
     dbg('WS video closed code=' + e.code + ' frames=' + frameCount);
     if (!gotFirstFrame) {
       ph.textContent   = 'No video stream';
@@ -1619,6 +1628,9 @@ function startWsVideoDecoder(robotUrl) {
     pending  = null;
     decoding = true;
     decodeJpegFrame(data).then(img => {
+      // Socket replaced while this frame was decoding — drop it, so a stale
+      // decoder can't draw over (or un-hide placeholders for) the new stream.
+      if (_videoWs !== ws) { if (img.close) img.close(); return; }
       const w = img.naturalWidth || img.width;
       const h = img.naturalHeight || img.height;
       // Assigning canvas width/height (even to the same value) clears and
@@ -1630,10 +1642,12 @@ function startWsVideoDecoder(robotUrl) {
       frameCount++;
       _lastVideoFrameAt = performance.now(); // feeds the stall watchdog
       onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
+      // A drawn frame means video is live: clear any placeholder text on
+      // every frame, not just the first, so nothing can stay stuck over it.
+      if (ph.style.display !== 'none')     ph.style.display     = 'none';
+      if (canvas.style.display === 'none') canvas.style.display = '';
       if (!gotFirstFrame) {
-        gotFirstFrame        = true;
-        canvas.style.display = '';
-        ph.style.display     = 'none';
+        gotFirstFrame = true;
         dbg('WS first frame! ' + w + 'x' + h);
       } else if (frameCount === 10) {
         dbg('WS stream OK, 10 frames received');
@@ -1641,7 +1655,7 @@ function startWsVideoDecoder(robotUrl) {
     }).catch(() => { /* corrupt frame — skip it */ })
       .finally(() => { decoding = false; drawNext(); });
   };
-  _videoWs.onmessage = e => { pending = e.data; drawNext(); };
+  ws.onmessage = e => { pending = e.data; drawNext(); };
 }
 
 // Decodes one JPEG (ArrayBuffer) off the main thread where the browser supports
