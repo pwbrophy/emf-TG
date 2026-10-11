@@ -151,6 +151,16 @@ public class UnityBridgeService : BackgroundService
                     break;
                 }
 
+                case "join_superseded":
+                {
+                    // This phone rejoined under the same name from another tab / a new
+                    // connection; tell the old one to stand down.
+                    string? connId = GetString(doc.RootElement, "connectionId");
+                    if (!string.IsNullOrEmpty(connId))
+                        Post(_hub.Clients.Client(connId).SendAsync("JoinSuperseded"));
+                    break;
+                }
+
                 case "robot_list":
                     HandleRobotList(doc.RootElement);
                     break;

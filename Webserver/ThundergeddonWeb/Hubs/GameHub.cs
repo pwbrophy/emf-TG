@@ -93,9 +93,23 @@ public class GameHub : Hub
         {
             cmd          = "join",
             name         = name.Trim(),
-            connectionId = Context.ConnectionId
+            connectionId = Context.ConnectionId,
+            deviceId     = DeviceId()
         });
         return true;
+    }
+
+    /// <summary>
+    /// The phone's device id: a random id its browser keeps in localStorage (shared
+    /// by all its tabs) and passes as ?device= on the hub URL. Unity uses it to let
+    /// the same phone rejoin under its own name instead of rejecting it as taken.
+    /// Empty for pages from before this existed — those keep the old behaviour.
+    /// </summary>
+    private string DeviceId()
+    {
+        string raw = Context.GetHttpContext()?.Request.Query["device"].ToString() ?? "";
+        var clean = new string(raw.Where(c => char.IsLetterOrDigit(c) || c == '-').ToArray());
+        return clean.Length <= 40 ? clean : clean[..40];
     }
 
     public async Task JoinSquad(int alliance)

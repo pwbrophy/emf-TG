@@ -1407,6 +1407,29 @@ const IS_FIREFOX = /Firefox/.test(navigator.userAgent);
 // display readable and stop long ones being cut off in the robot rows.
 const MAX_NAME_LEN = 12;
 
+// Random id for this browser, kept in localStorage so every tab on the phone shares
+// it. Sent on the hub URL; Unity uses it to let this phone rejoin under its own name
+// (new tab after rescanning the QR code, refresh, reconnect) instead of rejecting the
+// name as already taken. Private browsing without storage just gets one per page.
+const DEVICE_ID = (() => {
+  const fresh = () => (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+  try {
+    let id = localStorage.getItem('tg_device_id');
+    if (!id) { id = fresh(); localStorage.setItem('tg_device_id', id); }
+    return id;
+  } catch (_) { return fresh(); }
+})();
+
+// Automatic joins (lobby opening, SignalR reconnect, mid-game rejoin poll) only run
+// on the tab that's actually on screen. At Battles Through History a player's old
+// tab, still connected in the background, auto-joined with their saved name the
+// moment a new lobby opened — so the tab they were looking at got "name already
+// taken". A hidden tab that misses a rejoin catches up when it's shown again.
+function pageVisible() { return document.visibilityState === 'visible'; }
+let _rejoinWhenVisible = false;
+
 let myName      = '';
 let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
 let myRobotId   = '';
@@ -1479,6 +1502,18 @@ function releaseWakeLock() {
   dbg('wakeLock released');
 }
 document.addEventListener('visibilitychange', () => {
+  // A SignalR reconnect that happened while this tab was hidden skipped its
+  // JoinLobby (see pageVisible) — do it now the player is looking at this tab.
+  if (pageVisible() && _rejoinWhenVisible && connection && myName
+      && connection.state === signalR.HubConnectionState.Connected) {
+    _rejoinWhenVisible = false;
+    dbg('visible again — completing deferred rejoin');
+    const conn = connection;
+    conn.invoke('JoinLobby', myName).then(joined => {
+      if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active'))
+        showScreen('screen-lobby');
+    }).catch(err => dbg('deferred rejoin failed: ' + err.message));
+  }
   // Only re-acquire while actually playing (playing screen is active).
   if (document.visibilityState === 'visible'
       && document.getElementById('screen-playing').classList.contains('active')) {
@@ -1552,7 +1587,7 @@ function startServerPoll() {
         } else if (d.phase === 'playing') {
           // Auto-rejoin once if there's a saved name (page refresh mid-game).
           const savedName = document.getElementById('name-input').value.trim();
-          if (savedName && !_rejoinAttempted) {
+          if (savedName && !_rejoinAttempted && pageVisible()) {
             _rejoinAttempted = true;
             setStatus('Rejoining game…', false);
             joinLobby();
@@ -2004,7 +2039,7 @@ function buildConnection() {
     : {};
   dbg('buildConnection transport=' + (IS_IOS ? 'LongPolling' : 'default'));
   const conn = new signalR.HubConnectionBuilder()
-    .withUrl('/gamehub', urlOpts)
+    .withUrl('/gamehub?device=' + encodeURIComponent(DEVICE_ID), urlOpts)
     .withAutomaticReconnect([0, 2000, 5000, 10000])
     .build();
 
@@ -2056,6 +2091,16 @@ function buildConnection() {
   });
   conn.on('HitTaken',     data    => onHitTaken(data));
   conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
+  // This phone rejoined under the same name from another tab (or a newer connection
+  // in this one): close this connection and stop it auto-joining, so the two tabs
+  // can't keep taking the name off each other.
+  conn.on('JoinSuperseded', () => {
+    dbg('SignalR: JoinSuperseded');
+    if (connection !== conn) { conn.stop().catch(() => {}); return; }
+    _rejoinAttempted = true; // keeps the server poll from auto-rejoining this tab
+    returnToJoin('You joined from another tab or window — carry on there.');
+    _rejoinAttempted = true; // returnToJoin resets it
+  });
   // Rejected join (name taken, or game in progress for kicked players).
   // Only re-enable the button if the lobby is currently open; otherwise keep it grey.
   conn.on('JoinRejected', reason => {
@@ -2091,7 +2136,7 @@ function buildConnection() {
     dbg('SignalR: ServerConnected');
     _lobbyOpen = true;
     setJoinReady();
-    if (document.getElementById('screen-join').classList.contains('active') && myName) {
+    if (document.getElementById('screen-join').classList.contains('active') && myName && pageVisible()) {
       setStatus('Game server ready — joining…', false);
       conn.invoke('JoinLobby', myName).then(joined => {
         if (joined && !document.getElementById('screen-playing').classList.contains('active'))
@@ -2105,6 +2150,7 @@ function buildConnection() {
     dbg('SignalR: reconnected');
     hideReconnectOverlay();
     setStatus('', false);
+    if (!pageVisible()) { _rejoinWhenVisible = true; dbg('reconnected while hidden — rejoin deferred'); return; }
     const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
     if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active'))
       showScreen('screen-lobby');
@@ -3929,7 +3975,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v35</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v36</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

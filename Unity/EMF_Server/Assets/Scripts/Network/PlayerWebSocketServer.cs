@@ -44,6 +44,12 @@ public class PlayerWebSocketServer : MonoBehaviour
     private readonly Dictionary<string, string> _connToPlayer =
         new Dictionary<string, string>();
 
+    // Phone connectionId → device id: a random id the phone's browser keeps in
+    // localStorage (shared by all its tabs). Lets a join tell "the same phone
+    // rejoining under its own name" apart from "another player picked that name".
+    private readonly Dictionary<string, string> _connDevice =
+        new Dictionary<string, string>();
+
     // WebSocket sessionId (bridge WS conn) → phone connectionIds routed through it
     private readonly Dictionary<string, HashSet<string>> _sessionToConns =
         new Dictionary<string, HashSet<string>>();
@@ -318,7 +324,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         switch (msg.cmd)
         {
             case "join":
-                HandleJoin(sessionId, msg.connectionId, msg.name);
+                HandleJoin(sessionId, msg.connectionId, msg.name, msg.deviceId);
                 break;
 
             case "squad":
@@ -384,7 +390,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                      ",\"reason\":\""        + EscapeJson(message) + "\"}");
     }
 
-    void HandleJoin(string sessionId, string connId, string name)
+    void HandleJoin(string sessionId, string connId, string name, string deviceId)
     {
         if (string.IsNullOrWhiteSpace(connId) || string.IsNullOrWhiteSpace(name)) return;
         if (_connToPlayer.ContainsKey(connId)) return;
@@ -396,8 +402,22 @@ public class PlayerWebSocketServer : MonoBehaviour
             foreach (var p in existingList)
                 if (p.Name == name) { alreadyListed = true; break; }
 
-        // Reject duplicate names in Lobby. During Playing, same name = reconnect — allow it.
-        if (alreadyListed && ServiceLocator.GameFlow?.Phase == GamePhase.Lobby)
+        // The same phone rejoining under its own name: a fresh tab after scanning the
+        // QR code again, a page refresh, or a reconnect that arrived before the old
+        // connection's leave. At Battles Through History these were rejected as
+        // "already taken" — 43 times on day 1 — often by the player's own older tab,
+        // which had auto-joined in the background when the lobby opened. Hand the name
+        // (and its squad / tank) to the new connection instead.
+        var holders = new List<string>();
+        foreach (var kvp in _connToPlayer)
+            if (kvp.Value == name) holders.Add(kvp.Key);
+        bool sameDevice = alreadyListed && !string.IsNullOrEmpty(deviceId) && holders.Count > 0;
+        foreach (var h in holders)
+            if (!_connDevice.TryGetValue(h, out var d) || d != deviceId) { sameDevice = false; break; }
+
+        // Reject duplicate names in Lobby (a different player picked the same name).
+        // During Playing, same name = reconnect — allow it.
+        if (alreadyListed && !sameDevice && ServiceLocator.GameFlow?.Phase == GamePhase.Lobby)
         {
             string reason = EscapeJson("\"" + name + "\" is already taken — please choose a different name.");
             BroadcastRaw("{\"cmd\":\"join_rejected\",\"connectionId\":\"" + EscapeJson(connId) + "\",\"reason\":\"" + reason + "\"}");
@@ -425,7 +445,14 @@ public class PlayerWebSocketServer : MonoBehaviour
             return;
         }
 
+        if (sameDevice)
+        {
+            foreach (var old in holders) SupersedeConnection(old);
+            Debug.Log($"[PlayerWS] {name} rejoined from the same device — replaced {holders.Count} older connection(s)");
+        }
+
         _connToPlayer[connId] = name;
+        if (!string.IsNullOrEmpty(deviceId)) _connDevice[connId] = deviceId;
         if (_sessionToConns.TryGetValue(sessionId, out var conns)) conns.Add(connId);
 
         if (!alreadyListed)
@@ -440,6 +467,21 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         BroadcastPlayerList();
         BroadcastRobotList();
+    }
+
+    /// <summary>
+    /// Detaches an older connection whose player has rejoined from the same device.
+    /// The player keeps their squad and tank (they now belong to the new connection);
+    /// the old tab is told to close its connection and stop auto-joining, so it can't
+    /// take the name back later.
+    /// </summary>
+    void SupersedeConnection(string connId)
+    {
+        BroadcastRaw("{\"cmd\":\"join_superseded\",\"connectionId\":\"" + EscapeJson(connId) + "\"}");
+        _connToPlayer.Remove(connId);
+        _connDevice.Remove(connId);
+        _lastTurretByConn.Remove(connId);
+        foreach (var set in _sessionToConns.Values) set.Remove(connId);
     }
 
     /// <summary>
@@ -484,6 +526,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                              ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
                              ",\"reason\":\""        + kickReason         + "\"}");
                 _connToPlayer.Remove(connId);
+                _connDevice.Remove(connId);
             }
 
             // Remove from PlayersService (find index fresh each iteration as list shifts)
@@ -551,6 +594,7 @@ public class PlayerWebSocketServer : MonoBehaviour
                          ",\"reason\":\""        + reason             + "\"}");
         }
         _connToPlayer.Clear();
+        _connDevice.Clear();
 
         ServiceLocator.Players?.ClearAll();
         ServiceLocator.RobotDirectory?.ClearAllAssignedPlayers();
@@ -798,6 +842,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         if (!_connToPlayer.TryGetValue(connId, out string playerName)) return;
         _connToPlayer.Remove(connId);
+        _connDevice.Remove(connId);
         _lastTurretByConn.Remove(connId);
 
         // Player already rejoined with a new connection — don't evict them.
@@ -2191,6 +2236,7 @@ public class PlayerWebSocketServer : MonoBehaviour
         public int    alliance = -1;
         public string robotId;
         public bool   enabled;
+        public string deviceId;
     }
 
     // ── WebSocket behaviour ──────────────────────────────────────────────────────
