@@ -362,7 +362,7 @@
 </head>
 <body>
 
-<div id="version">display v12</div>
+<div id="version">display v13</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
@@ -902,9 +902,19 @@ startConnection();
 // ── WebSocket JPEG stream ────────────────────────────────────────────────
 // Uses /api/video-ws instead of /api/robot-stream to avoid Firefox's
 // 6-connection-per-server limit on HTTP/1.1 (WebSockets are not counted).
+// Frame-rate cap for the tank grid: the tiles are small, and decoding up to ten
+// full-rate streams is real work for the laptop that also runs Unity and the
+// stream proxy. The server drops the extra frames before sending. Override with
+// display.html?maxfps=25 (0 = uncapped).
+const DISPLAY_MAX_FPS = (() => {
+  const v = parseInt(new URLSearchParams(location.search).get('maxfps'), 10);
+  return Number.isFinite(v) && v >= 0 ? v : 15;
+})();
+
 function videoWsUrl(robotUrl) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}`;
+  return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}` +
+         `&who=display&maxfps=${DISPLAY_MAX_FPS}`;
 }
 
 // Decodes one JPEG (ArrayBuffer) off the main thread via createImageBitmap where

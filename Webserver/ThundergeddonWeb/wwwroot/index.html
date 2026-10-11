@@ -378,10 +378,13 @@
       transition: width 0.3s ease, background 0.3s ease;
       width: 100%;
     }
+    /* Colour only: the old blurred box-shadow glow was mostly clipped by
+       #hp-bar-wrap's overflow:hidden, yet animating it repainted a blur every
+       frame for as long as HP stayed critical — real work on older phones. */
     @keyframes hp-critical-flash {
-      0%   { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
-      50%  { background: #fff;    box-shadow: 0 0 14px rgba(255,255,255,1),  0 0 30px rgba(255,100,100,0.7); }
-      100% { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+      0%   { background: #ff2828; }
+      50%  { background: #fff; }
+      100% { background: #ff2828; }
     }
     #hp-bar-fill.hp-critical { animation: hp-critical-flash 0.65s ease-in-out infinite; }
     #hp-text {
@@ -946,6 +949,10 @@
       position: absolute;
       pointer-events: none;
       opacity: 0;
+      /* display:none while idle (JS shows it for each shot): a filtered layer
+         sitting over the video at opacity 0 can still cost compositing work on
+         every video frame on weaker GPUs. */
+      display: none;
       /* Fallback only — overwritten by JS (computeBeamGlowFilter, called from
          updateFireEffectBounds) with radii scaled to BEAM_GLOW_FALLOFF_FRAC
          of the video's actual rendered width once bounds are known. Kept to
@@ -984,6 +991,10 @@
       position: absolute;
       pointer-events: none;
       opacity: 0;
+      /* display:none while idle, like #fire-beam: an element with a blend mode
+         makes the browser blend the whole video group every frame, even when
+         the element itself is fully transparent. */
+      display: none;
       mix-blend-mode: overlay;
       background: radial-gradient(ellipse farthest-side at center,
         rgba(255,255,255,1) 0%,
@@ -1013,8 +1024,10 @@
       position: absolute;
       inset: 0;
       opacity: 0;
+      display: none; /* four full-screen gradients — only present while flashing */
     }
     .hit-effect.flash {
+      display: block;
       animation: hitFlash 0.6s ease-out forwards;
     }
 
@@ -1585,7 +1598,8 @@ function startWsVideoDecoder(robotUrl) {
 
   // Build ws:// URL pointing at the server's /api/video-ws endpoint
   const wsUrl = location.origin.replace(/^http/, 'ws')
-              + '/api/video-ws?url=' + encodeURIComponent(robotUrl);
+              + '/api/video-ws?url=' + encodeURIComponent(robotUrl)
+              + '&who=' + encodeURIComponent(myName || 'phone');
   dbg('WS video: ' + wsUrl);
 
   const ws = new WebSocket(wsUrl);
@@ -1627,6 +1641,7 @@ function startWsVideoDecoder(robotUrl) {
     const data = pending;
     pending  = null;
     decoding = true;
+    const decodeStart = performance.now();
     decodeJpegFrame(data).then(img => {
       // Socket replaced while this frame was decoding — drop it, so a stale
       // decoder can't draw over (or un-hide placeholders for) the new stream.
@@ -1640,6 +1655,8 @@ function startWsVideoDecoder(robotUrl) {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
       frameCount++;
+      _vsDrawn++;
+      _vsDecodeMs += performance.now() - decodeStart;
       _lastVideoFrameAt = performance.now(); // feeds the stall watchdog
       onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
       // A drawn frame means video is live: clear any placeholder text on
@@ -1655,7 +1672,7 @@ function startWsVideoDecoder(robotUrl) {
     }).catch(() => { /* corrupt frame — skip it */ })
       .finally(() => { decoding = false; drawNext(); });
   };
-  ws.onmessage = e => { pending = e.data; drawNext(); };
+  ws.onmessage = e => { _vsRecv++; pending = e.data; drawNext(); };
 }
 
 // Decodes one JPEG (ArrayBuffer) off the main thread where the browser supports
@@ -1727,9 +1744,112 @@ setInterval(() => {
   }
 }, 1000);
 
+// ── Video stats report ─────────────────────────────────────────────────────
+// Every VS_REPORT_MS while in a game, measure for VS_SAMPLE_MS what this phone
+// actually puts on screen and send it to the server (GameHub.ReportVideoStats),
+// which logs it beside its own per-tank in/out frame rates in logs/video-*.log.
+// Together they show whether choppy video came from the tank, the Wi-Fi link to
+// this phone, or the phone itself being too slow to draw what it received.
+//  - WS/canvas path (iOS, Firefox): exact counts of received and drawn frames.
+//  - <img> path (Android Chrome): an MJPEG <img> fires no per-frame event, so
+//    for the sample window a tiny copy of it is compared on every animation
+//    frame and changes are counted (the stall watchdog's trick, sped up).
+// pageFps is the requestAnimationFrame rate: well under 60 means the phone's
+// main thread or GPU is struggling, independent of the video.
+const VS_REPORT_MS = 30000;
+const VS_SAMPLE_MS = 2000;
+let _vsRecv = 0, _vsDrawn = 0, _vsDecodeMs = 0; // WS path, running totals
+let _vsDevice = '';
+
+// Device description for the log. Chrome's user-agent string no longer names the
+// phone model ("Android 10; K"), but its client hints do.
+(async function vsLoadDevice() {
+  try {
+    const uad = navigator.userAgentData;
+    if (uad && uad.getHighEntropyValues) {
+      const h = await uad.getHighEntropyValues(['model', 'platformVersion']);
+      const real = (uad.brands || []).filter(x => !/Not.?A.?Brand/i.test(x.brand));
+      const b = real.find(x => !/Chromium/i.test(x.brand)) || real[0]; // "Google Chrome" over plain "Chromium"
+      _vsDevice = [h.model, (uad.platform || '') + ' ' + (h.platformVersion || ''),
+                   b ? b.brand + ' ' + b.version : ''].filter(x => x && x.trim()).join(', ');
+    }
+  } catch (_) {}
+  if (!_vsDevice) {
+    const ua = navigator.userAgent;
+    const os = ua.match(/\(([^)]*)\)/);  // "(iPhone; CPU iPhone OS 16_6 like Mac OS X)"
+    const br = ua.match(/(CriOS|FxiOS|EdgiOS|SamsungBrowser|Firefox|Chrome|Version)\/([\d.]+)/);
+    _vsDevice = (os ? os[1] : ua) + (br ? ', ' + br[1] + ' ' + br[2] : '');
+  }
+  _vsDevice = _vsDevice.slice(0, 120);
+})();
+
+function vsMeasure(done) {
+  const usingWs = !!_videoWs;
+  const img = document.getElementById('stream');
+  let ctx = null, prev = null, changes = 0, rafs = 0;
+  if (!usingWs) {
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 24; // same size as the stall watchdog: small enough to be cheap, big enough to see sensor noise
+    ctx = c.getContext('2d', { willReadFrequently: true });
+  }
+  const recv0 = _vsRecv, drawn0 = _vsDrawn, dec0 = _vsDecodeMs;
+  const t0 = performance.now();
+  const step = () => {
+    rafs++;
+    if (ctx && img.naturalWidth) {
+      try {
+        ctx.drawImage(img, 0, 0, 32, 24);
+        const px = ctx.getImageData(0, 0, 32, 24).data;
+        if (prev) {
+          for (let i = 0; i < px.length; i++) if (px[i] !== prev[i]) { changes++; break; }
+        }
+        prev = px;
+      } catch (_) {}
+    }
+    const elapsed = performance.now() - t0;
+    if (elapsed < VS_SAMPLE_MS) { requestAnimationFrame(step); return; }
+    const secs  = elapsed / 1000;
+    const drawn = _vsDrawn - drawn0;
+    done({
+      path:     usingWs ? 'ws' : 'img',
+      shownFps: (usingWs ? drawn : changes) / secs,
+      recvFps:  usingWs ? (_vsRecv - recv0) / secs : 0,
+      decodeMs: usingWs && drawn ? (_vsDecodeMs - dec0) / drawn : 0,
+      pageFps:  rafs / secs,
+    });
+  };
+  requestAnimationFrame(step);
+}
+
+setInterval(() => {
+  if (!_videoWanted || gamePaused || document.visibilityState !== 'visible' || !connection) return;
+  vsMeasure(m => {
+    dbg(`video stats: ${m.path} shown ${m.shownFps.toFixed(1)} fps` +
+        (m.path === 'ws' ? ` (recv ${m.recvFps.toFixed(1)}, ${m.decodeMs.toFixed(0)} ms)` : '') +
+        `, page ${m.pageFps.toFixed(0)} fps`);
+    if (!connection) return;
+    connection.send('ReportVideoStats', Object.assign(m, {
+      name:     myName,
+      device:   _vsDevice,
+      cores:    navigator.hardwareConcurrency || 0,
+      memoryGb: navigator.deviceMemory || 0,
+      screen:   `${screen.width}x${screen.height}@${(window.devicePixelRatio || 1).toFixed(1)}`,
+      lowFx:    _lowFx,
+    })).catch(() => {});
+  });
+}, VS_REPORT_MS);
+
 function stopGameStream() {
   _videoWanted = false;
-  document.getElementById('stream').src = '';
+  // Detach the retry handler BEFORE blanking: blanking an <img> fires 'error',
+  // and the old handler then restarted the stream 1.5 s later (game over keeps
+  // game-active on for ~2 s more, and Chrome reports a blank src as the page
+  // URL so the src check passed). The phone then kept downloading its last
+  // tank's video for as long as the page stayed open — including through every
+  // later match that tank played in, a full extra stream on the shared Wi-Fi.
+  const img = document.getElementById('stream');
+  img.onerror = null;
+  img.removeAttribute('src');
   stopVideoWs();
 }
 
@@ -1742,7 +1862,8 @@ function startGameStream(url) {
   _vSamplePrev      = null;
   // Route through the server-side fanout proxy so the robot only has one HTTP
   // streaming client regardless of how many viewers (phone + display) are watching.
-  const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url);
+  const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url)
+                 + '&who=' + encodeURIComponent(myName || 'phone');
   dbg('proxyUrl=' + proxyUrl);
   if (IS_IOS || IS_FIREFOX) {
     dbg('WS video decoder path (iOS=' + IS_IOS + ' firefox=' + IS_FIREFOX + ')');
@@ -1765,7 +1886,8 @@ function startGameStream(url) {
     img.onerror = () => {
       dbg('img stream error — retrying in 1.5s');
       setTimeout(() => {
-        if (document.body.classList.contains('game-active') && img.src)
+        // Only if this is still the stream we want: not stopped, not replaced.
+        if (_videoWanted && _videoUrl === url && document.body.classList.contains('game-active'))
           img.src = proxyUrl + '&t=' + Date.now();
       }, 1500);
     };
@@ -2840,6 +2962,9 @@ function showHitEffect(dir, shooter) {
   effectEl.classList.remove('flash');
   void effectEl.offsetWidth; // force reflow to restart animation
   effectEl.classList.add('flash');
+  // Drop it from the page again once faded (see .hit-effect CSS). A restart
+  // mid-flash cancels the old animation, so only the newest one's end fires.
+  effectEl.addEventListener('animationend', () => effectEl.classList.remove('flash'), { once: true });
 
   const label = document.getElementById('hit-by-label');
   label.textContent = shooter ? 'Hit by ' + escHtml(shooter) : 'HIT';
@@ -3468,6 +3593,7 @@ function onVideoFrameTick() {
     const elapsed = performance.now() - _fireStartTime;
     if (elapsed >= FIRE_FLASH_MS) {
       el.style.opacity = '0';
+      el.style.display = 'none';
       _fireFlashActive = false;
     } else {
       el.style.opacity = String(fireFlashOpacityAt(elapsed));
@@ -3476,7 +3602,10 @@ function onVideoFrameTick() {
   if (_fireBeamActive) {
     const elapsed = performance.now() - _fireStartTime;
     updateFireBeamClip(elapsed);
-    if (elapsed >= BEAM_MS) _fireBeamActive = false;
+    if (elapsed >= BEAM_MS) {
+      _fireBeamActive = false;
+      document.getElementById('fire-beam').style.display = 'none';
+    }
   }
   updateShakeTransform();
   if (!_fireFlashActive && !_fireBeamActive && !_shakeTier && _fireTimerId) {
@@ -3501,6 +3630,7 @@ function playFireFx() {
   const beamEl  = document.getElementById('fire-beam');
   const beamShapeEl = document.getElementById('fire-beam-shape');
   if (!flashEl || !beamEl || !beamShapeEl) return;
+  flashEl.style.display = beamEl.style.display = 'block'; // hidden while idle — see CSS
   updateFireEffectBounds();
   _fireStartTime   = performance.now();
   _lastFireTickAt  = 0;  // don't count the pre-shot idle gap as jank
@@ -3522,8 +3652,8 @@ function stopFireFx() {
   const flashEl = document.getElementById('fire-flash');
   const beamEl  = document.getElementById('fire-beam');
   const videoShakeEl = document.getElementById('video-shake');
-  if (flashEl) flashEl.style.opacity = '0';
-  if (beamEl)  beamEl.style.opacity  = '0';
+  if (flashEl) { flashEl.style.opacity = '0'; flashEl.style.display = 'none'; }
+  if (beamEl)  { beamEl.style.opacity  = '0'; beamEl.style.display  = 'none'; }
   if (videoShakeEl) videoShakeEl.style.transform = '';
 }
 
@@ -3796,7 +3926,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v33</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v34</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

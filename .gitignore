@@ -34,3 +34,6 @@ __pycache__/
 
 # ── PlatformIO build cache ────────────────────────────────
 **/.pio/
+
+# ── Web server runtime logs (video stats) ────────────────
+Webserver/ThundergeddonWeb/logs/

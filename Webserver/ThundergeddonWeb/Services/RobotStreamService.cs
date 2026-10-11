@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
@@ -23,16 +25,82 @@ public class RobotStreamService
 
     private readonly IHttpClientFactory _factory;
     private readonly ILogger<RobotStreamService> _log;
+    private readonly VideoStatsLog _statsLog;
+    private readonly UnityBridgeService _bridge;
     private readonly object _lock = new();
     private readonly Dictionary<string, StreamBroadcaster> _active = new();
 
-    public RobotStreamService(IHttpClientFactory factory, ILogger<RobotStreamService> log)
+    // Per robot URL. Outlives individual broadcasters (one dies and is replaced on
+    // every camera restart) so a minute's counts aren't lost at a reconnect.
+    private readonly ConcurrentDictionary<string, StreamCounters> _counters = new();
+    private static readonly TimeSpan StatsInterval = TimeSpan.FromSeconds(60);
+
+    public RobotStreamService(IHttpClientFactory factory, ILogger<RobotStreamService> log,
+                              VideoStatsLog statsLog, UnityBridgeService bridge)
     {
-        _factory = factory;
-        _log     = log;
+        _factory  = factory;
+        _log      = log;
+        _statsLog = statsLog;
+        _bridge   = bridge;
+        _ = Task.Run(StatsLoop);
     }
 
-    public async Task StreamToSubscriber(string robotUrl, HttpResponse response, CancellationToken ct)
+    // One line per tank per minute:
+    //   [VideoStats] Desert-01: in 24.8 fps, 11.2 KB/frame, 2.22 Mbit/s | Alice 24.1 fps | display 15.0 fps
+    // "in" is what the robot delivered to this server; each viewer's figure is what
+    // was actually sent to it. "dropped" = frames replaced in that viewer's one-slot
+    // mailbox before its connection could take them (its link was the bottleneck);
+    // "skipped" = frames left out on purpose by a frame-rate cap (the display).
+    private async Task StatsLoop()
+    {
+        using var timer = new PeriodicTimer(StatsInterval);
+        long last = Stopwatch.GetTimestamp();
+        while (await timer.WaitForNextTickAsync())
+        {
+            try
+            {
+                double secs = Stopwatch.GetElapsedTime(last).TotalSeconds;
+                last = Stopwatch.GetTimestamp();
+                foreach (var (url, c) in _counters)
+                {
+                    long framesIn = Interlocked.Exchange(ref c.FramesIn, 0);
+                    long bytesIn  = Interlocked.Exchange(ref c.BytesIn, 0);
+
+                    var parts = new List<string>();
+                    foreach (var (who, s) in c.Subs)
+                    {
+                        long sent    = Interlocked.Exchange(ref s.Sent, 0);
+                        long dropped = Interlocked.Exchange(ref s.Dropped, 0);
+                        long skipped = Interlocked.Exchange(ref s.Skipped, 0);
+                        int  conns   = Volatile.Read(ref s.Connections);
+                        // Idle entries are skipped, not removed: removing could race a viewer
+                        // connecting right now and orphan its counters. They're tiny.
+                        if (sent == 0 && dropped == 0 && conns == 0) continue;
+
+                        var sb = new StringBuilder($"{who} {sent / secs:F1} fps");
+                        if (conns > 1)   sb.Append($" ({conns} connections)");
+                        if (dropped > 0) sb.Append($", dropped {dropped / secs:F1}/s");
+                        if (skipped > 0) sb.Append($", capped -{skipped / secs:F1}/s");
+                        parts.Add(sb.ToString());
+                    }
+
+                    if (framesIn == 0 && parts.Count == 0) continue;
+
+                    string name = _bridge.CallsignForVideoUrl(url) ?? new Uri(url).Host;
+                    double kbPerFrame = framesIn > 0 ? bytesIn / 1024.0 / framesIn : 0;
+                    _statsLog.Write($"[VideoStats] {name}: in {framesIn / secs:F1} fps, {kbPerFrame:F1} KB/frame, " +
+                                    $"{bytesIn * 8 / secs / 1e6:F2} Mbit/s" +
+                                    (parts.Count > 0 ? " | " + string.Join(" | ", parts) : " | no viewers"));
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning("[VideoStats] summary failed: {msg}", ex.Message);
+            }
+        }
+    }
+
+    public async Task StreamToSubscriber(string robotUrl, string who, HttpResponse response, CancellationToken ct)
     {
         if (response.HttpContext.Features.Get<IHttpResponseBodyFeature>() is { } bodyFeature)
             bodyFeature.DisableBuffering();
@@ -69,7 +137,7 @@ public class RobotStreamService
             var broadcaster = GetOrCreate(robotUrl);
             try
             {
-                await broadcaster.Subscribe(response, ct);
+                await broadcaster.Subscribe(response, who, ct);
             }
             finally
             {
@@ -85,15 +153,16 @@ public class RobotStreamService
     /// as one binary WebSocket message.  This bypasses iOS Safari's inability to
     /// stream-read fetch response bodies (multipart/x-mixed-replace).
     /// Like the HTTP path, reconnects to the robot while the client stays open.
+    /// maxFps > 0 caps the frames sent to this client (the display's small tiles).
     /// </summary>
-    public async Task StreamFramesToWebSocket(string robotUrl, WebSocket ws, CancellationToken ct)
+    public async Task StreamFramesToWebSocket(string robotUrl, string who, int maxFps, WebSocket ws, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
         {
             var broadcaster = GetOrCreate(robotUrl);
             try
             {
-                await broadcaster.SubscribeWs(ws, ct);
+                await broadcaster.SubscribeWs(ws, who, maxFps, ct);
             }
             finally
             {
@@ -113,7 +182,8 @@ public class RobotStreamService
             // instead of a channel that completes with zero frames.
             if (!_active.TryGetValue(robotUrl, out var b) || b.IsDead)
             {
-                b = new StreamBroadcaster(robotUrl, _factory, _log);
+                b = new StreamBroadcaster(robotUrl, _factory, _log,
+                                          _counters.GetOrAdd(robotUrl, _ => new StreamCounters()));
                 _active[robotUrl] = b;
             }
             return b;
@@ -133,6 +203,23 @@ public class RobotStreamService
     }
 }
 
+/// <summary>Frame counters for one robot stream; reset each time the summary is logged.</summary>
+internal sealed class StreamCounters
+{
+    public long FramesIn;
+    public long BytesIn;
+    public readonly ConcurrentDictionary<string, SubCounters> Subs = new();
+}
+
+/// <summary>Counters for one named viewer ("Alice", "display") of a robot stream.</summary>
+internal sealed class SubCounters
+{
+    public long Sent;
+    public long Dropped;
+    public long Skipped;
+    public int  Connections; // currently open subscriptions under this name
+}
+
 /// <summary>
 /// Opens one streaming connection to a robot, splits it into complete JPEG
 /// frames once, and hands each frame to every subscriber.
@@ -148,9 +235,16 @@ internal class StreamBroadcaster
     private readonly string _url;
     private readonly IHttpClientFactory _factory;
     private readonly ILogger _log;
+    private readonly StreamCounters _counters;
+
+    private sealed class Sub
+    {
+        public required Channel<byte[]> Ch;
+        public required SubCounters     Stats;
+    }
 
     private readonly object _subLock = new();
-    private readonly Dictionary<object, Channel<byte[]>> _subs = new();
+    private readonly Dictionary<object, Sub> _subs = new();
     private Task? _readTask;
     private CancellationTokenSource? _readCts;
     private bool _dead; // read loop finished — this broadcaster never streams again
@@ -165,11 +259,12 @@ internal class StreamBroadcaster
         get { lock (_subLock) return _dead; }
     }
 
-    public StreamBroadcaster(string url, IHttpClientFactory factory, ILogger log)
+    public StreamBroadcaster(string url, IHttpClientFactory factory, ILogger log, StreamCounters counters)
     {
-        _url     = url;
-        _factory = factory;
-        _log     = log;
+        _url      = url;
+        _factory  = factory;
+        _log      = log;
+        _counters = counters;
     }
 
     // ── HTTP subscriber ──────────────────────────────────────────────────────
@@ -178,16 +273,16 @@ internal class StreamBroadcaster
     /// Writes frames as multipart parts. The caller has already written the
     /// opening boundary; every part written here ends with the next boundary.
     /// </summary>
-    public async Task Subscribe(HttpResponse response, CancellationToken clientCt)
+    public async Task Subscribe(HttpResponse response, string who, CancellationToken clientCt)
     {
         var key = new object();
-        var ch  = AddSubscriber(key);
-        if (ch == null) return; // dead — caller retries with a fresh broadcaster
+        var sub = AddSubscriber(key, who);
+        if (sub == null) return; // dead — caller retries with a fresh broadcaster
 
         var writer = response.BodyWriter;
         try
         {
-            await foreach (var frame in ch.Reader.ReadAllAsync(clientCt))
+            await foreach (var frame in sub.Ch.Reader.ReadAllAsync(clientCt))
             {
                 // Header, JPEG and closing boundary go out in a single flush so
                 // Kestrel sends them as one burst of full-size TCP segments.
@@ -197,6 +292,7 @@ internal class StreamBroadcaster
                 writer.Write(RobotStreamService.EndBoundary);
                 var flush = await writer.FlushAsync(clientCt);
                 if (flush.IsCompleted || flush.IsCanceled) break;
+                Interlocked.Increment(ref sub.Stats.Sent);
             }
         }
         catch (OperationCanceledException) { }
@@ -206,19 +302,35 @@ internal class StreamBroadcaster
 
     // ── WebSocket subscriber ─────────────────────────────────────────────────
 
-    public async Task SubscribeWs(WebSocket ws, CancellationToken ct)
+    public async Task SubscribeWs(WebSocket ws, string who, int maxFps, CancellationToken ct)
     {
         var key = new object();
-        var ch  = AddSubscriber(key);
-        if (ch == null) return; // dead — caller retries with a fresh broadcaster
+        var sub = AddSubscriber(key, who);
+        if (sub == null) return; // dead — caller retries with a fresh broadcaster
+
+        // Frame-rate cap as a credit bucket: maxFps credits/s accrue, each frame
+        // sent spends one. Unlike a minimum gap between frames this hits the target
+        // rate exactly (a 15 fps cap on a 25 fps source sends 3 frames in every 5,
+        // where a gap rule would round down to every other frame).
+        double credit = 1.5;
+        long   lastTs = Stopwatch.GetTimestamp();
 
         try
         {
-            await foreach (var frame in ch.Reader.ReadAllAsync(ct))
+            await foreach (var frame in sub.Ch.Reader.ReadAllAsync(ct))
             {
                 if (ws.State != WebSocketState.Open) return;
+                if (maxFps > 0)
+                {
+                    long now = Stopwatch.GetTimestamp();
+                    credit = Math.Min(1.5, credit + (double)(now - lastTs) / Stopwatch.Frequency * maxFps);
+                    lastTs = now;
+                    if (credit < 1) { Interlocked.Increment(ref sub.Stats.Skipped); continue; }
+                    credit -= 1;
+                }
                 await ws.SendAsync(new ArraySegment<byte>(frame),
                     WebSocketMessageType.Binary, endOfMessage: true, ct);
+                Interlocked.Increment(ref sub.Stats.Sent);
             }
         }
         catch (OperationCanceledException) { }
@@ -228,28 +340,37 @@ internal class StreamBroadcaster
 
     // ── Subscriber bookkeeping ───────────────────────────────────────────────
 
-    private Channel<byte[]>? AddSubscriber(object key)
+    private Sub? AddSubscriber(object key, string who)
     {
-        var ch = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1)
+        var sub = new Sub
         {
-            FullMode     = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = true,
-        });
+            Ch = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1)
+            {
+                FullMode     = BoundedChannelFullMode.DropOldest,
+                SingleReader = true,
+                SingleWriter = true,
+            }),
+            Stats = _counters.Subs.GetOrAdd(who, _ => new SubCounters()),
+        };
         lock (_subLock)
         {
             if (_dead) return null;
-            _subs[key] = ch;
+            _subs[key] = sub;
+            Interlocked.Increment(ref sub.Stats.Connections);
             EnsureReadLoop();
         }
-        return ch;
+        return sub;
     }
 
     private void RemoveSubscriber(object key)
     {
         lock (_subLock)
         {
-            if (_subs.Remove(key, out var ch)) ch.Writer.TryComplete();
+            if (_subs.Remove(key, out var sub))
+            {
+                sub.Ch.Writer.TryComplete();
+                Interlocked.Decrement(ref sub.Stats.Connections);
+            }
             if (_subs.Count == 0) _readCts?.Cancel();
         }
     }
@@ -346,15 +467,23 @@ internal class StreamBroadcaster
         lock (_subLock)
         {
             _dead = true;
-            foreach (var ch in _subs.Values) ch.Writer.TryComplete();
+            foreach (var sub in _subs.Values) sub.Ch.Writer.TryComplete();
         }
     }
 
     private void Publish(byte[] frame)
     {
+        Interlocked.Increment(ref _counters.FramesIn);
+        Interlocked.Add(ref _counters.BytesIn, frame.Length);
         lock (_subLock)
         {
-            foreach (var ch in _subs.Values) ch.Writer.TryWrite(frame);
+            foreach (var sub in _subs.Values)
+            {
+                // Mailbox still holds the previous frame: this viewer's connection
+                // hasn't taken it yet, and DropOldest is about to replace it.
+                if (sub.Ch.Reader.Count > 0) Interlocked.Increment(ref sub.Stats.Dropped);
+                sub.Ch.Writer.TryWrite(frame);
+            }
         }
     }
 }

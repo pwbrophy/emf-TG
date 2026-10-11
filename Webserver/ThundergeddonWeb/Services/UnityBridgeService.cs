@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text;
@@ -185,6 +186,7 @@ public class UnityBridgeService : BackgroundService
 
                 case "display_update":
                     _lastDisplayUpdate = json;
+                    RememberVideoCallsigns(doc.RootElement);
                     Post(_hub.Clients.Group(GameHub.DisplayGroup).SendAsync("DisplayUpdate", json));
                     break;
 
@@ -550,6 +552,25 @@ public class UnityBridgeService : BackgroundService
             _sendLock.Release();
         }
     }
+
+    // ── Video URL → tank name (for the stream proxy's stats log) ────────────────
+
+    private readonly ConcurrentDictionary<string, string> _callsignByVideoUrl = new();
+
+    private void RememberVideoCallsigns(JsonElement root)
+    {
+        if (!root.TryGetProperty("robots", out var robots) || robots.ValueKind != JsonValueKind.Array) return;
+        foreach (var r in robots.EnumerateArray())
+        {
+            string? url = GetString(r, "videoUrl");
+            string? cs  = GetString(r, "callsign");
+            if (!string.IsNullOrEmpty(url) && !string.IsNullOrEmpty(cs)) _callsignByVideoUrl[url] = cs;
+        }
+    }
+
+    /// <summary>Tank callsign for a robot stream URL, once a match's display_update has named it.</summary>
+    public string? CallsignForVideoUrl(string url) =>
+        _callsignByVideoUrl.TryGetValue(url, out var cs) ? cs : null;
 
     // ── Outbound sends (Unity → phones) ──────────────────────────────────────────
 

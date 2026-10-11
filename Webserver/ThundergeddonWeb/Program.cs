@@ -11,6 +11,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<UnityBridgeService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UnityBridgeService>());
 builder.Services.AddSingleton<RobotStreamService>();
+builder.Services.AddSingleton<VideoStatsLog>();
 
 var app = builder.Build();
 
@@ -41,14 +42,15 @@ app.MapGet("/api/server-ready", (UnityBridgeService bridge) =>
 
 // Fan-out MJPEG proxy: one connection to the robot, shared between all subscribers
 // (phone player + spectator display).  The robot always sees exactly one HTTP client.
-app.MapGet("/api/robot-stream", async (string url, RobotStreamService streamer, HttpContext ctx, CancellationToken ct) =>
+// who = viewer name for the stats log (the player's name, or "display").
+app.MapGet("/api/robot-stream", async (string url, string? who, RobotStreamService streamer, HttpContext ctx, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(url))
     {
         ctx.Response.StatusCode = 400;
         return;
     }
-    await streamer.StreamToSubscriber(url, ctx.Response, ct);
+    await streamer.StreamToSubscriber(url, ViewerName(who), ctx.Response, ct);
 });
 
 // WebSocket video endpoint: parses MJPEG frames server-side and pushes each JPEG
@@ -68,11 +70,20 @@ app.Map("/api/video-ws", async (HttpContext ctx) =>
         return;
     }
     var streamer = ctx.RequestServices.GetRequiredService<RobotStreamService>();
+    int.TryParse(ctx.Request.Query["maxfps"], out int maxFps); // 0 / absent = uncapped
     using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
-    await streamer.StreamFramesToWebSocket(robotUrl, ws, ctx.RequestAborted);
+    await streamer.StreamFramesToWebSocket(robotUrl, ViewerName(ctx.Request.Query["who"]), maxFps, ws, ctx.RequestAborted);
 });
 
 app.Run();
+
+// Stats-log label for a video viewer: trimmed, no control characters, capped.
+static string ViewerName(string? who)
+{
+    var clean = new string((who ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
+    if (clean.Length == 0) return "viewer";
+    return clean.Length <= 24 ? clean : clean[..24];
+}
 
 static string GetLanIpv4()
 {

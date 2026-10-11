@@ -7,6 +7,7 @@ namespace ThundergeddonWeb.Hubs;
 public class GameHub : Hub
 {
     private readonly UnityBridgeService _bridge;
+    private readonly VideoStatsLog _videoStats;
 
     // Port 5000 is open to the whole venue LAN, so hub methods must assume hostile
     // callers. Names are length/character capped, and each connection gets a simple
@@ -24,9 +25,10 @@ public class GameHub : Hub
     // Static: hubs are transient per-invocation. Keyed by connectionId, cleaned on disconnect.
     private static readonly ConcurrentDictionary<string, (long Window, int Count)> _rate = new();
 
-    public GameHub(UnityBridgeService bridge)
+    public GameHub(UnityBridgeService bridge, VideoStatsLog videoStats)
     {
-        _bridge = bridge;
+        _bridge     = bridge;
+        _videoStats = videoStats;
     }
 
     /// <summary>Sliding 1-second message budget for the calling connection.</summary>
@@ -189,6 +191,34 @@ public class GameHub : Hub
             cmd          = "fire",
             connectionId = Context.ConnectionId
         });
+    }
+
+    // ── Diagnostics ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A phone's own measurement of its video (sent every 30 s while playing),
+    /// logged next to the stream proxy's per-tank figures in logs/video-*.log.
+    /// </summary>
+    public void ReportVideoStats(VideoStatsReport r)
+    {
+        if (r == null || !AllowMessage()) return;
+        string device = Clip(r.Device, 120);
+        string hw = r.Cores > 0 ? $"{r.Cores} cores" : "";
+        if (r.MemoryGb > 0) hw += (hw.Length > 0 ? ", " : "") + $"{r.MemoryGb:0.##} GB";
+        string video = r.Path == "ws"
+            ? $"ws video: received {r.RecvFps:F1} fps, shown {r.ShownFps:F1} fps, decode+draw {r.DecodeMs:F0} ms"
+            : $"img video: shown {r.ShownFps:F1} fps";
+        _videoStats.Write($"[PhoneStats] {Clip(r.Name, MaxNameLength)}: {video} | page {r.PageFps:F0} fps" +
+                          (r.LowFx ? " | lowFx" : "") +
+                          $" | {device}" + (hw.Length > 0 ? $" | {hw}" : "") +
+                          $" | screen {Clip(r.Screen, 24)}");
+    }
+
+    private static string Clip(string? s, int max)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "?";
+        var clean = new string(s.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        return clean.Length <= max ? clean : clean[..max];
     }
 
     // ── Connect / Disconnect ─────────────────────────────────────────────────────
