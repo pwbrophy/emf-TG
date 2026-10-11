@@ -362,7 +362,7 @@
 </head>
 <body>
 
-<div id="version">display v13</div>
+<div id="version">display v14</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
@@ -1561,7 +1561,12 @@ function applyDisplayUpdate(data) {
     startGrid();
   }
 
-  if (wasPlaying && !nowPlaying && (state.phase === 'lobby' || state.phase === 'mainmenu')) {
+  // Close the tank streams once the match is over and we're back in the lobby.
+  // Checked on _gridBuilt, not on "was playing": a real match goes
+  // playing → ended → lobby, so a playing→lobby test never matched and all the
+  // grid's video connections stayed open through every lobby, with the server
+  // reconnecting to each (paused) tank every few seconds until the next match.
+  if (_gridBuilt && (state.phase === 'lobby' || state.phase === 'mainmenu')) {
     stopGrid();
   }
 

@@ -2646,6 +2646,9 @@ function onGameOver(data) {
     // After 2 s (fade complete): stop video, hold GAME OVER on black for 2 more seconds
     setTimeout(() => {
       stopGameStream();
+      // The controls loop (gamepad polling + drive sends, every animation frame)
+      // has nothing to do on the results screen; onGameStarted restarts it.
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       // p1 stays visible — GAME OVER text on pure black background
 
       setTimeout(() => {
@@ -3926,7 +3929,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v34</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v35</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

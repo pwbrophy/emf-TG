@@ -71,8 +71,38 @@ app.Map("/api/video-ws", async (HttpContext ctx) =>
     }
     var streamer = ctx.RequestServices.GetRequiredService<RobotStreamService>();
     int.TryParse(ctx.Request.Query["maxfps"], out int maxFps); // 0 / absent = uncapped
-    using var ws = await ctx.WebSockets.AcceptWebSocketAsync();
-    await streamer.StreamFramesToWebSocket(robotUrl, ViewerName(ctx.Request.Query["who"]), maxFps, ws, ctx.RequestAborted);
+    using var ws  = await ctx.WebSockets.AcceptWebSocketAsync();
+    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+
+    // Watch for the browser closing the socket. Its ws.close() sends a close frame
+    // and waits for ours, but nothing else ever reads this socket — so the server
+    // never saw the close and kept streaming video into it until the browser gave
+    // up on the handshake (~25–30 s measured). That doubled a phone's video for
+    // half a minute after every stall-restart, and kept all ten display streams
+    // running after each match.
+    var closeWatch = Task.Run(async () =>
+    {
+        var buf = new byte[256];
+        try
+        {
+            while (ws.State == WebSocketState.Open)
+            {
+                var r = await ws.ReceiveAsync(buf, cts.Token);
+                if (r.MessageType == WebSocketMessageType.Close) break;
+            }
+        }
+        catch { /* socket gone or cancelled */ }
+        cts.Cancel();
+    });
+
+    await streamer.StreamFramesToWebSocket(robotUrl, ViewerName(ctx.Request.Query["who"]), maxFps, ws, cts.Token);
+    cts.Cancel();
+    if (ws.State == WebSocketState.CloseReceived)
+    {
+        try { await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None); }
+        catch { /* already gone */ }
+    }
+    await closeWatch;
 });
 
 app.Run();
