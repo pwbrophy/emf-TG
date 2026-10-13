@@ -36,7 +36,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v16";
+    const string BUILT_SENTINEL = "__ppb_v17";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -297,9 +297,14 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_rearMult    = MakeSettingsRow(gameSettingsContent,    "Rear Mult");
         var f_killPoints  = MakeSettingsRow(gameSettingsContent,    "Kill Pts");
         var f_cooldown    = MakeSettingsRow(gameSettingsContent,    "Cooldown s");
+        var f_deadTime    = MakeSettingsRow(gameSettingsContent,    "Dead Time s");
         var f_invuln      = MakeSettingsRow(gameSettingsContent,    "Invuln s");
         var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX");
         var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret");
+        var f_turretMin   = MakeSettingsRow(gameSettingsContent,    "Turret Min");
+        var f_turretPulse = MakeSettingsRow(gameSettingsContent,    "Pulse ms");
+        var f_turretKick  = MakeSettingsRow(gameSettingsContent,    "Kick ms");
+        var f_turretBrake = MakeSettingsToggle(gameSettingsContent, "Turret Brake");
         var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
         var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
         var f_videoQuality = MakeSettingsRow(gameSettingsContent,    "JPEG Qual");
@@ -356,9 +361,14 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "rearMultField",    f_rearMult);
         Wire(psp, "killPointsField",  f_killPoints);
         Wire(psp, "cooldownField",    f_cooldown);
+        Wire(psp, "deadTimeField",    f_deadTime);
         Wire(psp, "invulnField",      f_invuln);
         Wire(psp, "buzzerToggle",     f_buzzer);
         Wire(psp, "slowTurretField",  f_slowTurret);
+        Wire(psp, "turretMinField",   f_turretMin);
+        Wire(psp, "turretPulseField", f_turretPulse);
+        Wire(psp, "turretKickField",  f_turretKick);
+        Wire(psp, "turretBrakeToggle", f_turretBrake);
         Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
         Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
         Wire(psp, "videoFpsField",     f_videoFps);

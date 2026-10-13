@@ -13,9 +13,14 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField rearMultField;
     [SerializeField] private TMP_InputField killPointsField;
     [SerializeField] private TMP_InputField cooldownField;
+    [SerializeField] private TMP_InputField deadTimeField;
     [SerializeField] private TMP_InputField invulnField;
     [SerializeField] private Toggle         buzzerToggle;
     [SerializeField] private TMP_InputField slowTurretField;
+    [SerializeField] private TMP_InputField turretMinField;
+    [SerializeField] private TMP_InputField turretPulseField;
+    [SerializeField] private TMP_InputField turretKickField;
+    [SerializeField] private Toggle         turretBrakeToggle;
     [SerializeField] private Button          videoResButton;
     [SerializeField] private TextMeshProUGUI videoResLabel;
     [SerializeField] private TMP_InputField  videoFpsField;
@@ -45,9 +50,14 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (rearMultField)   rearMultField.SetTextWithoutNotify(_settings.RearMultiplier.ToString("F1"));
         if (killPointsField) killPointsField.SetTextWithoutNotify(_settings.TeamPointsPerKill.ToString());
         if (cooldownField)   cooldownField.SetTextWithoutNotify(_settings.FireCooldownSeconds.ToString("F1"));
+        if (deadTimeField)   deadTimeField.SetTextWithoutNotify(_settings.ExplosionDurationSeconds.ToString("F1"));
         if (invulnField)     invulnField.SetTextWithoutNotify(_settings.InvulnerabilitySeconds.ToString("F1"));
         if (buzzerToggle)    buzzerToggle.SetIsOnWithoutNotify(_settings.BuzzerEnabled);
         if (slowTurretField) slowTurretField.SetTextWithoutNotify(_settings.SlowTurretSpeed.ToString("F2"));
+        if (turretMinField)    turretMinField.SetTextWithoutNotify(_settings.TurretMinSpeed.ToString("F2"));
+        if (turretPulseField)  turretPulseField.SetTextWithoutNotify(_settings.TurretPulseMs.ToString());
+        if (turretKickField)   turretKickField.SetTextWithoutNotify(_settings.TurretKickMs.ToString());
+        if (turretBrakeToggle) turretBrakeToggle.SetIsOnWithoutNotify(_settings.TurretBrake);
         if (videoResLabel)     videoResLabel.text = ResName(_settings.VideoFrameSize);
         if (videoFpsField)     videoFpsField.SetTextWithoutNotify(_settings.VideoFps.ToString());
         if (videoQualityField) videoQualityField.SetTextWithoutNotify(_settings.VideoJpegQuality.ToString());
@@ -60,9 +70,14 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (rearMultField)   rearMultField.onValueChanged.AddListener(OnRearMult);
         if (killPointsField) killPointsField.onValueChanged.AddListener(OnKillPoints);
         if (cooldownField)   cooldownField.onValueChanged.AddListener(OnCooldown);
+        if (deadTimeField)   deadTimeField.onValueChanged.AddListener(OnDeadTime);
         if (invulnField)     invulnField.onValueChanged.AddListener(OnInvuln);
         if (buzzerToggle)    buzzerToggle.onValueChanged.AddListener(OnBuzzer);
         if (slowTurretField) slowTurretField.onValueChanged.AddListener(OnSlowTurret);
+        if (turretMinField)    turretMinField.onValueChanged.AddListener(OnTurretMin);
+        if (turretPulseField)  turretPulseField.onValueChanged.AddListener(OnTurretPulse);
+        if (turretKickField)   turretKickField.onValueChanged.AddListener(OnTurretKick);
+        if (turretBrakeToggle) turretBrakeToggle.onValueChanged.AddListener(OnTurretBrake);
         if (videoResButton)    videoResButton.onClick.AddListener(OnVideoResCycle);
         if (videoFpsField)     videoFpsField.onValueChanged.AddListener(OnVideoFps);
         if (videoQualityField) videoQualityField.onValueChanged.AddListener(OnVideoQuality);
@@ -75,9 +90,14 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (rearMultField)   rearMultField.onValueChanged.RemoveListener(OnRearMult);
         if (killPointsField) killPointsField.onValueChanged.RemoveListener(OnKillPoints);
         if (cooldownField)   cooldownField.onValueChanged.RemoveListener(OnCooldown);
+        if (deadTimeField)   deadTimeField.onValueChanged.RemoveListener(OnDeadTime);
         if (invulnField)     invulnField.onValueChanged.RemoveListener(OnInvuln);
         if (buzzerToggle)    buzzerToggle.onValueChanged.RemoveListener(OnBuzzer);
         if (slowTurretField) slowTurretField.onValueChanged.RemoveListener(OnSlowTurret);
+        if (turretMinField)    turretMinField.onValueChanged.RemoveListener(OnTurretMin);
+        if (turretPulseField)  turretPulseField.onValueChanged.RemoveListener(OnTurretPulse);
+        if (turretKickField)   turretKickField.onValueChanged.RemoveListener(OnTurretKick);
+        if (turretBrakeToggle) turretBrakeToggle.onValueChanged.RemoveListener(OnTurretBrake);
         if (videoResButton)    videoResButton.onClick.RemoveListener(OnVideoResCycle);
         if (videoFpsField)     videoFpsField.onValueChanged.RemoveListener(OnVideoFps);
         if (videoQualityField) videoQualityField.onValueChanged.RemoveListener(OnVideoQuality);
@@ -88,9 +108,15 @@ public class PlayingSettingsPanel : MonoBehaviour
     void OnRearMult(string v)  { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.RearMultiplier = n; _settings.SaveToDisk(); } }
     void OnKillPoints(string v){ if (_settings != null && int.TryParse(v, out int n) && n >= 0) { _settings.TeamPointsPerKill = n; _settings.SaveToDisk(); } }
     void OnCooldown(string v)  { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.FireCooldownSeconds = n; _settings.SaveToDisk(); } }
+    void OnDeadTime(string v)  { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.ExplosionDurationSeconds = n; _settings.SaveToDisk(); } }
     void OnInvuln(string v)    { if (_settings != null && float.TryParse(v, out float n) && n >= 0) { _settings.InvulnerabilitySeconds = n; _settings.SaveToDisk(); } }
     void OnBuzzer(bool on)     { if (_settings != null) { _settings.BuzzerEnabled = on; _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastBuzzerToAll(on); } }
     void OnSlowTurret(string v){ if (_settings != null && float.TryParse(v, out float n) && n > 0f && n <= 1f) { _settings.SlowTurretSpeed = n; _settings.SaveToDisk(); ServiceLocator.PlayerServer?.BroadcastTurretSettings(); } }
+    void OnTurretMin(string v)   { if (_settings != null && float.TryParse(v, out float n) && n >= 0f && n <= 1f) { _settings.TurretMinSpeed = n; SavePhysics(); } }
+    void OnTurretPulse(string v) { if (_settings != null && int.TryParse(v, out int n) && n >= 10 && n <= 1000) { _settings.TurretPulseMs = n; SavePhysics(); } }
+    void OnTurretKick(string v)  { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 200) { _settings.TurretKickMs = n; SavePhysics(); } }
+    void OnTurretBrake(bool on)  { if (_settings != null) { _settings.TurretBrake = on; SavePhysics(); } }
+    void SavePhysics()           { _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings); }
 
     void OnVideoResCycle()
     {
