@@ -114,6 +114,18 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Extra full-power burst (ms) when the turret reverses direction, to take up gear backlash. 0 = off.")]
     public int TurretBacklashMs = 110;
 
+    [Header("Drive Low-Speed Tuning (tracks — separate motors from the turret)")]
+    [Tooltip("Lowest track speed the motors hold continuously. Smaller stick values are made by pulsing (power-matched, so speed rises smoothly with the stick). 0 = no pulsing.")]
+    public float DriveMinSpeed = 0.4f;
+    [Tooltip("Length (ms) of one track pulse window. Both tracks share the window so they tick together.")]
+    public int DrivePulseMs = 40;
+    [Tooltip("Full-power burst (ms) at the start of every track move/pulse to break stiction. 0 = off.")]
+    public int DriveKickMs = 20;
+    [Tooltip("Brake the tracks when stopped / between pulses instead of coasting.")]
+    public bool DriveBrake = true;
+    [Tooltip("Extra full-power burst (ms) when a track reverses direction, to take up gear backlash. 0 = off.")]
+    public int DriveBacklashMs = 0;
+
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
     public bool TwoPlayerModeEnabled = false;
@@ -191,6 +203,11 @@ public class GameSettings : MonoBehaviour
                 turretKickMs             = TurretKickMs,
                 turretBrake              = TurretBrake ? 1 : 0,
                 turretBacklashMs         = TurretBacklashMs,
+                driveMinSpeed            = DriveMinSpeed,
+                drivePulseMs             = DrivePulseMs,
+                driveKickMs              = DriveKickMs,
+                driveBrake               = DriveBrake ? 1 : 0,
+                driveBacklashMs          = DriveBacklashMs,
                 explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
@@ -241,6 +258,11 @@ public class GameSettings : MonoBehaviour
             if (data.turretKickMs             >= 0) TurretKickMs             = data.turretKickMs;
             if (data.turretBrake              >= 0) TurretBrake              = data.turretBrake != 0;
             if (data.turretBacklashMs         >= 0) TurretBacklashMs         = data.turretBacklashMs;
+            if (data.driveMinSpeed            >= 0) DriveMinSpeed            = data.driveMinSpeed;
+            if (data.drivePulseMs             > 0) DrivePulseMs             = data.drivePulseMs;
+            if (data.driveKickMs              >= 0) DriveKickMs              = data.driveKickMs;
+            if (data.driveBrake               >= 0) DriveBrake               = data.driveBrake != 0;
+            if (data.driveBacklashMs          >= 0) DriveBacklashMs          = data.driveBacklashMs;
             if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
@@ -287,6 +309,11 @@ public class GameSettings : MonoBehaviour
         public int   turretKickMs = -1;          // -1 = not set → keep default 20
         public int   turretBrake = -1;           // -1 = not set → keep default true
         public int   turretBacklashMs = -1;      // -1 = not set → keep default 110
+        public float driveMinSpeed = -1f;        // -1 = not set → keep default 0.4
+        public int   drivePulseMs;               // 0 = not set → keep default 40
+        public int   driveKickMs = -1;           // -1 = not set → keep default 20
+        public int   driveBrake = -1;            // -1 = not set → keep default true
+        public int   driveBacklashMs = -1;       // -1 = not set → keep default 0
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;

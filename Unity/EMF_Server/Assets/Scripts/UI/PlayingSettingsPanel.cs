@@ -22,6 +22,11 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField turretKickField;
     [SerializeField] private Toggle         turretBrakeToggle;
     [SerializeField] private TMP_InputField turretBacklashField;
+    [SerializeField] private TMP_InputField driveMinField;
+    [SerializeField] private TMP_InputField drivePulseField;
+    [SerializeField] private TMP_InputField driveKickField;
+    [SerializeField] private Toggle         driveBrakeToggle;
+    [SerializeField] private TMP_InputField driveBacklashField;
     [SerializeField] private Button          videoResButton;
     [SerializeField] private TextMeshProUGUI videoResLabel;
     [SerializeField] private TMP_InputField  videoFpsField;
@@ -60,6 +65,11 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (turretKickField)   turretKickField.SetTextWithoutNotify(_settings.TurretKickMs.ToString());
         if (turretBrakeToggle) turretBrakeToggle.SetIsOnWithoutNotify(_settings.TurretBrake);
         if (turretBacklashField) turretBacklashField.SetTextWithoutNotify(_settings.TurretBacklashMs.ToString());
+        if (driveMinField)      driveMinField.SetTextWithoutNotify(_settings.DriveMinSpeed.ToString("F2"));
+        if (drivePulseField)    drivePulseField.SetTextWithoutNotify(_settings.DrivePulseMs.ToString());
+        if (driveKickField)     driveKickField.SetTextWithoutNotify(_settings.DriveKickMs.ToString());
+        if (driveBrakeToggle)   driveBrakeToggle.SetIsOnWithoutNotify(_settings.DriveBrake);
+        if (driveBacklashField) driveBacklashField.SetTextWithoutNotify(_settings.DriveBacklashMs.ToString());
         if (videoResLabel)     videoResLabel.text = ResName(_settings.VideoFrameSize);
         if (videoFpsField)     videoFpsField.SetTextWithoutNotify(_settings.VideoFps.ToString());
         if (videoQualityField) videoQualityField.SetTextWithoutNotify(_settings.VideoJpegQuality.ToString());
@@ -81,6 +91,11 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (turretKickField)   turretKickField.onValueChanged.AddListener(OnTurretKick);
         if (turretBrakeToggle) turretBrakeToggle.onValueChanged.AddListener(OnTurretBrake);
         if (turretBacklashField) turretBacklashField.onValueChanged.AddListener(OnTurretBacklash);
+        if (driveMinField)      driveMinField.onValueChanged.AddListener(OnDriveMin);
+        if (drivePulseField)    drivePulseField.onValueChanged.AddListener(OnDrivePulse);
+        if (driveKickField)     driveKickField.onValueChanged.AddListener(OnDriveKick);
+        if (driveBrakeToggle)   driveBrakeToggle.onValueChanged.AddListener(OnDriveBrake);
+        if (driveBacklashField) driveBacklashField.onValueChanged.AddListener(OnDriveBacklash);
         if (videoResButton)    videoResButton.onClick.AddListener(OnVideoResCycle);
         if (videoFpsField)     videoFpsField.onValueChanged.AddListener(OnVideoFps);
         if (videoQualityField) videoQualityField.onValueChanged.AddListener(OnVideoQuality);
@@ -102,6 +117,11 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (turretKickField)   turretKickField.onValueChanged.RemoveListener(OnTurretKick);
         if (turretBrakeToggle) turretBrakeToggle.onValueChanged.RemoveListener(OnTurretBrake);
         if (turretBacklashField) turretBacklashField.onValueChanged.RemoveListener(OnTurretBacklash);
+        if (driveMinField)      driveMinField.onValueChanged.RemoveListener(OnDriveMin);
+        if (drivePulseField)    drivePulseField.onValueChanged.RemoveListener(OnDrivePulse);
+        if (driveKickField)     driveKickField.onValueChanged.RemoveListener(OnDriveKick);
+        if (driveBrakeToggle)   driveBrakeToggle.onValueChanged.RemoveListener(OnDriveBrake);
+        if (driveBacklashField) driveBacklashField.onValueChanged.RemoveListener(OnDriveBacklash);
         if (videoResButton)    videoResButton.onClick.RemoveListener(OnVideoResCycle);
         if (videoFpsField)     videoFpsField.onValueChanged.RemoveListener(OnVideoFps);
         if (videoQualityField) videoQualityField.onValueChanged.RemoveListener(OnVideoQuality);
@@ -121,6 +141,11 @@ public class PlayingSettingsPanel : MonoBehaviour
     void OnTurretKick(string v)  { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 200) { _settings.TurretKickMs = n; SavePhysics(); } }
     void OnTurretBrake(bool on)  { if (_settings != null) { _settings.TurretBrake = on; SavePhysics(); } }
     void OnTurretBacklash(string v) { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 300) { _settings.TurretBacklashMs = n; SavePhysics(); } }
+    void OnDriveMin(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0f && n <= 1f) { _settings.DriveMinSpeed = n; SavePhysics(); } }
+    void OnDrivePulse(string v)    { if (_settings != null && int.TryParse(v, out int n) && n >= 10 && n <= 1000) { _settings.DrivePulseMs = n; SavePhysics(); } }
+    void OnDriveKick(string v)     { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 200) { _settings.DriveKickMs = n; SavePhysics(); } }
+    void OnDriveBrake(bool on)     { if (_settings != null) { _settings.DriveBrake = on; SavePhysics(); } }
+    void OnDriveBacklash(string v) { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 300) { _settings.DriveBacklashMs = n; SavePhysics(); } }
     void SavePhysics()           { _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings); }
 
     void OnVideoResCycle()

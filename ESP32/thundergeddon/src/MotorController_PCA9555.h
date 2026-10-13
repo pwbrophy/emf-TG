@@ -45,6 +45,35 @@ static constexpr uint8_t BIT_HULL_LED = 0x80; // IO1_7
 // Raise to 16 for finer resolution (but 62 Hz may buzz some motors).
 static constexpr uint8_t PWM_STEPS = 8;
 
+// Low-speed tuning for one motor (or the pair of tracks).  The soft PWM only
+// has PWM_STEPS levels and the motors stall below ~3/8 duty, so speeds under
+// 'minSpeed' are produced by pulsing instead: each 'pulseMs' window is split
+// into an on-part and a stopped part, so the motor moves in small even ticks
+// at a lower average speed than it can hold continuously.
+//   minSpeed     lowest speed that turns continuously (0 = never pulse)
+//   pulseMs      length of one pulse window
+//   kickMs       full-power burst at the start of every move / pulse (beats stiction; 0 = off)
+//   backlashMs   extra full-power burst when a move goes the opposite way to
+//                the previous one, to take up gear backlash (0 = off)
+//   brake        brake (IN1=IN2=1) instead of coasting when stopped / between pulses
+//   powerMatched how the on-part is sized:
+//     false - on for |v|/minSpeed of the window (kick included).  With a kick
+//             the pulses run at full power, so values just under minSpeed come
+//             out faster than minSpeed.  Fine for the turret's fixed slow speed
+//             (and what its play-tested settings were tuned against).
+//     true  - on just long enough to deliver |v| x the window's full-power
+//             energy, counting the kick, so speed rises smoothly with the
+//             input right up to minSpeed.  Needed for an analog stick (drive).
+struct MotorTuning
+{
+    float    minSpeed;
+    uint16_t pulseMs;
+    uint16_t kickMs;
+    uint16_t backlashMs;
+    bool     brake;
+    bool     powerMatched;
+};
+
 class MotorController_PCA9555
 {
 public:
@@ -78,14 +107,9 @@ public:
         } else {
             // Zero targets AND currents so the tank stops instantly on disable,
             // regardless of any in-progress inertia ramp.
-            _leftTarget = _rightTarget = _turretTarget = 0.0f;
-            _leftCurrent = _rightCurrent = _turretCurrent = 0.0f;
-            _leftLevel   = 0;
-            _rightLevel  = 0;
-            _turretLevel = 0;
-            _turretPulsing  = false;
-            _turretPrevSign = 0;
-            _turretCmdSign  = 0;
+            _left.reset();
+            _right.reset();
+            _turret.reset();
             // Clear all motor bits and assert SLEEP
             _port1 &= ~(BIT_L_IN1 | BIT_L_IN2 |
                         BIT_R_IN1 | BIT_R_IN2 |
@@ -102,9 +126,7 @@ public:
     // Used to pick a safe moment for blocking work like NVS flash writes.
     bool isIdle() const
     {
-        return _leftTarget  == 0.0f && _leftCurrent  == 0.0f &&
-               _rightTarget == 0.0f && _rightCurrent == 0.0f &&
-               _turretTarget == 0.0f && _turretCurrent == 0.0f;
+        return _left.idle() && _right.idle() && _turret.idle();
     }
 
     // Set acceleration/deceleration ramp times (seconds, 0 = instant).
@@ -119,39 +141,31 @@ public:
         _turretDecel = turretDecel;
     }
 
-    // Turret low-speed tuning.  The soft PWM only has PWM_STEPS levels and the
-    // turret stalls below ~3/8 duty, so speeds under 'minSpeed' are produced by
-    // pulsing instead: each 'pulsePeriodMs' window runs at minSpeed for a
-    // fraction |v|/minSpeed of the window, then stops.  The turret then moves in
-    // small even ticks at a lower average speed than it can hold continuously.
-    //   minSpeed      lowest speed that reliably turns continuously (0 = no pulsing)
-    //   pulsePeriodMs length of one pulse window
-    //   kickMs        full-power burst at the start of every move (beats stiction; 0 = off)
-    //   brake         brake (IN1=IN2=1) instead of coasting when stopped / between pulses
-    //   backlashMs    extra full-power burst when a move goes the opposite way to the
-    //                 previous one, to take up gear backlash (0 = off)
-    void setTurretTuning(float minSpeed, uint16_t pulsePeriodMs, uint16_t kickMs, bool brake,
+    // Low-speed tuning (see MotorTuning).  powerMatched is fixed per channel.
+    void setTurretTuning(float minSpeed, uint16_t pulseMs, uint16_t kickMs, bool brake,
                          uint16_t backlashMs)
     {
-        _turretMinSpeed    = fmaxf(0.0f, fminf(1.0f, minSpeed));
-        _turretPulsePeriod = pulsePeriodMs < 10 ? 10 : pulsePeriodMs;
-        _turretKickMs      = kickMs;
-        _turretBrake       = brake;
-        _turretBacklashMs  = backlashMs;
+        _setTuning(_turretTuning, minSpeed, pulseMs, kickMs, brake, backlashMs);
+    }
+
+    void setDriveTuning(float minSpeed, uint16_t pulseMs, uint16_t kickMs, bool brake,
+                        uint16_t backlashMs)
+    {
+        _setTuning(_driveTuning, minSpeed, pulseMs, kickMs, brake, backlashMs);
     }
 
     // Set left and right track speeds.  Values in [-1..1].
     // Stores as float targets; tick() ramps the current value toward the target.
     void setLeftRight(float l, float r)
     {
-        _leftTarget  = fmaxf(-1.0f, fminf(1.0f, l));
-        _rightTarget = fmaxf(-1.0f, fminf(1.0f, r));
+        _left.target  = fmaxf(-1.0f, fminf(1.0f, l));
+        _right.target = fmaxf(-1.0f, fminf(1.0f, r));
     }
 
     // Set turret rotation speed.  Value in [-1..1].
     void setTurret(float v)
     {
-        _turretTarget = fmaxf(-1.0f, fminf(1.0f, v));
+        _turret.target = fmaxf(-1.0f, fminf(1.0f, v));
     }
 
     // Control the hull board test LED (IO1_7).
@@ -168,14 +182,17 @@ public:
     void tick()
     {
         _pwmCounter = (_pwmCounter + 1) % PWM_STEPS;
+        const uint32_t now = millis();
 
         // Ramp currents toward targets (runs even when disabled so state is clean).
-        _stepChannel(_leftCurrent,   _leftTarget,   _driveAccel,  _driveDecel);
-        _stepChannel(_rightCurrent,  _rightTarget,  _driveAccel,  _driveDecel);
-        _stepChannel(_turretCurrent, _turretTarget, _turretAccel, _turretDecel);
-        _leftLevel   = _toLevel(_leftCurrent);
-        _rightLevel  = _toLevel(_rightCurrent);
-        _turretLevel = _turretLevelNow();
+        _stepChannel(_left.current,   _left.target,   _driveAccel,  _driveDecel);
+        _stepChannel(_right.current,  _right.target,  _driveAccel,  _driveDecel);
+        _stepChannel(_turret.current, _turret.target, _turretAccel, _turretDecel);
+        // The tracks share one pulse window so they tick together; otherwise a
+        // gentle curve (inner track pulsing, outer running) would wobble.
+        _left.level   = _levelFor(_left,   _driveTuning,  now, &_right);
+        _right.level  = _levelFor(_right,  _driveTuning,  now, &_left);
+        _turret.level = _levelFor(_turret, _turretTuning, now, nullptr);
 
         if (!_enabled) return; // nothing to do; port already zeroed by enable(false)
 
@@ -183,12 +200,9 @@ public:
         uint8_t bits = _port1 & (BIT_SLEEP | BIT_HULL_LED);
         // Left track and turret are physically swapped on this board revision —
         // left drive signal goes to the turret connector and vice versa.
-        bits |= _motorBits(_leftLevel,   BIT_T_IN1, BIT_T_IN2);
-        bits |= _motorBits(_rightLevel,  BIT_R_IN1, BIT_R_IN2);
-        if (_turretLevel == 0 && _turretBrake)
-            bits |= BIT_L_IN1 | BIT_L_IN2;      // brake: stop dead, no drift
-        else
-            bits |= _motorBits(_turretLevel, BIT_L_IN1, BIT_L_IN2);
+        bits |= _chanBits(_left.level,   _driveTuning.brake,  BIT_T_IN1, BIT_T_IN2);
+        bits |= _chanBits(_right.level,  _driveTuning.brake,  BIT_R_IN1, BIT_R_IN2);
+        bits |= _chanBits(_turret.level, _turretTuning.brake, BIT_L_IN1, BIT_L_IN2);
 
         if (bits != _port1) {
             _port1 = bits;
@@ -208,6 +222,40 @@ public:
     }
 
 private:
+    // Per-motor state.
+    struct Channel
+    {
+        float    target        = 0.0f;  // set by setLeftRight/setTurret
+        float    current       = 0.0f;  // ramped toward target each tick
+        int8_t   level         = 0;     // -PWM_STEPS..+PWM_STEPS for this tick
+        int8_t   prevSign      = 0;     // sign of last tick's level (kick detection)
+        int8_t   cmdSign       = 0;     // sign of the current command
+        int8_t   lastDir       = 0;     // direction of the last move; kept across stops
+        bool     pulsing       = false;
+        uint32_t pulseStart    = 0;
+        uint32_t kickUntil     = 0;
+        uint32_t backlashUntil = 0;
+
+        // lastDir survives: the gears stay where they were while disabled.
+        void reset()
+        {
+            target = current = 0.0f;
+            level = prevSign = cmdSign = 0;
+            pulsing = false;
+        }
+        bool idle() const { return target == 0.0f && current == 0.0f; }
+    };
+
+    static void _setTuning(MotorTuning& t, float minSpeed, uint16_t pulseMs, uint16_t kickMs,
+                           bool brake, uint16_t backlashMs)
+    {
+        t.minSpeed   = fmaxf(0.0f, fminf(1.0f, minSpeed));
+        t.pulseMs    = pulseMs < 10 ? 10 : pulseMs;
+        t.kickMs     = kickMs;
+        t.brake      = brake;
+        t.backlashMs = backlashMs;
+    }
+
     // Quantise float [-1..1] to signed integer [-PWM_STEPS..+PWM_STEPS].
     static int8_t _toLevel(float v)
     {
@@ -215,14 +263,13 @@ private:
         return (int8_t)roundf(v * PWM_STEPS);
     }
 
-    // Turret PWM level for this tick, applying pulse mode and kick-start
-    // (see setTurretTuning).  Timed with millis() so a slow loop() iteration
-    // doesn't stretch the pulses.
-    int8_t _turretLevelNow()
+    // PWM level for this tick, applying backlash, pulse mode and kick-start
+    // (see MotorTuning).  Timed with millis() so a slow loop() iteration
+    // doesn't stretch the pulses.  'partner' shares its pulse window (tracks).
+    static int8_t _levelFor(Channel& c, const MotorTuning& t, uint32_t now, const Channel* partner)
     {
-        const float    v   = _turretCurrent;
-        const float    mag = fabsf(v);
-        const uint32_t now = millis();
+        const float v   = c.current;
+        const float mag = fabsf(v);
 
         // Backlash: when the commanded direction is opposite to the last move
         // (remembered across stops - the gears stay where they were), run a
@@ -230,45 +277,56 @@ private:
         // by the command, not the pulse, so pulse mode can't cut it short; the
         // pulse window restarts once the burst is done.  Releasing cancels it.
         const int8_t cmdSign = (v > 0) - (v < 0);
-        if (cmdSign != _turretCmdSign) {
-            _turretBacklashUntil = now;
+        if (cmdSign != c.cmdSign) {
+            c.backlashUntil = now;
             if (cmdSign != 0) {
-                if (_turretLastDir != 0 && cmdSign != _turretLastDir)
-                    _turretBacklashUntil = now + _turretBacklashMs;
-                _turretLastDir = cmdSign;
-                _turretPulsing = false;
+                if (c.lastDir != 0 && cmdSign != c.lastDir)
+                    c.backlashUntil = now + t.backlashMs;
+                c.lastDir = cmdSign;
+                c.pulsing = false;
             }
-            _turretCmdSign = cmdSign;
+            c.cmdSign = cmdSign;
         }
-        if (cmdSign != 0 && (int32_t)(_turretBacklashUntil - now) > 0) {
-            _turretPrevSign = cmdSign;   // already moving: no kick when the burst ends
+        if (cmdSign != 0 && (int32_t)(c.backlashUntil - now) > 0) {
+            c.prevSign = cmdSign;   // already moving: no kick when the burst ends
             return cmdSign * (int8_t)PWM_STEPS;
         }
 
         int8_t level;
         if (mag == 0.0f) {
             level = 0;
-            _turretPulsing = false;
-        } else if (mag < _turretMinSpeed) {
-            if (!_turretPulsing) { _turretPulsing = true; _turretPulseStart = now; }
-            uint32_t phase = (now - _turretPulseStart) % _turretPulsePeriod;
-            uint32_t onMs  = (uint32_t)lroundf(_turretPulsePeriod * mag / _turretMinSpeed);
-            if (onMs < 1) onMs = 1;
-            int8_t pulseLevel = _toLevel(_turretMinSpeed);
+            c.pulsing = false;
+        } else if (mag < t.minSpeed) {
+            if (!c.pulsing) {
+                c.pulsing    = true;
+                c.pulseStart = (partner && partner->pulsing) ? partner->pulseStart : now;
+            }
+            int8_t pulseLevel = _toLevel(t.minSpeed);
             if (pulseLevel < 1) pulseLevel = 1;
+            uint32_t onMs;
+            if (t.powerMatched) {
+                float energy = mag * t.pulseMs;   // full-power ms needed this window
+                if (energy <= t.kickMs) onMs = (uint32_t)lroundf(energy);
+                else onMs = t.kickMs + (uint32_t)lroundf((energy - t.kickMs) * PWM_STEPS / pulseLevel);
+            } else {
+                onMs = (uint32_t)lroundf(t.pulseMs * mag / t.minSpeed);
+            }
+            if (onMs < 1) onMs = 1;
+            if (onMs > t.pulseMs) onMs = t.pulseMs;
+            uint32_t phase = (now - c.pulseStart) % t.pulseMs;
             level = (phase < onMs) ? (v > 0 ? pulseLevel : -pulseLevel) : 0;
         } else {
             level = _toLevel(v);
-            _turretPulsing = false;
+            c.pulsing = false;
         }
 
         // Kick-start: full power for the first kickMs of every move from rest
         // (including each pulse) or direction reversal.
         int8_t sign = (level > 0) - (level < 0);
-        if (sign != 0 && sign != _turretPrevSign && _turretKickMs > 0)
-            _turretKickUntil = now + _turretKickMs;
-        _turretPrevSign = sign;
-        if (sign != 0 && (int32_t)(_turretKickUntil - now) > 0)
+        if (sign != 0 && sign != c.prevSign && t.kickMs > 0)
+            c.kickUntil = now + t.kickMs;
+        c.prevSign = sign;
+        if (sign != 0 && (int32_t)(c.kickUntil - now) > 0)
             level = sign * (int8_t)PWM_STEPS;
 
         return level;
@@ -285,6 +343,14 @@ private:
         float step  = (param <= 0.0f) ? 2.0f : (1.0f / (param * 1000.0f));
         if (tgt > cur) cur = fminf(cur + step, tgt);
         else           cur = fmaxf(cur - step, tgt);
+    }
+
+    // INx bits for one channel: brake (IN1=IN2=1) when stopped if enabled,
+    // otherwise the soft-PWM drive bits.
+    uint8_t _chanBits(int8_t level, bool brake, uint8_t bitIN1, uint8_t bitIN2)
+    {
+        if (level == 0 && brake) return bitIN1 | bitIN2;   // brake: stop dead, no drift
+        return _motorBits(level, bitIN1, bitIN2);
     }
 
     // Return the two INx output bits for one H-bridge at the current PWM phase.
@@ -311,36 +377,19 @@ private:
 
     uint8_t  _addr        = 0x20;
     bool     _enabled     = false;
-    int8_t   _leftLevel   = 0;    // -PWM_STEPS..+PWM_STEPS (quantised from _leftCurrent)
-    int8_t   _rightLevel  = 0;
-    int8_t   _turretLevel = 0;
     uint8_t  _pwmCounter  = 0;    // 0..(PWM_STEPS-1)
     uint8_t  _port1       = 0x00; // shadow of PCA9555 Port 1 output register
 
-    // Float targets set by setLeftRight/setTurret.
-    float _leftTarget   = 0.0f;
-    float _rightTarget  = 0.0f;
-    float _turretTarget = 0.0f;
-    // Float currents ramped toward targets each tick by _stepChannel.
-    float _leftCurrent   = 0.0f;
-    float _rightCurrent  = 0.0f;
-    float _turretCurrent = 0.0f;
+    Channel _left, _right, _turret;
+
     // Inertia parameters (seconds; 0 = instant).
     float _driveAccel  = 0.0f;
     float _driveDecel  = 0.0f;
     float _turretAccel = 0.0f;
     float _turretDecel = 0.0f;
-    // Turret low-speed tuning (setTurretTuning).
-    float    _turretMinSpeed    = 0.4f;
-    uint16_t _turretPulsePeriod = 20;
-    uint16_t _turretKickMs      = 20;
-    uint16_t _turretBacklashMs  = 110;
-    int8_t   _turretLastDir     = 0;  // direction of the last turret move; kept across stops
-    int8_t   _turretCmdSign     = 0;  // sign of the current turret command
-    uint32_t _turretBacklashUntil = 0;
-    bool     _turretBrake       = true;
-    bool     _turretPulsing     = false;
-    uint32_t _turretPulseStart  = 0;
-    uint32_t _turretKickUntil   = 0;
-    int8_t   _turretPrevSign    = 0;
+
+    // Low-speed tuning.  Turret defaults are the play-tested values; drive
+    // defaults are a starting point (pulse a little longer for the heavier hull).
+    MotorTuning _turretTuning { 0.4f, 20, 20, 110, true, false };
+    MotorTuning _driveTuning  { 0.4f, 40, 20,   0, true, true  };
 };

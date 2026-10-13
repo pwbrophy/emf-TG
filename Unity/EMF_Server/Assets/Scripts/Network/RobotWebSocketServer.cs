@@ -782,11 +782,15 @@ public class RobotWebSocketServer : MonoBehaviour
         string ta   = gs.TurretAcceleration.ToString("F3", CultureInfo.InvariantCulture);
         string td   = gs.TurretDeceleration.ToString("F3", CultureInfo.InvariantCulture);
         string tmin = gs.TurretMinSpeed.ToString("F3",     CultureInfo.InvariantCulture);
+        string dmin = gs.DriveMinSpeed.ToString("F3",      CultureInfo.InvariantCulture);
         string json = $"{{\"cmd\":\"set_physics\",\"drive_accel\":{da},\"drive_decel\":{dd}," +
                       $"\"turret_accel\":{ta},\"turret_decel\":{td}," +
                       $"\"turret_min\":{tmin},\"turret_pulse_ms\":{gs.TurretPulseMs}," +
                       $"\"turret_kick_ms\":{gs.TurretKickMs},\"turret_brake\":{(gs.TurretBrake ? 1 : 0)}," +
-                      $"\"turret_backlash_ms\":{gs.TurretBacklashMs}}}";
+                      $"\"turret_backlash_ms\":{gs.TurretBacklashMs}," +
+                      $"\"drive_min\":{dmin},\"drive_pulse_ms\":{gs.DrivePulseMs}," +
+                      $"\"drive_kick_ms\":{gs.DriveKickMs},\"drive_brake\":{(gs.DriveBrake ? 1 : 0)}," +
+                      $"\"drive_backlash_ms\":{gs.DriveBacklashMs}}}";
         return SendJsonToRobot(robotId, json);
     }
 

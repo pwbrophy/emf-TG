@@ -1463,6 +1463,20 @@ let TURRET_RADIUS = 144;
 const DRIVE_HZ   = 20;  // max sends per second
 let lastDriveSend = 0;
 
+// Joystick response curve — radial, so the stick direction is unchanged:
+//  - the inner JOY_DEADZONE of the throw does nothing (resting thumb / jitter);
+//  - from JOY_FULL outwards is full deflection: a thumb pushed to the edge wants full speed;
+//  - in between, deflection = t^JOY_EXPO, so most of the throw goes to the low
+//    speeds the robot's drive pulse mode can make, and less to the top end.
+const JOY_DEADZONE = 0.08;
+const JOY_FULL     = 0.90;
+const JOY_EXPO     = 2.0;
+function joyCurve(r) {
+  if (r <= JOY_DEADZONE) return 0;
+  const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
+  return Math.pow(t, JOY_EXPO);
+}
+
 // Turret
 let slowTurretSpeed = 0.2; // updated from server via TurretSettings / game_started
 
@@ -3085,10 +3099,11 @@ const roundF = v => Math.round(v * 1000) / 1000;
 //    20 Hz tick — that wait used to add up to 50 ms to every stick movement;
 //  - otherwise the current value is re-sent at DRIVE_HZ, which the robot's
 //    500 ms drive watchdog relies on while the stick is held still.
-// The robot quantises speed to 1/DRIVE_LEVELS steps (MotorController PWM_STEPS),
-// so smaller wobbles of the thumb don't count as a change.
+// Changes smaller than 1/DRIVE_LEVELS don't count, so thumb wobble doesn't spam
+// sends.  Finer than the robot's 8 PWM levels because below its drive min speed
+// the robot pulses, and there every small step changes the speed.
 const DRIVE_FAST_HZ = 30; // with gamepad turret (20 Hz) + fire, stays under GameHub.MaxMsgsPerSecond (60)
-const DRIVE_LEVELS  = 8;
+const DRIVE_LEVELS  = 32;
 let lastDriveLevelL = 0, lastDriveLevelR = 0;
 
 function maybeSendDrive(now) {
@@ -3170,8 +3185,11 @@ function updateJoy(cx, cy) {
 
   joyThumb.style.transform = `translate(calc(-50% + ${jdx}px), calc(-50% + ${jdy}px))`;
 
-  const nx =  jdx / JOY_RADIUS;
-  const ny = -jdy / JOY_RADIUS;
+  // Apply the response curve to the deflection radius, keeping its direction.
+  const r  = Math.min(1, Math.sqrt(jdx*jdx + jdy*jdy) / JOY_RADIUS);
+  const k  = r > 0 ? joyCurve(r) / r : 0;
+  const nx =  jdx / JOY_RADIUS * k;
+  const ny = -jdy / JOY_RADIUS * k;
 
   const tx = nx * 0.50;
   joyL = clamp(ny + tx, -1, 1);
@@ -3975,7 +3993,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v36</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v37</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

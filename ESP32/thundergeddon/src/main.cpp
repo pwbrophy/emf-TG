@@ -1101,8 +1101,20 @@ static void handleWsText(const String& s)
         motors.setTurretTuning(tmin, (uint16_t)constrain(tpulse, 10, 1000),
                                (uint16_t)constrain(tkick, 0, 200), tbrake != 0,
                                (uint16_t)constrain(tlash, 0, 300));
-        Serial.printf("[PHYS] drive=%.2f/%.2f turret=%.2f/%.2f min=%.2f pulse=%dms kick=%dms brake=%d backlash=%dms\n",
-                      da, dd, ta, td, tmin, tpulse, tkick, tbrake, tlash);
+        // Drive (track) low-speed tuning — separate motors, separate values.
+        float dmin   = doc["drive_min"]         | 0.4f;
+        int   dpulse = doc["drive_pulse_ms"]    | 40;
+        int   dkick  = doc["drive_kick_ms"]     | 20;
+        int   dbrake = doc["drive_brake"]       | 1;
+        int   dlash  = doc["drive_backlash_ms"] | 0;
+        motors.setDriveTuning(dmin, (uint16_t)constrain(dpulse, 10, 1000),
+                              (uint16_t)constrain(dkick, 0, 200), dbrake != 0,
+                              (uint16_t)constrain(dlash, 0, 300));
+        Serial.printf("[PHYS] drive=%.2f/%.2f turret=%.2f/%.2f\n", da, dd, ta, td);
+        Serial.printf("[PHYS] turret min=%.2f pulse=%dms kick=%dms brake=%d backlash=%dms\n",
+                      tmin, tpulse, tkick, tbrake, tlash);
+        Serial.printf("[PHYS] drive  min=%.2f pulse=%dms kick=%dms brake=%d backlash=%dms\n",
+                      dmin, dpulse, dkick, dbrake, dlash);
         return;
     }
 

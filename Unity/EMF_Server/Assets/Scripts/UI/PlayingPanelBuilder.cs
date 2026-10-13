@@ -36,7 +36,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v18";
+    const string BUILT_SENTINEL = "__ppb_v19";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -300,12 +300,20 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_deadTime    = MakeSettingsRow(gameSettingsContent,    "Dead Time s");
         var f_invuln      = MakeSettingsRow(gameSettingsContent,    "Invuln s");
         var f_buzzer      = MakeSettingsToggle(gameSettingsContent, "Buzzer SFX");
+        MakeSettingsSection(gameSettingsContent, "TURRET MOTOR");
         var f_slowTurret  = MakeSettingsRow(gameSettingsContent,    "Slow Turret");
-        var f_turretMin   = MakeSettingsRow(gameSettingsContent,    "Turret Min");
+        var f_turretMin   = MakeSettingsRow(gameSettingsContent,    "Min Speed");
         var f_turretPulse = MakeSettingsRow(gameSettingsContent,    "Pulse ms");
         var f_turretKick  = MakeSettingsRow(gameSettingsContent,    "Kick ms");
-        var f_turretBrake = MakeSettingsToggle(gameSettingsContent, "Turret Brake");
+        var f_turretBrake = MakeSettingsToggle(gameSettingsContent, "Brake");
         var f_turretLash  = MakeSettingsRow(gameSettingsContent,    "Backlash ms");
+        MakeSettingsSection(gameSettingsContent, "DRIVE MOTORS");
+        var f_driveMin    = MakeSettingsRow(gameSettingsContent,    "Min Speed");
+        var f_drivePulse  = MakeSettingsRow(gameSettingsContent,    "Pulse ms");
+        var f_driveKick   = MakeSettingsRow(gameSettingsContent,    "Kick ms");
+        var f_driveBrake  = MakeSettingsToggle(gameSettingsContent, "Brake");
+        var f_driveLash   = MakeSettingsRow(gameSettingsContent,    "Backlash ms");
+        MakeSettingsSection(gameSettingsContent, "VIDEO");
         var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
         var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
         var f_videoQuality = MakeSettingsRow(gameSettingsContent,    "JPEG Qual");
@@ -371,6 +379,11 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "turretKickField",  f_turretKick);
         Wire(psp, "turretBrakeToggle", f_turretBrake);
         Wire(psp, "turretBacklashField", f_turretLash);
+        Wire(psp, "driveMinField",      f_driveMin);
+        Wire(psp, "drivePulseField",    f_drivePulse);
+        Wire(psp, "driveKickField",     f_driveKick);
+        Wire(psp, "driveBrakeToggle",   f_driveBrake);
+        Wire(psp, "driveBacklashField", f_driveLash);
         Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
         Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
         Wire(psp, "videoFpsField",     f_videoFps);
@@ -508,6 +521,15 @@ public class PlayingPanelBuilder : MonoBehaviour
         foreach (var tmp in GetComponentsInChildren<TextMeshProUGUI>())
             if (tmp.font == null) tmp.font = _font;
         enabled = false; // run once
+    }
+
+    // Small heading that groups the settings rows below it.
+    void MakeSettingsSection(RectTransform parent, string text)
+    {
+        var lbl = MakeTmp(parent.transform, "Section_" + text.Replace(" ", ""), text,
+                          C_CYAN, 9f, TextAlignmentOptions.BottomLeft, bold: true);
+        lbl.characterSpacing = 1.5f;
+        lbl.gameObject.AddComponent<LayoutElement>().preferredHeight = 20f;
     }
 
     TMP_InputField MakeSettingsRow(RectTransform parent, string labelText)
