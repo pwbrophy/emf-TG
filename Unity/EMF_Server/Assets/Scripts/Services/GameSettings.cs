@@ -126,6 +126,16 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Extra full-power burst (ms) when a track reverses direction, to take up gear backlash. 0 = off.")]
     public int DriveBacklashMs = 0;
 
+    [Header("Phone Joystick Curve")]
+    [Tooltip("Fraction of the joystick throw (from centre) that does nothing.")]
+    public float JoystickDeadzone = 0.08f;
+    [Tooltip("Drive speed just outside the deadzone — slower than this is too slow to be useful.")]
+    public float JoystickStartSpeed = 0.30f;
+    [Tooltip("Fraction of the throw from which the stick gives full speed.")]
+    public float JoystickFullAt = 0.90f;
+    [Tooltip("Curve exponent between start and full speed. 1 = straight line; higher = more of the throw spent at low speeds.")]
+    public float JoystickCurve = 2.0f;
+
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
     public bool TwoPlayerModeEnabled = false;
@@ -208,6 +218,10 @@ public class GameSettings : MonoBehaviour
                 driveKickMs              = DriveKickMs,
                 driveBrake               = DriveBrake ? 1 : 0,
                 driveBacklashMs          = DriveBacklashMs,
+                joystickDeadzone         = JoystickDeadzone,
+                joystickStartSpeed       = JoystickStartSpeed,
+                joystickFullAt           = JoystickFullAt,
+                joystickCurve            = JoystickCurve,
                 explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
@@ -263,6 +277,10 @@ public class GameSettings : MonoBehaviour
             if (data.driveKickMs              >= 0) DriveKickMs              = data.driveKickMs;
             if (data.driveBrake               >= 0) DriveBrake               = data.driveBrake != 0;
             if (data.driveBacklashMs          >= 0) DriveBacklashMs          = data.driveBacklashMs;
+            if (data.joystickDeadzone         >= 0) JoystickDeadzone         = data.joystickDeadzone;
+            if (data.joystickStartSpeed       >= 0) JoystickStartSpeed       = data.joystickStartSpeed;
+            if (data.joystickFullAt           > 0) JoystickFullAt           = data.joystickFullAt;
+            if (data.joystickCurve            > 0) JoystickCurve            = data.joystickCurve;
             if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
@@ -314,6 +332,10 @@ public class GameSettings : MonoBehaviour
         public int   driveKickMs = -1;           // -1 = not set → keep default 20
         public int   driveBrake = -1;            // -1 = not set → keep default true
         public int   driveBacklashMs = -1;       // -1 = not set → keep default 0
+        public float joystickDeadzone = -1f;     // -1 = not set → keep default 0.08
+        public float joystickStartSpeed = -1f;   // -1 = not set → keep default 0.30
+        public float joystickFullAt;             // 0 = not set → keep default 0.90
+        public float joystickCurve;              // 0 = not set → keep default 2.0
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;

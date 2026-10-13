@@ -212,6 +212,16 @@ public class UnityBridgeService : BackgroundService
                         Post(_hub.Clients.All.SendAsync("TurretSettings", ss));
                     break;
 
+                case "joystick_settings":
+                    Post(_hub.Clients.All.SendAsync("JoystickSettings", new
+                    {
+                        deadzone   = GetFloat(doc.RootElement, "deadzone",   0.08f),
+                        startSpeed = GetFloat(doc.RootElement, "startSpeed", 0.30f),
+                        fullAt     = GetFloat(doc.RootElement, "fullAt",     0.90f),
+                        curve      = GetFloat(doc.RootElement, "curve",      2.0f),
+                    }));
+                    break;
+
                 case "fire_result":
                     HandleFireResult(doc.RootElement);
                     break;

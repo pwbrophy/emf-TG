@@ -1466,15 +1466,19 @@ let lastDriveSend = 0;
 // Joystick response curve — radial, so the stick direction is unchanged:
 //  - the inner JOY_DEADZONE of the throw does nothing (resting thumb / jitter);
 //  - from JOY_FULL outwards is full deflection: a thumb pushed to the edge wants full speed;
-//  - in between, deflection = t^JOY_EXPO, so most of the throw goes to the low
-//    speeds the robot's drive pulse mode can make, and less to the top end.
-const JOY_DEADZONE = 0.08;
-const JOY_FULL     = 0.90;
-const JOY_EXPO     = 2.0;
+//  - just outside the deadzone the deflection starts at JOY_MIN_OUT (slower
+//    than that is too slow to be useful), then rises as t^JOY_EXPO, so most of
+//    the throw goes to the low speeds the robot's drive pulse mode can make,
+//    and less to the top end.
+// Defaults below; the live values come from the server (JoystickSettings).
+let JOY_DEADZONE = 0.08;
+let JOY_FULL     = 0.90;
+let JOY_EXPO     = 2.0;
+let JOY_MIN_OUT  = 0.30;
 function joyCurve(r) {
   if (r <= JOY_DEADZONE) return 0;
   const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
-  return Math.pow(t, JOY_EXPO);
+  return JOY_MIN_OUT + (1 - JOY_MIN_OUT) * Math.pow(t, JOY_EXPO);
 }
 
 // Turret
@@ -2076,6 +2080,13 @@ function buildConnection() {
   conn.on('CountdownStarted', total  => { dbg('SignalR: CountdownStarted total=' + total); showCountdown(total); });
   conn.on('CountdownTick',   (count, total) => { dbg('SignalR: CountdownTick ' + count); updateCountdown(count); });
   conn.on('TurretSettings',  speed   => { slowTurretSpeed = speed; });
+  conn.on('JoystickSettings', s      => {
+    // Guard against a full-speed point at or inside the deadzone.
+    if (s.fullAt > s.deadzone) { JOY_DEADZONE = s.deadzone; JOY_FULL = s.fullAt; }
+    JOY_MIN_OUT = s.startSpeed;
+    JOY_EXPO    = s.curve;
+    dbg('SignalR: JoystickSettings dz=' + s.deadzone + ' start=' + s.startSpeed + ' full=' + s.fullAt + ' curve=' + s.curve);
+  });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
   conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
   conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
@@ -3993,7 +4004,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v37</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v38</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

@@ -36,7 +36,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v19";
+    const string BUILT_SENTINEL = "__ppb_v20";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -76,7 +76,9 @@ public class PlayingPanelBuilder : MonoBehaviour
         var scene = gameObject.scene;
         EditorApplication.delayCall += () =>
         {
-            if (gameObject != null) EditorSceneManager.SaveScene(scene);
+            // 'this' can be gone by now (domain reload / scene reload) — check it
+            // before touching gameObject, which would throw on a destroyed component.
+            if (this != null && !Application.isPlaying) EditorSceneManager.SaveScene(scene);
         };
     }
 #endif
@@ -313,6 +315,11 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_driveKick   = MakeSettingsRow(gameSettingsContent,    "Kick ms");
         var f_driveBrake  = MakeSettingsToggle(gameSettingsContent, "Brake");
         var f_driveLash   = MakeSettingsRow(gameSettingsContent,    "Backlash ms");
+        MakeSettingsSection(gameSettingsContent, "JOYSTICK");
+        var f_joyDeadzone = MakeSettingsRow(gameSettingsContent,    "Deadzone");
+        var f_joyStart    = MakeSettingsRow(gameSettingsContent,    "Start Speed");
+        var f_joyFull     = MakeSettingsRow(gameSettingsContent,    "Full At");
+        var f_joyCurve    = MakeSettingsRow(gameSettingsContent,    "Curve");
         MakeSettingsSection(gameSettingsContent, "VIDEO");
         var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
         var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
@@ -384,6 +391,10 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "driveKickField",     f_driveKick);
         Wire(psp, "driveBrakeToggle",   f_driveBrake);
         Wire(psp, "driveBacklashField", f_driveLash);
+        Wire(psp, "joyDeadzoneField",   f_joyDeadzone);
+        Wire(psp, "joyStartField",      f_joyStart);
+        Wire(psp, "joyFullField",       f_joyFull);
+        Wire(psp, "joyCurveField",      f_joyCurve);
         Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
         Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
         Wire(psp, "videoFpsField",     f_videoFps);

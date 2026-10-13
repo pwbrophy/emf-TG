@@ -27,6 +27,10 @@ public class PlayingSettingsPanel : MonoBehaviour
     [SerializeField] private TMP_InputField driveKickField;
     [SerializeField] private Toggle         driveBrakeToggle;
     [SerializeField] private TMP_InputField driveBacklashField;
+    [SerializeField] private TMP_InputField joyDeadzoneField;
+    [SerializeField] private TMP_InputField joyStartField;
+    [SerializeField] private TMP_InputField joyFullField;
+    [SerializeField] private TMP_InputField joyCurveField;
     [SerializeField] private Button          videoResButton;
     [SerializeField] private TextMeshProUGUI videoResLabel;
     [SerializeField] private TMP_InputField  videoFpsField;
@@ -70,6 +74,10 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (driveKickField)     driveKickField.SetTextWithoutNotify(_settings.DriveKickMs.ToString());
         if (driveBrakeToggle)   driveBrakeToggle.SetIsOnWithoutNotify(_settings.DriveBrake);
         if (driveBacklashField) driveBacklashField.SetTextWithoutNotify(_settings.DriveBacklashMs.ToString());
+        if (joyDeadzoneField)   joyDeadzoneField.SetTextWithoutNotify(_settings.JoystickDeadzone.ToString("F2"));
+        if (joyStartField)      joyStartField.SetTextWithoutNotify(_settings.JoystickStartSpeed.ToString("F2"));
+        if (joyFullField)       joyFullField.SetTextWithoutNotify(_settings.JoystickFullAt.ToString("F2"));
+        if (joyCurveField)      joyCurveField.SetTextWithoutNotify(_settings.JoystickCurve.ToString("F1"));
         if (videoResLabel)     videoResLabel.text = ResName(_settings.VideoFrameSize);
         if (videoFpsField)     videoFpsField.SetTextWithoutNotify(_settings.VideoFps.ToString());
         if (videoQualityField) videoQualityField.SetTextWithoutNotify(_settings.VideoJpegQuality.ToString());
@@ -96,6 +104,10 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (driveKickField)     driveKickField.onValueChanged.AddListener(OnDriveKick);
         if (driveBrakeToggle)   driveBrakeToggle.onValueChanged.AddListener(OnDriveBrake);
         if (driveBacklashField) driveBacklashField.onValueChanged.AddListener(OnDriveBacklash);
+        if (joyDeadzoneField)   joyDeadzoneField.onValueChanged.AddListener(OnJoyDeadzone);
+        if (joyStartField)      joyStartField.onValueChanged.AddListener(OnJoyStart);
+        if (joyFullField)       joyFullField.onValueChanged.AddListener(OnJoyFull);
+        if (joyCurveField)      joyCurveField.onValueChanged.AddListener(OnJoyCurve);
         if (videoResButton)    videoResButton.onClick.AddListener(OnVideoResCycle);
         if (videoFpsField)     videoFpsField.onValueChanged.AddListener(OnVideoFps);
         if (videoQualityField) videoQualityField.onValueChanged.AddListener(OnVideoQuality);
@@ -122,6 +134,10 @@ public class PlayingSettingsPanel : MonoBehaviour
         if (driveKickField)     driveKickField.onValueChanged.RemoveListener(OnDriveKick);
         if (driveBrakeToggle)   driveBrakeToggle.onValueChanged.RemoveListener(OnDriveBrake);
         if (driveBacklashField) driveBacklashField.onValueChanged.RemoveListener(OnDriveBacklash);
+        if (joyDeadzoneField)   joyDeadzoneField.onValueChanged.RemoveListener(OnJoyDeadzone);
+        if (joyStartField)      joyStartField.onValueChanged.RemoveListener(OnJoyStart);
+        if (joyFullField)       joyFullField.onValueChanged.RemoveListener(OnJoyFull);
+        if (joyCurveField)      joyCurveField.onValueChanged.RemoveListener(OnJoyCurve);
         if (videoResButton)    videoResButton.onClick.RemoveListener(OnVideoResCycle);
         if (videoFpsField)     videoFpsField.onValueChanged.RemoveListener(OnVideoFps);
         if (videoQualityField) videoQualityField.onValueChanged.RemoveListener(OnVideoQuality);
@@ -146,6 +162,11 @@ public class PlayingSettingsPanel : MonoBehaviour
     void OnDriveKick(string v)     { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 200) { _settings.DriveKickMs = n; SavePhysics(); } }
     void OnDriveBrake(bool on)     { if (_settings != null) { _settings.DriveBrake = on; SavePhysics(); } }
     void OnDriveBacklash(string v) { if (_settings != null && int.TryParse(v, out int n) && n >= 0 && n <= 300) { _settings.DriveBacklashMs = n; SavePhysics(); } }
+    void OnJoyDeadzone(string v) { if (_settings != null && float.TryParse(v, out float n) && n >= 0f && n < 0.5f) { _settings.JoystickDeadzone = n; SaveJoystick(); } }
+    void OnJoyStart(string v)    { if (_settings != null && float.TryParse(v, out float n) && n >= 0f && n <= 1f) { _settings.JoystickStartSpeed = n; SaveJoystick(); } }
+    void OnJoyFull(string v)     { if (_settings != null && float.TryParse(v, out float n) && n > 0.5f && n <= 1f) { _settings.JoystickFullAt = n; SaveJoystick(); } }
+    void OnJoyCurve(string v)    { if (_settings != null && float.TryParse(v, out float n) && n >= 0.2f && n <= 5f) { _settings.JoystickCurve = n; SaveJoystick(); } }
+    void SaveJoystick()          { _settings.SaveToDisk(); ServiceLocator.PlayerServer?.BroadcastJoystickSettings(); }
     void SavePhysics()           { _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings); }
 
     void OnVideoResCycle()

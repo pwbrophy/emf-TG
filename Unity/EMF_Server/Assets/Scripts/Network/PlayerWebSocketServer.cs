@@ -1802,6 +1802,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             "}";
 
         BroadcastRaw(json);
+        BroadcastJoystickSettings();
         Debug.Log($"[PlayerWS] Sent game_started to {playerName} (robot={callsign}, role={role})");
     }
 
@@ -2142,6 +2143,21 @@ public class PlayerWebSocketServer : MonoBehaviour
     {
         float slow = ServiceLocator.GameSettings?.SlowTurretSpeed ?? 0.2f;
         string json = "{\"cmd\":\"turret_settings\",\"slowSpeed\":" + slow.ToString("F3") + "}";
+        BroadcastRaw(json);
+    }
+
+    // Joystick response curve for the phones (deadzone, start speed, full-speed
+    // point, curve exponent).  Sent with every game_started and on any change.
+    public void BroadcastJoystickSettings()
+    {
+        var gs = ServiceLocator.GameSettings;
+        if (gs == null) return;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string json = "{\"cmd\":\"joystick_settings\"" +
+            ",\"deadzone\":"   + gs.JoystickDeadzone.ToString("F3", ci)   +
+            ",\"startSpeed\":" + gs.JoystickStartSpeed.ToString("F3", ci) +
+            ",\"fullAt\":"     + gs.JoystickFullAt.ToString("F3", ci)     +
+            ",\"curve\":"      + gs.JoystickCurve.ToString("F3", ci)      + "}";
         BroadcastRaw(json);
     }
 
