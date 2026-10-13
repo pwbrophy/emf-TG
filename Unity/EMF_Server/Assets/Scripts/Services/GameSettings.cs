@@ -87,7 +87,7 @@ public class GameSettings : MonoBehaviour
 
     [Header("Phone Controls")]
     [Tooltip("Speed (0.1–0.9) sent when a player presses a slow turret button. Fast buttons always use 1.0.")]
-    public float SlowTurretSpeed = 0.4f;
+    public float SlowTurretSpeed = 0.2f;
 
     [Tooltip("When true, all phone turret input is capped to SlowTurretSpeed.")]
     public bool SlowTurretEnabled = false;
@@ -106,13 +106,13 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Lowest turret speed the motor holds continuously without stalling. Speeds below this are made by pulsing at this speed, so Slow Turret can go lower than this. 0 = no pulsing.")]
     public float TurretMinSpeed = 0.4f;
     [Tooltip("Length (ms) of one turret pulse window when pulsing. Shorter = smoother, longer = bigger discrete ticks.")]
-    public int TurretPulseMs = 100;
+    public int TurretPulseMs = 20;
     [Tooltip("Full-power burst (ms) at the start of every turret move/pulse to break stiction. 0 = off.")]
-    public int TurretKickMs = 0;
+    public int TurretKickMs = 20;
     [Tooltip("Brake the turret motor when stopped / between pulses instead of coasting.")]
     public bool TurretBrake = true;
     [Tooltip("Extra full-power burst (ms) when the turret reverses direction, to take up gear backlash. 0 = off.")]
-    public int TurretBacklashMs = 0;
+    public int TurretBacklashMs = 110;
 
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
@@ -283,10 +283,10 @@ public class GameSettings : MonoBehaviour
         public float turretAcceleration;
         public float turretDeceleration;
         public float turretMinSpeed = -1f;       // -1 = not set (old save) → keep default 0.4
-        public int   turretPulseMs;              // 0 = not set → keep default 100
-        public int   turretKickMs = -1;          // -1 = not set → keep default 0
+        public int   turretPulseMs;              // 0 = not set → keep default 20
+        public int   turretKickMs = -1;          // -1 = not set → keep default 20
         public int   turretBrake = -1;           // -1 = not set → keep default true
-        public int   turretBacklashMs = -1;      // -1 = not set → keep default 0
+        public int   turretBacklashMs = -1;      // -1 = not set → keep default 110
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;

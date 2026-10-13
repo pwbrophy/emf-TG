@@ -1094,10 +1094,10 @@ static void handleWsText(const String& s)
         // Turret low-speed tuning — defaults match MotorController_PCA9555 so an
         // older server that omits these keys gets the standard behaviour.
         float tmin   = doc["turret_min"]      | 0.4f;
-        int   tpulse = doc["turret_pulse_ms"] | 100;
-        int   tkick  = doc["turret_kick_ms"]  | 0;
+        int   tpulse = doc["turret_pulse_ms"] | 20;
+        int   tkick  = doc["turret_kick_ms"]  | 20;
         int   tbrake = doc["turret_brake"]    | 1;
-        int   tlash  = doc["turret_backlash_ms"] | 0;
+        int   tlash  = doc["turret_backlash_ms"] | 110;
         motors.setTurretTuning(tmin, (uint16_t)constrain(tpulse, 10, 1000),
                                (uint16_t)constrain(tkick, 0, 200), tbrake != 0,
                                (uint16_t)constrain(tlash, 0, 300));

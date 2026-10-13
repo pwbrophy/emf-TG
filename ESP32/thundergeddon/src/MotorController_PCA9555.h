@@ -332,9 +332,9 @@ private:
     float _turretDecel = 0.0f;
     // Turret low-speed tuning (setTurretTuning).
     float    _turretMinSpeed    = 0.4f;
-    uint16_t _turretPulsePeriod = 100;
-    uint16_t _turretKickMs      = 0;
-    uint16_t _turretBacklashMs  = 0;
+    uint16_t _turretPulsePeriod = 20;
+    uint16_t _turretKickMs      = 20;
+    uint16_t _turretBacklashMs  = 110;
     int8_t   _turretLastDir     = 0;  // direction of the last turret move; kept across stops
     int8_t   _turretCmdSign     = 0;  // sign of the current turret command
     uint32_t _turretBacklashUntil = 0;
