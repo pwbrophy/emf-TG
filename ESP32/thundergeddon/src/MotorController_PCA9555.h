@@ -85,6 +85,7 @@ public:
             _turretLevel = 0;
             _turretPulsing  = false;
             _turretPrevSign = 0;
+            _turretCmdSign  = 0;
             // Clear all motor bits and assert SLEEP
             _port1 &= ~(BIT_L_IN1 | BIT_L_IN2 |
                         BIT_R_IN1 | BIT_R_IN2 |
@@ -223,6 +224,27 @@ private:
         const float    mag = fabsf(v);
         const uint32_t now = millis();
 
+        // Backlash: when the commanded direction is opposite to the last move
+        // (remembered across stops - the gears stay where they were), run a
+        // full-power burst of backlashMs to take up the slack.  It is driven
+        // by the command, not the pulse, so pulse mode can't cut it short; the
+        // pulse window restarts once the burst is done.  Releasing cancels it.
+        const int8_t cmdSign = (v > 0) - (v < 0);
+        if (cmdSign != _turretCmdSign) {
+            _turretBacklashUntil = now;
+            if (cmdSign != 0) {
+                if (_turretLastDir != 0 && cmdSign != _turretLastDir)
+                    _turretBacklashUntil = now + _turretBacklashMs;
+                _turretLastDir = cmdSign;
+                _turretPulsing = false;
+            }
+            _turretCmdSign = cmdSign;
+        }
+        if (cmdSign != 0 && (int32_t)(_turretBacklashUntil - now) > 0) {
+            _turretPrevSign = cmdSign;   // already moving: no kick when the burst ends
+            return cmdSign * (int8_t)PWM_STEPS;
+        }
+
         int8_t level;
         if (mag == 0.0f) {
             level = 0;
@@ -241,16 +263,10 @@ private:
         }
 
         // Kick-start: full power for the first kickMs of every move from rest
-        // (including each pulse) or direction reversal.  Backlash: when the move
-        // is the opposite way to the last one (remembered across stops - the
-        // gears stay where they were), add backlashMs to take up the slack.
+        // (including each pulse) or direction reversal.
         int8_t sign = (level > 0) - (level < 0);
-        if (sign != 0 && sign != _turretPrevSign) {
-            uint32_t burst = _turretKickMs;
-            if (_turretLastDir != 0 && sign != _turretLastDir) burst += _turretBacklashMs;
-            if (burst > 0) _turretKickUntil = now + burst;
-            _turretLastDir = sign;
-        }
+        if (sign != 0 && sign != _turretPrevSign && _turretKickMs > 0)
+            _turretKickUntil = now + _turretKickMs;
         _turretPrevSign = sign;
         if (sign != 0 && (int32_t)(_turretKickUntil - now) > 0)
             level = sign * (int8_t)PWM_STEPS;
@@ -320,6 +336,8 @@ private:
     uint16_t _turretKickMs      = 0;
     uint16_t _turretBacklashMs  = 0;
     int8_t   _turretLastDir     = 0;  // direction of the last turret move; kept across stops
+    int8_t   _turretCmdSign     = 0;  // sign of the current turret command
+    uint32_t _turretBacklashUntil = 0;
     bool     _turretBrake       = true;
     bool     _turretPulsing     = false;
     uint32_t _turretPulseStart  = 0;
