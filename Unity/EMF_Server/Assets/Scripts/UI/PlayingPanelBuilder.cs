@@ -36,7 +36,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v20";
+    const string BUILT_SENTINEL = "__ppb_v21";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -320,6 +320,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_joyStart    = MakeSettingsRow(gameSettingsContent,    "Start Speed");
         var f_joyFull     = MakeSettingsRow(gameSettingsContent,    "Full At");
         var f_joyCurve    = MakeSettingsRow(gameSettingsContent,    "Curve");
+        var f_joyAxisSnap = MakeSettingsRow(gameSettingsContent,    "Axis Snap");
         MakeSettingsSection(gameSettingsContent, "VIDEO");
         var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
         var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
@@ -395,6 +396,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "joyStartField",      f_joyStart);
         Wire(psp, "joyFullField",       f_joyFull);
         Wire(psp, "joyCurveField",      f_joyCurve);
+        Wire(psp, "joyAxisSnapField",   f_joyAxisSnap);
         Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
         Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
         Wire(psp, "videoFpsField",     f_videoFps);

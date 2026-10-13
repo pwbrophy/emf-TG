@@ -135,6 +135,8 @@ public class GameSettings : MonoBehaviour
     public float JoystickFullAt = 0.90f;
     [Tooltip("Curve exponent between start and full speed. 1 = straight line; higher = more of the throw spent at low speeds.")]
     public float JoystickCurve = 2.0f;
+    [Tooltip("Half-width (fraction of the throw) of the cross along the stick's axes. Inside the vertical arm the tank drives dead straight; inside the horizontal arm it spins on the spot. 0 = off.")]
+    public float JoystickAxisSnap = 0.15f;
 
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
@@ -222,6 +224,7 @@ public class GameSettings : MonoBehaviour
                 joystickStartSpeed       = JoystickStartSpeed,
                 joystickFullAt           = JoystickFullAt,
                 joystickCurve            = JoystickCurve,
+                joystickAxisSnap         = JoystickAxisSnap,
                 explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
@@ -281,6 +284,7 @@ public class GameSettings : MonoBehaviour
             if (data.joystickStartSpeed       >= 0) JoystickStartSpeed       = data.joystickStartSpeed;
             if (data.joystickFullAt           > 0) JoystickFullAt           = data.joystickFullAt;
             if (data.joystickCurve            > 0) JoystickCurve            = data.joystickCurve;
+            if (data.joystickAxisSnap         >= 0) JoystickAxisSnap         = data.joystickAxisSnap;
             if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
@@ -336,6 +340,7 @@ public class GameSettings : MonoBehaviour
         public float joystickStartSpeed = -1f;   // -1 = not set → keep default 0.30
         public float joystickFullAt;             // 0 = not set → keep default 0.90
         public float joystickCurve;              // 0 = not set → keep default 2.0
+        public float joystickAxisSnap = -1f;     // -1 = not set → keep default 0.15
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;

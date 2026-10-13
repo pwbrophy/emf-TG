@@ -38,6 +38,7 @@ public class GameSettingsPanel : MonoBehaviour
     private TMP_InputField _joyStartField;
     private TMP_InputField _joyFullField;
     private TMP_InputField _joyCurveField;
+    private TMP_InputField _joyAxisSnapField;
 
     // Video controls
     private Button          _videoResButton;
@@ -129,6 +130,7 @@ public class GameSettingsPanel : MonoBehaviour
         _joyStartField    = AddInputRow("Start Speed:");
         _joyFullField     = AddInputRow("Full At:");
         _joyCurveField    = AddInputRow("Curve:");
+        _joyAxisSnapField = AddInputRow("Axis Snap:");
 
         AddSectionLabel("── Video ──");
         var resRow = AddButtonRow("Resolution:");
@@ -168,6 +170,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_joyStartField)      _joyStartField.SetTextWithoutNotify(_settings.JoystickStartSpeed.ToString("F2"));
         if (_joyFullField)       _joyFullField.SetTextWithoutNotify(_settings.JoystickFullAt.ToString("F2"));
         if (_joyCurveField)      _joyCurveField.SetTextWithoutNotify(_settings.JoystickCurve.ToString("F1"));
+        if (_joyAxisSnapField)   _joyAxisSnapField.SetTextWithoutNotify(_settings.JoystickAxisSnap.ToString("F2"));
         if (_videoResLabel)      _videoResLabel.text = ResName(_settings.VideoFrameSize);
         if (_videoFpsField)      _videoFpsField.SetTextWithoutNotify(_settings.VideoFps.ToString());
         if (_videoQualityField)  _videoQualityField.SetTextWithoutNotify(_settings.VideoJpegQuality.ToString());
@@ -205,6 +208,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_joyStartField)      _joyStartField.onValueChanged.AddListener(OnJoyStart);
         if (_joyFullField)       _joyFullField.onValueChanged.AddListener(OnJoyFull);
         if (_joyCurveField)      _joyCurveField.onValueChanged.AddListener(OnJoyCurve);
+        if (_joyAxisSnapField)   _joyAxisSnapField.onValueChanged.AddListener(OnJoyAxisSnap);
         if (_videoResButton)     _videoResButton.onClick.AddListener(OnVideoResCycle);
         if (_videoFpsField)      _videoFpsField.onValueChanged.AddListener(OnVideoFps);
         if (_videoQualityField)  _videoQualityField.onValueChanged.AddListener(OnVideoQuality);
@@ -238,6 +242,7 @@ public class GameSettingsPanel : MonoBehaviour
         if (_joyStartField)      _joyStartField.onValueChanged.RemoveListener(OnJoyStart);
         if (_joyFullField)       _joyFullField.onValueChanged.RemoveListener(OnJoyFull);
         if (_joyCurveField)      _joyCurveField.onValueChanged.RemoveListener(OnJoyCurve);
+        if (_joyAxisSnapField)   _joyAxisSnapField.onValueChanged.RemoveListener(OnJoyAxisSnap);
         if (_videoResButton)     _videoResButton.onClick.RemoveListener(OnVideoResCycle);
         if (_videoFpsField)      _videoFpsField.onValueChanged.RemoveListener(OnVideoFps);
         if (_videoQualityField)  _videoQualityField.onValueChanged.RemoveListener(OnVideoQuality);
@@ -271,6 +276,7 @@ public class GameSettingsPanel : MonoBehaviour
     void OnJoyStart(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0f && n <= 1f) { _settings.JoystickStartSpeed = n; SaveJoystick(); } }
     void OnJoyFull(string v)       { if (_settings != null && float.TryParse(v, out float n) && n > 0.5f && n <= 1f) { _settings.JoystickFullAt = n; SaveJoystick(); } }
     void OnJoyCurve(string v)      { if (_settings != null && float.TryParse(v, out float n) && n >= 0.2f && n <= 5f) { _settings.JoystickCurve = n; SaveJoystick(); } }
+    void OnJoyAxisSnap(string v)   { if (_settings != null && float.TryParse(v, out float n) && n >= 0f && n <= 0.5f) { _settings.JoystickAxisSnap = n; SaveJoystick(); } }
     void SaveJoystick()            { _settings.SaveToDisk(); ServiceLocator.PlayerServer?.BroadcastJoystickSettings(); }
     void SavePhysics()             { _settings.SaveToDisk(); ServiceLocator.RobotServer?.BroadcastPhysicsToAll(_settings); }
 

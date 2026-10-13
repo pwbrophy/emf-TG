@@ -2147,7 +2147,7 @@ public class PlayerWebSocketServer : MonoBehaviour
     }
 
     // Joystick response curve for the phones (deadzone, start speed, full-speed
-    // point, curve exponent).  Sent with every game_started and on any change.
+    // point, curve exponent, axis snap).  Sent with every game_started and on any change.
     public void BroadcastJoystickSettings()
     {
         var gs = ServiceLocator.GameSettings;
@@ -2157,7 +2157,8 @@ public class PlayerWebSocketServer : MonoBehaviour
             ",\"deadzone\":"   + gs.JoystickDeadzone.ToString("F3", ci)   +
             ",\"startSpeed\":" + gs.JoystickStartSpeed.ToString("F3", ci) +
             ",\"fullAt\":"     + gs.JoystickFullAt.ToString("F3", ci)     +
-            ",\"curve\":"      + gs.JoystickCurve.ToString("F3", ci)      + "}";
+            ",\"curve\":"      + gs.JoystickCurve.ToString("F3", ci)      +
+            ",\"axisSnap\":"   + gs.JoystickAxisSnap.ToString("F3", ci)   + "}";
         BroadcastRaw(json);
     }
 
