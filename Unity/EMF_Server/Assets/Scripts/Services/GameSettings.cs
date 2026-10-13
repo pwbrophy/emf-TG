@@ -137,6 +137,8 @@ public class GameSettings : MonoBehaviour
     public float JoystickCurve = 2.0f;
     [Tooltip("Half-width (fraction of the throw) of the cross along the stick's axes. Inside the vertical arm the tank drives dead straight; inside the horizontal arm it spins on the spot. 0 = off.")]
     public float JoystickAxisSnap = 0.15f;
+    [Tooltip("How strongly sideways stick turns the tank (touch, keyboard and gamepad). 0.5 = a full sideways push spins on the spot at half speed; 1.0 = full speed.")]
+    public float JoystickTurnSpeed = 0.5f;
 
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
@@ -225,6 +227,7 @@ public class GameSettings : MonoBehaviour
                 joystickFullAt           = JoystickFullAt,
                 joystickCurve            = JoystickCurve,
                 joystickAxisSnap         = JoystickAxisSnap,
+                joystickTurnSpeed        = JoystickTurnSpeed,
                 explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
@@ -285,6 +288,7 @@ public class GameSettings : MonoBehaviour
             if (data.joystickFullAt           > 0) JoystickFullAt           = data.joystickFullAt;
             if (data.joystickCurve            > 0) JoystickCurve            = data.joystickCurve;
             if (data.joystickAxisSnap         >= 0) JoystickAxisSnap         = data.joystickAxisSnap;
+            if (data.joystickTurnSpeed        > 0) JoystickTurnSpeed        = data.joystickTurnSpeed;
             if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
@@ -341,6 +345,7 @@ public class GameSettings : MonoBehaviour
         public float joystickFullAt;             // 0 = not set → keep default 0.90
         public float joystickCurve;              // 0 = not set → keep default 2.0
         public float joystickAxisSnap = -1f;     // -1 = not set → keep default 0.15
+        public float joystickTurnSpeed;          // 0 = not set → keep default 0.5
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;

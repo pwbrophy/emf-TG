@@ -321,6 +321,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_joyFull     = MakeSettingsRow(gameSettingsContent,    "Full At");
         var f_joyCurve    = MakeSettingsRow(gameSettingsContent,    "Curve");
         var f_joyAxisSnap = MakeSettingsRow(gameSettingsContent,    "Axis Snap");
+        var f_joyTurnSpd  = MakeSettingsRow(gameSettingsContent,    "Turn Speed");
         MakeSettingsSection(gameSettingsContent, "VIDEO");
         var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
         var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
@@ -397,6 +398,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "joyFullField",       f_joyFull);
         Wire(psp, "joyCurveField",      f_joyCurve);
         Wire(psp, "joyAxisSnapField",   f_joyAxisSnap);
+        Wire(psp, "joyTurnSpeedField",  f_joyTurnSpd);
         Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
         Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
         Wire(psp, "videoFpsField",     f_videoFps);

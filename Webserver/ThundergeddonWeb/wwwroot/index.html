@@ -1503,6 +1503,7 @@ let JOY_FULL     = 0.90;
 let JOY_EXPO     = 2.0;
 let JOY_MIN_OUT  = 0.30;
 let JOY_AXIS_SNAP = 0.15;  // half-width of the axis cross (fraction of the throw)
+let TURN_SPEED    = 0.5;   // steering mix: tracks = forward ± turn × TURN_SPEED (touch, keyboard, gamepad)
 function joyCurve(r) {
   if (r <= JOY_DEADZONE) return 0;
   const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
@@ -2113,11 +2114,12 @@ function buildConnection() {
     if (s.fullAt > s.deadzone) { JOY_DEADZONE = s.deadzone; JOY_FULL = s.fullAt; }
     JOY_MIN_OUT = s.startSpeed;
     JOY_EXPO    = s.curve;
+    if (typeof s.turnSpeed === 'number' && s.turnSpeed > 0) TURN_SPEED = Math.min(1, s.turnSpeed);
     if (typeof s.axisSnap === 'number') {
       JOY_AXIS_SNAP = Math.max(0, Math.min(0.5, s.axisSnap));
       document.getElementById('joystick-base').style.setProperty('--axis-snap', JOY_AXIS_SNAP);
     }
-    dbg('SignalR: JoystickSettings dz=' + s.deadzone + ' start=' + s.startSpeed + ' full=' + s.fullAt + ' curve=' + s.curve + ' axisSnap=' + s.axisSnap);
+    dbg('SignalR: JoystickSettings dz=' + s.deadzone + ' start=' + s.startSpeed + ' full=' + s.fullAt + ' curve=' + s.curve + ' axisSnap=' + s.axisSnap + ' turn=' + s.turnSpeed);
   });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
   conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
@@ -3256,7 +3258,7 @@ function updateJoy(cx, cy) {
   const nx = m > 0 ? ux / m * speed : 0;
   const ny = m > 0 ? uy / m * speed : 0;
 
-  const tx = nx * 0.50;
+  const tx = nx * TURN_SPEED;
   joyL = clamp(ny + tx, -1, 1);
   joyR = clamp(ny - tx, -1, 1);
 
@@ -3902,8 +3904,8 @@ function _updateKbDrive() {
     }
   } else {
     joystickActive = true;
-    joyL = clamp(fwd + turn * 0.5, -1, 1);
-    joyR = clamp(fwd - turn * 0.5, -1, 1);
+    joyL = clamp(fwd + turn * TURN_SPEED, -1, 1);
+    joyR = clamp(fwd - turn * TURN_SPEED, -1, 1);
   }
 }
 
@@ -3989,8 +3991,8 @@ function _gpPoll(now) {
     if (sx !== 0 || sy !== 0) {
       const fwd = -sy; // stick up = forward
       const trn =  sx;
-      joyL = clamp(fwd + trn * 0.5, -1, 1);
-      joyR = clamp(fwd - trn * 0.5, -1, 1);
+      joyL = clamp(fwd + trn * TURN_SPEED, -1, 1);
+      joyR = clamp(fwd - trn * TURN_SPEED, -1, 1);
       joystickActive = true;
     } else if (!_anyKbDriveHeld() && !_joyPointerHeld && joystickActive) {
       // Stick centred, no keyboard drive, no pointer held → stop
@@ -4058,7 +4060,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v39</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v40</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

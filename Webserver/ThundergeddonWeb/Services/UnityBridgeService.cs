@@ -220,6 +220,7 @@ public class UnityBridgeService : BackgroundService
                         fullAt     = GetFloat(doc.RootElement, "fullAt",     0.90f),
                         curve      = GetFloat(doc.RootElement, "curve",      2.0f),
                         axisSnap   = GetFloat(doc.RootElement, "axisSnap",   0.15f),
+                        turnSpeed  = GetFloat(doc.RootElement, "turnSpeed",  0.5f),
                     }));
                     break;
 
