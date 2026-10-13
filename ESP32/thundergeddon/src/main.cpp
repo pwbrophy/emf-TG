@@ -1102,9 +1102,9 @@ static void handleWsText(const String& s)
                                (uint16_t)constrain(tkick, 0, 200), tbrake != 0,
                                (uint16_t)constrain(tlash, 0, 300));
         // Drive (track) low-speed tuning — separate motors, separate values.
-        float dmin   = doc["drive_min"]         | 0.4f;
-        int   dpulse = doc["drive_pulse_ms"]    | 40;
-        int   dkick  = doc["drive_kick_ms"]     | 20;
+        float dmin   = doc["drive_min"]         | 0.8f;
+        int   dpulse = doc["drive_pulse_ms"]    | 20;
+        int   dkick  = doc["drive_kick_ms"]     | 120;
         int   dbrake = doc["drive_brake"]       | 1;
         int   dlash  = doc["drive_backlash_ms"] | 0;
         motors.setDriveTuning(dmin, (uint16_t)constrain(dpulse, 10, 1000),

@@ -216,11 +216,11 @@ public class UnityBridgeService : BackgroundService
                     Post(_hub.Clients.All.SendAsync("JoystickSettings", new
                     {
                         deadzone   = GetFloat(doc.RootElement, "deadzone",   0.08f),
-                        startSpeed = GetFloat(doc.RootElement, "startSpeed", 0.30f),
-                        fullAt     = GetFloat(doc.RootElement, "fullAt",     0.90f),
+                        startSpeed = GetFloat(doc.RootElement, "startSpeed", 0.40f),
+                        fullAt     = GetFloat(doc.RootElement, "fullAt",     1.0f),
                         curve      = GetFloat(doc.RootElement, "curve",      2.0f),
                         axisSnap   = GetFloat(doc.RootElement, "axisSnap",   0.15f),
-                        turnSpeed  = GetFloat(doc.RootElement, "turnSpeed",  0.5f),
+                        turnSpeed  = GetFloat(doc.RootElement, "turnSpeed",  0.7f),
                     }));
                     break;
 

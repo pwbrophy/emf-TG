@@ -1499,11 +1499,11 @@ let lastDriveSend = 0;
 //    and less to the top end.
 // Defaults below; the live values come from the server (JoystickSettings).
 let JOY_DEADZONE = 0.08;
-let JOY_FULL     = 0.90;
+let JOY_FULL     = 1.0;
 let JOY_EXPO     = 2.0;
-let JOY_MIN_OUT  = 0.30;
+let JOY_MIN_OUT  = 0.40;
 let JOY_AXIS_SNAP = 0.15;  // half-width of the axis cross (fraction of the throw)
-let TURN_SPEED    = 0.5;   // steering mix: tracks = forward ± turn × TURN_SPEED (touch, keyboard, gamepad)
+let TURN_SPEED    = 0.7;   // steering mix: tracks = forward ± turn × TURN_SPEED (touch, keyboard, gamepad)
 function joyCurve(r) {
   if (r <= JOY_DEADZONE) return 0;
   const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
@@ -4060,7 +4060,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v40</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v41</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--

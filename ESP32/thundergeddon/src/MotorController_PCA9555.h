@@ -388,8 +388,9 @@ private:
     float _turretAccel = 0.0f;
     float _turretDecel = 0.0f;
 
-    // Low-speed tuning.  Turret defaults are the play-tested values; drive
-    // defaults are a starting point (pulse a little longer for the heavier hull).
-    MotorTuning _turretTuning { 0.4f, 20, 20, 110, true, false };
-    MotorTuning _driveTuning  { 0.4f, 40, 20,   0, true, true  };
+    // Low-speed tuning — play-tested defaults.  The drive min speed is high
+    // because spinning on the spot (tracks scrubbing sideways) bogs down at low
+    // continuous power; full-power pulses below it break the scrub reliably.
+    MotorTuning _turretTuning { 0.4f, 20,  20, 110, true, false };
+    MotorTuning _driveTuning  { 0.8f, 20, 120,   0, true, true  };
 };
