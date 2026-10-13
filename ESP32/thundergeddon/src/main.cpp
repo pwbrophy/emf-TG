@@ -1097,10 +1097,12 @@ static void handleWsText(const String& s)
         int   tpulse = doc["turret_pulse_ms"] | 100;
         int   tkick  = doc["turret_kick_ms"]  | 0;
         int   tbrake = doc["turret_brake"]    | 1;
+        int   tlash  = doc["turret_backlash_ms"] | 0;
         motors.setTurretTuning(tmin, (uint16_t)constrain(tpulse, 10, 1000),
-                               (uint16_t)constrain(tkick, 0, 200), tbrake != 0);
-        Serial.printf("[PHYS] drive=%.2f/%.2f turret=%.2f/%.2f min=%.2f pulse=%dms kick=%dms brake=%d\n",
-                      da, dd, ta, td, tmin, tpulse, tkick, tbrake);
+                               (uint16_t)constrain(tkick, 0, 200), tbrake != 0,
+                               (uint16_t)constrain(tlash, 0, 300));
+        Serial.printf("[PHYS] drive=%.2f/%.2f turret=%.2f/%.2f min=%.2f pulse=%dms kick=%dms brake=%d backlash=%dms\n",
+                      da, dd, ta, td, tmin, tpulse, tkick, tbrake, tlash);
         return;
     }
 

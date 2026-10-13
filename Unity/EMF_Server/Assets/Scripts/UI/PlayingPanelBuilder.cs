@@ -36,7 +36,7 @@ public class PlayingPanelBuilder : MonoBehaviour
     TMP_FontAsset _font;
 
     // Bump this string whenever the layout changes to force a one-time edit-mode rebuild.
-    const string BUILT_SENTINEL = "__ppb_v17";
+    const string BUILT_SENTINEL = "__ppb_v18";
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -305,6 +305,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         var f_turretPulse = MakeSettingsRow(gameSettingsContent,    "Pulse ms");
         var f_turretKick  = MakeSettingsRow(gameSettingsContent,    "Kick ms");
         var f_turretBrake = MakeSettingsToggle(gameSettingsContent, "Turret Brake");
+        var f_turretLash  = MakeSettingsRow(gameSettingsContent,    "Backlash ms");
         var f_videoRes     = MakeSettingsButton(gameSettingsContent, "Resolution");
         var f_videoFps     = MakeSettingsRow(gameSettingsContent,    "FPS Cap");
         var f_videoQuality = MakeSettingsRow(gameSettingsContent,    "JPEG Qual");
@@ -369,6 +370,7 @@ public class PlayingPanelBuilder : MonoBehaviour
         Wire(psp, "turretPulseField", f_turretPulse);
         Wire(psp, "turretKickField",  f_turretKick);
         Wire(psp, "turretBrakeToggle", f_turretBrake);
+        Wire(psp, "turretBacklashField", f_turretLash);
         Wire(psp, "videoResButton",    f_videoRes.GetComponent<Button>());
         Wire(psp, "videoResLabel",     f_videoRes.GetComponentInChildren<TextMeshProUGUI>());
         Wire(psp, "videoFpsField",     f_videoFps);

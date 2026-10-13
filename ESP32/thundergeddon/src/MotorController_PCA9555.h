@@ -127,12 +127,16 @@ public:
     //   pulsePeriodMs length of one pulse window
     //   kickMs        full-power burst at the start of every move (beats stiction; 0 = off)
     //   brake         brake (IN1=IN2=1) instead of coasting when stopped / between pulses
-    void setTurretTuning(float minSpeed, uint16_t pulsePeriodMs, uint16_t kickMs, bool brake)
+    //   backlashMs    extra full-power burst when a move goes the opposite way to the
+    //                 previous one, to take up gear backlash (0 = off)
+    void setTurretTuning(float minSpeed, uint16_t pulsePeriodMs, uint16_t kickMs, bool brake,
+                         uint16_t backlashMs)
     {
         _turretMinSpeed    = fmaxf(0.0f, fminf(1.0f, minSpeed));
         _turretPulsePeriod = pulsePeriodMs < 10 ? 10 : pulsePeriodMs;
         _turretKickMs      = kickMs;
         _turretBrake       = brake;
+        _turretBacklashMs  = backlashMs;
     }
 
     // Set left and right track speeds.  Values in [-1..1].
@@ -237,10 +241,16 @@ private:
         }
 
         // Kick-start: full power for the first kickMs of every move from rest
-        // (including each pulse) or direction reversal.
+        // (including each pulse) or direction reversal.  Backlash: when the move
+        // is the opposite way to the last one (remembered across stops - the
+        // gears stay where they were), add backlashMs to take up the slack.
         int8_t sign = (level > 0) - (level < 0);
-        if (sign != 0 && sign != _turretPrevSign && _turretKickMs > 0)
-            _turretKickUntil = now + _turretKickMs;
+        if (sign != 0 && sign != _turretPrevSign) {
+            uint32_t burst = _turretKickMs;
+            if (_turretLastDir != 0 && sign != _turretLastDir) burst += _turretBacklashMs;
+            if (burst > 0) _turretKickUntil = now + burst;
+            _turretLastDir = sign;
+        }
         _turretPrevSign = sign;
         if (sign != 0 && (int32_t)(_turretKickUntil - now) > 0)
             level = sign * (int8_t)PWM_STEPS;
@@ -308,6 +318,8 @@ private:
     float    _turretMinSpeed    = 0.4f;
     uint16_t _turretPulsePeriod = 100;
     uint16_t _turretKickMs      = 0;
+    uint16_t _turretBacklashMs  = 0;
+    int8_t   _turretLastDir     = 0;  // direction of the last turret move; kept across stops
     bool     _turretBrake       = true;
     bool     _turretPulsing     = false;
     uint32_t _turretPulseStart  = 0;

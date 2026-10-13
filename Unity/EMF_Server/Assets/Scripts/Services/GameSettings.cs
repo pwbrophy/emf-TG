@@ -111,6 +111,8 @@ public class GameSettings : MonoBehaviour
     public int TurretKickMs = 0;
     [Tooltip("Brake the turret motor when stopped / between pulses instead of coasting.")]
     public bool TurretBrake = true;
+    [Tooltip("Extra full-power burst (ms) when the turret reverses direction, to take up gear backlash. 0 = off.")]
+    public int TurretBacklashMs = 0;
 
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
@@ -188,6 +190,7 @@ public class GameSettings : MonoBehaviour
                 turretPulseMs            = TurretPulseMs,
                 turretKickMs             = TurretKickMs,
                 turretBrake              = TurretBrake ? 1 : 0,
+                turretBacklashMs         = TurretBacklashMs,
                 explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
@@ -237,6 +240,7 @@ public class GameSettings : MonoBehaviour
             if (data.turretPulseMs            > 0) TurretPulseMs            = data.turretPulseMs;
             if (data.turretKickMs             >= 0) TurretKickMs             = data.turretKickMs;
             if (data.turretBrake              >= 0) TurretBrake              = data.turretBrake != 0;
+            if (data.turretBacklashMs         >= 0) TurretBacklashMs         = data.turretBacklashMs;
             if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
@@ -282,6 +286,7 @@ public class GameSettings : MonoBehaviour
         public int   turretPulseMs;              // 0 = not set → keep default 100
         public int   turretKickMs = -1;          // -1 = not set → keep default 0
         public int   turretBrake = -1;           // -1 = not set → keep default true
+        public int   turretBacklashMs = -1;      // -1 = not set → keep default 0
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;

@@ -785,7 +785,8 @@ public class RobotWebSocketServer : MonoBehaviour
         string json = $"{{\"cmd\":\"set_physics\",\"drive_accel\":{da},\"drive_decel\":{dd}," +
                       $"\"turret_accel\":{ta},\"turret_decel\":{td}," +
                       $"\"turret_min\":{tmin},\"turret_pulse_ms\":{gs.TurretPulseMs}," +
-                      $"\"turret_kick_ms\":{gs.TurretKickMs},\"turret_brake\":{(gs.TurretBrake ? 1 : 0)}}}";
+                      $"\"turret_kick_ms\":{gs.TurretKickMs},\"turret_brake\":{(gs.TurretBrake ? 1 : 0)}," +
+                      $"\"turret_backlash_ms\":{gs.TurretBacklashMs}}}";
         return SendJsonToRobot(robotId, json);
     }
 
