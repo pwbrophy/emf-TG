@@ -83,6 +83,8 @@ public:
             _leftLevel   = 0;
             _rightLevel  = 0;
             _turretLevel = 0;
+            _turretPulsing  = false;
+            _turretPrevSign = 0;
             // Clear all motor bits and assert SLEEP
             _port1 &= ~(BIT_L_IN1 | BIT_L_IN2 |
                         BIT_R_IN1 | BIT_R_IN2 |
@@ -114,6 +116,23 @@ public:
         _driveDecel  = driveDecel;
         _turretAccel = turretAccel;
         _turretDecel = turretDecel;
+    }
+
+    // Turret low-speed tuning.  The soft PWM only has PWM_STEPS levels and the
+    // turret stalls below ~3/8 duty, so speeds under 'minSpeed' are produced by
+    // pulsing instead: each 'pulsePeriodMs' window runs at minSpeed for a
+    // fraction |v|/minSpeed of the window, then stops.  The turret then moves in
+    // small even ticks at a lower average speed than it can hold continuously.
+    //   minSpeed      lowest speed that reliably turns continuously (0 = no pulsing)
+    //   pulsePeriodMs length of one pulse window
+    //   kickMs        full-power burst at the start of every move (beats stiction; 0 = off)
+    //   brake         brake (IN1=IN2=1) instead of coasting when stopped / between pulses
+    void setTurretTuning(float minSpeed, uint16_t pulsePeriodMs, uint16_t kickMs, bool brake)
+    {
+        _turretMinSpeed    = fmaxf(0.0f, fminf(1.0f, minSpeed));
+        _turretPulsePeriod = pulsePeriodMs < 10 ? 10 : pulsePeriodMs;
+        _turretKickMs      = kickMs;
+        _turretBrake       = brake;
     }
 
     // Set left and right track speeds.  Values in [-1..1].
@@ -151,7 +170,7 @@ public:
         _stepChannel(_turretCurrent, _turretTarget, _turretAccel, _turretDecel);
         _leftLevel   = _toLevel(_leftCurrent);
         _rightLevel  = _toLevel(_rightCurrent);
-        _turretLevel = _toLevel(_turretCurrent);
+        _turretLevel = _turretLevelNow();
 
         if (!_enabled) return; // nothing to do; port already zeroed by enable(false)
 
@@ -161,7 +180,10 @@ public:
         // left drive signal goes to the turret connector and vice versa.
         bits |= _motorBits(_leftLevel,   BIT_T_IN1, BIT_T_IN2);
         bits |= _motorBits(_rightLevel,  BIT_R_IN1, BIT_R_IN2);
-        bits |= _motorBits(_turretLevel, BIT_L_IN1, BIT_L_IN2);
+        if (_turretLevel == 0 && _turretBrake)
+            bits |= BIT_L_IN1 | BIT_L_IN2;      // brake: stop dead, no drift
+        else
+            bits |= _motorBits(_turretLevel, BIT_L_IN1, BIT_L_IN2);
 
         if (bits != _port1) {
             _port1 = bits;
@@ -186,6 +208,44 @@ private:
     {
         v = fmaxf(-1.0f, fminf(1.0f, v));
         return (int8_t)roundf(v * PWM_STEPS);
+    }
+
+    // Turret PWM level for this tick, applying pulse mode and kick-start
+    // (see setTurretTuning).  Timed with millis() so a slow loop() iteration
+    // doesn't stretch the pulses.
+    int8_t _turretLevelNow()
+    {
+        const float    v   = _turretCurrent;
+        const float    mag = fabsf(v);
+        const uint32_t now = millis();
+
+        int8_t level;
+        if (mag == 0.0f) {
+            level = 0;
+            _turretPulsing = false;
+        } else if (mag < _turretMinSpeed) {
+            if (!_turretPulsing) { _turretPulsing = true; _turretPulseStart = now; }
+            uint32_t phase = (now - _turretPulseStart) % _turretPulsePeriod;
+            uint32_t onMs  = (uint32_t)lroundf(_turretPulsePeriod * mag / _turretMinSpeed);
+            if (onMs < 1) onMs = 1;
+            int8_t pulseLevel = _toLevel(_turretMinSpeed);
+            if (pulseLevel < 1) pulseLevel = 1;
+            level = (phase < onMs) ? (v > 0 ? pulseLevel : -pulseLevel) : 0;
+        } else {
+            level = _toLevel(v);
+            _turretPulsing = false;
+        }
+
+        // Kick-start: full power for the first kickMs of every move from rest
+        // (including each pulse) or direction reversal.
+        int8_t sign = (level > 0) - (level < 0);
+        if (sign != 0 && sign != _turretPrevSign && _turretKickMs > 0)
+            _turretKickUntil = now + _turretKickMs;
+        _turretPrevSign = sign;
+        if (sign != 0 && (int32_t)(_turretKickUntil - now) > 0)
+            level = sign * (int8_t)PWM_STEPS;
+
+        return level;
     }
 
     // Advance 'cur' one tick (1 ms) toward 'tgt' using the appropriate ramp rate.
@@ -244,4 +304,13 @@ private:
     float _driveDecel  = 0.0f;
     float _turretAccel = 0.0f;
     float _turretDecel = 0.0f;
+    // Turret low-speed tuning (setTurretTuning).
+    float    _turretMinSpeed    = 0.4f;
+    uint16_t _turretPulsePeriod = 100;
+    uint16_t _turretKickMs      = 0;
+    bool     _turretBrake       = true;
+    bool     _turretPulsing     = false;
+    uint32_t _turretPulseStart  = 0;
+    uint32_t _turretKickUntil   = 0;
+    int8_t   _turretPrevSign    = 0;
 };

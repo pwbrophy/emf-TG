@@ -437,8 +437,7 @@ public class RobotWebSocketServer : MonoBehaviour
             var gs = ServiceLocator.GameSettings;
             if (gs != null)
             {
-                SendPhysics(id, gs.DriveAcceleration, gs.DriveDeceleration,
-                            gs.TurretAcceleration, gs.TurretDeceleration);
+                SendPhysics(id, gs);
                 SendBuzzerEnabled(id, gs.BuzzerEnabled);
                 SendVideoConfig(id, gs.VideoFps, gs.VideoFrameSize, gs.VideoJpegQuality);
             }
@@ -775,16 +774,18 @@ public class RobotWebSocketServer : MonoBehaviour
         return SendJsonToRobot(robotId, json);
     }
 
-    public bool SendPhysics(string robotId, float driveAccel, float driveDecel,
-                            float turretAccel, float turretDecel)
+    public bool SendPhysics(string robotId, GameSettings gs)
     {
-        if (string.IsNullOrEmpty(robotId)) return false;
-        string da = driveAccel.ToString("F3",  CultureInfo.InvariantCulture);
-        string dd = driveDecel.ToString("F3",  CultureInfo.InvariantCulture);
-        string ta = turretAccel.ToString("F3", CultureInfo.InvariantCulture);
-        string td = turretDecel.ToString("F3", CultureInfo.InvariantCulture);
+        if (string.IsNullOrEmpty(robotId) || gs == null) return false;
+        string da   = gs.DriveAcceleration.ToString("F3",  CultureInfo.InvariantCulture);
+        string dd   = gs.DriveDeceleration.ToString("F3",  CultureInfo.InvariantCulture);
+        string ta   = gs.TurretAcceleration.ToString("F3", CultureInfo.InvariantCulture);
+        string td   = gs.TurretDeceleration.ToString("F3", CultureInfo.InvariantCulture);
+        string tmin = gs.TurretMinSpeed.ToString("F3",     CultureInfo.InvariantCulture);
         string json = $"{{\"cmd\":\"set_physics\",\"drive_accel\":{da},\"drive_decel\":{dd}," +
-                      $"\"turret_accel\":{ta},\"turret_decel\":{td}}}";
+                      $"\"turret_accel\":{ta},\"turret_decel\":{td}," +
+                      $"\"turret_min\":{tmin},\"turret_pulse_ms\":{gs.TurretPulseMs}," +
+                      $"\"turret_kick_ms\":{gs.TurretKickMs},\"turret_brake\":{(gs.TurretBrake ? 1 : 0)}}}";
         return SendJsonToRobot(robotId, json);
     }
 
@@ -792,8 +793,7 @@ public class RobotWebSocketServer : MonoBehaviour
     {
         if (settings == null) return;
         foreach (var robotId in _sessionByRobot.Keys.ToList())
-            SendPhysics(robotId, settings.DriveAcceleration, settings.DriveDeceleration,
-                        settings.TurretAcceleration, settings.TurretDeceleration);
+            SendPhysics(robotId, settings);
     }
 
     public bool SendBuzzerEnabled(string robotId, bool enabled)

@@ -102,6 +102,16 @@ public class GameSettings : MonoBehaviour
     [Tooltip("Seconds to coast to a stop after turret input is released. 0 = instant stop.")]
     public float TurretDeceleration = 0f;
 
+    [Header("Turret Low-Speed Tuning")]
+    [Tooltip("Lowest turret speed the motor holds continuously without stalling. Speeds below this are made by pulsing at this speed, so Slow Turret can go lower than this. 0 = no pulsing.")]
+    public float TurretMinSpeed = 0.4f;
+    [Tooltip("Length (ms) of one turret pulse window when pulsing. Shorter = smoother, longer = bigger discrete ticks.")]
+    public int TurretPulseMs = 100;
+    [Tooltip("Full-power burst (ms) at the start of every turret move/pulse to break stiction. 0 = off.")]
+    public int TurretKickMs = 0;
+    [Tooltip("Brake the turret motor when stopped / between pulses instead of coasting.")]
+    public bool TurretBrake = true;
+
     [Header("Two-Player Mode")]
     [Tooltip("Allow a second player to join a tank as gunner in the lobby. Driver controls drive; gunner controls turret and fire.")]
     public bool TwoPlayerModeEnabled = false;
@@ -174,6 +184,10 @@ public class GameSettings : MonoBehaviour
                 driveDeceleration        = DriveDeceleration,
                 turretAcceleration       = TurretAcceleration,
                 turretDeceleration       = TurretDeceleration,
+                turretMinSpeed           = TurretMinSpeed,
+                turretPulseMs            = TurretPulseMs,
+                turretKickMs             = TurretKickMs,
+                turretBrake              = TurretBrake ? 1 : 0,
                 explosionDurationSeconds = ExplosionDurationSeconds,
                 invulnerabilitySeconds   = InvulnerabilitySeconds,
                 fireCooldownSeconds      = FireCooldownSeconds,
@@ -219,6 +233,10 @@ public class GameSettings : MonoBehaviour
             DriveDeceleration  = data.driveDeceleration;
             TurretAcceleration = data.turretAcceleration;
             TurretDeceleration = data.turretDeceleration;
+            if (data.turretMinSpeed           >= 0) TurretMinSpeed           = data.turretMinSpeed;
+            if (data.turretPulseMs            > 0) TurretPulseMs            = data.turretPulseMs;
+            if (data.turretKickMs             >= 0) TurretKickMs             = data.turretKickMs;
+            if (data.turretBrake              >= 0) TurretBrake              = data.turretBrake != 0;
             if (data.explosionDurationSeconds > 0) ExplosionDurationSeconds = data.explosionDurationSeconds;
             if (data.invulnerabilitySeconds   > 0) InvulnerabilitySeconds   = data.invulnerabilitySeconds;
             if (data.fireCooldownSeconds      > 0) FireCooldownSeconds      = data.fireCooldownSeconds;
@@ -260,6 +278,10 @@ public class GameSettings : MonoBehaviour
         public float driveDeceleration;
         public float turretAcceleration;
         public float turretDeceleration;
+        public float turretMinSpeed = -1f;       // -1 = not set (old save) → keep default 0.4
+        public int   turretPulseMs;              // 0 = not set → keep default 100
+        public int   turretKickMs = -1;          // -1 = not set → keep default 0
+        public int   turretBrake = -1;           // -1 = not set → keep default true
         public float explosionDurationSeconds;
         public float invulnerabilitySeconds;
         public float fireCooldownSeconds;
