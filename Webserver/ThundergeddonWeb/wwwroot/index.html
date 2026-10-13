@@ -464,6 +464,32 @@
       pointer-events: all;
       touch-action: none;
     }
+    /* Axis-snap cross: the bands along the stick's axes where it drives dead
+       straight / spins on the spot.  Arm half-width = --axis-snap x the thumb's
+       travel radius, which is 40.05% of the base width ((58.93 - 11.73) / 2 / 58.93),
+       so full arm width = axis-snap x 80.1% of the base.  Clipped to the circle. */
+    #joystick-cross {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #joystick-cross::before, #joystick-cross::after {
+      content: '';
+      position: absolute;
+      background: rgba(255,255,255,0.13);
+    }
+    #joystick-cross::before {   /* vertical arm: straight forwards / backwards */
+      top: 0; bottom: 0; left: 50%;
+      width: calc(var(--axis-snap, 0.15) * 80.1%);
+      transform: translateX(-50%);
+    }
+    #joystick-cross::after {    /* horizontal arm: turn on the spot */
+      left: 0; right: 0; top: 50%;
+      height: calc(var(--axis-snap, 0.15) * 80.1%);
+      transform: translateY(-50%);
+    }
     #joystick-thumb {
       position: absolute;
       width: 11.73vmin;
@@ -1296,6 +1322,7 @@
   <div id="controls">
     <!-- Joystick -->
     <div id="joystick-base">
+      <div id="joystick-cross"></div>
       <div id="joystick-thumb"></div>
     </div>
 
@@ -1475,6 +1502,7 @@ let JOY_DEADZONE = 0.08;
 let JOY_FULL     = 0.90;
 let JOY_EXPO     = 2.0;
 let JOY_MIN_OUT  = 0.30;
+let JOY_AXIS_SNAP = 0.15;  // half-width of the axis cross (fraction of the throw)
 function joyCurve(r) {
   if (r <= JOY_DEADZONE) return 0;
   const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
@@ -2085,7 +2113,11 @@ function buildConnection() {
     if (s.fullAt > s.deadzone) { JOY_DEADZONE = s.deadzone; JOY_FULL = s.fullAt; }
     JOY_MIN_OUT = s.startSpeed;
     JOY_EXPO    = s.curve;
-    dbg('SignalR: JoystickSettings dz=' + s.deadzone + ' start=' + s.startSpeed + ' full=' + s.fullAt + ' curve=' + s.curve);
+    if (typeof s.axisSnap === 'number') {
+      JOY_AXIS_SNAP = Math.max(0, Math.min(0.5, s.axisSnap));
+      document.getElementById('joystick-base').style.setProperty('--axis-snap', JOY_AXIS_SNAP);
+    }
+    dbg('SignalR: JoystickSettings dz=' + s.deadzone + ' start=' + s.startSpeed + ' full=' + s.fullAt + ' curve=' + s.curve + ' axisSnap=' + s.axisSnap);
   });
   conn.on('StateUpdate',  data     => onStateUpdate(data));
   conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
@@ -3171,6 +3203,25 @@ function releaseJoy(e) {
   if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
 }
 
+// Axis snap: inside JOY_AXIS_SNAP of the vertical axis the stick points dead
+// ahead/behind (both tracks equal - drive straight); inside it of the
+// horizontal axis it points dead sideways (tracks opposite - spin on the spot).
+// Outside an arm the off-axis part ramps up from zero, so leaving the cross
+// doesn't jerk the steering.  x, y are normalised (-1..1, y up); only the
+// direction of the result matters.
+function axisSnap(x, y) {
+  const w = JOY_AXIS_SNAP;
+  if (w <= 0) return [x, y];
+  const ax = Math.abs(x), ay = Math.abs(y);
+  let sx = ax <= w ? 0 : Math.sign(x) * (ax - w) / (1 - w);
+  let sy = ay <= w ? 0 : Math.sign(y) * (ay - w) / (1 - w);
+  // Near the centre the thumb can be inside both arms: keep the dominant axis.
+  if (sx === 0 && sy === 0) {
+    if (ax >= ay) sx = Math.sign(x); else sy = Math.sign(y);
+  }
+  return [sx, sy];
+}
+
 function updateJoy(cx, cy) {
   let dx = cx - joyOriginX;
   let dy = cy - joyOriginY;
@@ -3196,11 +3247,14 @@ function updateJoy(cx, cy) {
 
   joyThumb.style.transform = `translate(calc(-50% + ${jdx}px), calc(-50% + ${jdy}px))`;
 
-  // Apply the response curve to the deflection radius, keeping its direction.
-  const r  = Math.min(1, Math.sqrt(jdx*jdx + jdy*jdy) / JOY_RADIUS);
-  const k  = r > 0 ? joyCurve(r) / r : 0;
-  const nx =  jdx / JOY_RADIUS * k;
-  const ny = -jdy / JOY_RADIUS * k;
+  // Speed comes from how far the thumb is pushed (response curve on the radius);
+  // direction from where it points, snapped onto the axes inside the cross.
+  const r     = Math.min(1, Math.sqrt(jdx*jdx + jdy*jdy) / JOY_RADIUS);
+  const speed = joyCurve(r);
+  const [ux, uy] = axisSnap(jdx / JOY_RADIUS, -jdy / JOY_RADIUS);
+  const m  = Math.sqrt(ux*ux + uy*uy);
+  const nx = m > 0 ? ux / m * speed : 0;
+  const ny = m > 0 ? uy / m * speed : 0;
 
   const tx = nx * 0.50;
   joyL = clamp(ny + tx, -1, 1);
@@ -4004,7 +4058,7 @@ startServerPoll();
   } catch (_) {}
 })();
 </script>
-<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v38</div>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v39</div>
 
 <!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
 <!--
