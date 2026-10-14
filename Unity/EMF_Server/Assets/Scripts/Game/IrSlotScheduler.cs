@@ -142,14 +142,14 @@ public class IrSlotScheduler : MonoBehaviour
 
         var allRobots = dir.GetAll();
         var enemies   = new List<RobotInfo>();
-        var deadSet   = game?.State?.DeadRobots;
 
+        // Dead enemies stay in the list: they still listen, so a hit on one can be
+        // reported to the shooter as "already dead" (their FPV view can't see the LEDs).
         for (int i = 0; i < allRobots.Count; i++)
         {
             var r = allRobots[i];
             if (r.RobotId == shooterId) continue;
             if (string.IsNullOrEmpty(r.AssignedPlayer)) continue;
-            if (deadSet != null && deadSet.Contains(r.RobotId)) continue;
             int ally = GetAllianceIndex(r.AssignedPlayer);
             if (ally < 0 || ally == shooterAlliance) continue;
             NetLog.Log($"[IrHs]   enemy: {r.Callsign ?? r.RobotId}");
@@ -289,9 +289,15 @@ public class IrSlotScheduler : MonoBehaviour
                 hitCount++;
 
                 var state = game?.State;
-                if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId) || state.InvulnerableRobots.Contains(enemyId)))
+                if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId)))
                 {
-                    NetLog.Log($"[IrHs]   {enemyName} is dead/respawning/invulnerable — skipping");
+                    NetLog.Log($"[IrHs]   {enemyName} is dead/respawning — skipping");
+                    if (!hitParts.Contains(AlreadyDeadText)) hitParts.Add(AlreadyDeadText);
+                    continue;
+                }
+                if (state != null && state.InvulnerableRobots.Contains(enemyId))
+                {
+                    NetLog.Log($"[IrHs]   {enemyName} is invulnerable — skipping");
                     continue;
                 }
 
@@ -327,7 +333,9 @@ public class IrSlotScheduler : MonoBehaviour
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private static readonly string[] DirNames  = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+    private const string AlreadyDeadText = "That tank is already dead!";
+
+    private static readonly string[] DirNames  ={ "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
     private static readonly float[]  DirAngles = { 90f, 45f, 0f, -45f, -90f, -135f, 180f, 135f };
 
     private static string ResolveAveragedCardinal(byte mask)
