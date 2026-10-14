@@ -66,7 +66,6 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     // ── Announcer tracking ────────────────────────────────────────────────────────
     private bool _firstBloodDone;
-    private float _gameStartTime;
     private readonly Dictionary<string, int> _playerKillStreak   = new Dictionary<string, int>();
     private readonly Dictionary<string, int> _playerKillTotal    = new Dictionary<string, int>();
     private readonly Dictionary<string, int> _playerCaptureScore = new Dictionary<string, int>();
@@ -1040,7 +1039,6 @@ public class PlayerWebSocketServer : MonoBehaviour
 
             SendGameStartedToAll();
             ActivateAllRobots();
-            _gameStartTime = Time.time;
             _firstBloodDone = false;
             _playerKillStreak.Clear();
             _playerKillTotal.Clear();
@@ -1246,10 +1244,6 @@ public class PlayerWebSocketServer : MonoBehaviour
             else if (streak >= 4)
             {
                 text = $"{shooterName} is unstoppable! Eliminated {victim}!";
-            }
-            else if (Time.time - _gameStartTime < 60f)
-            {
-                text = $"An early casualty — {shooterName} eliminated {victim}!";
             }
             else
             {
