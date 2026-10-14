@@ -212,6 +212,16 @@ public class PlayersEditorPanel : MonoBehaviour
 
     void OnRemovePlayer(int playerIndex)
     {
+        // A phone player: kick their connection too, or it stays mapped to a name
+        // that is no longer in the lobby and breaks the next game start.
+        var server = ServiceLocator.PlayerServer;
+        if (server != null)
+        {
+            var all = _players.GetAll();
+            if (playerIndex < all.Count) server.KickPlayer(all[playerIndex].Name);
+            return;
+        }
+
         // Free any robot the player was driving
         if (_robots != null)
         {

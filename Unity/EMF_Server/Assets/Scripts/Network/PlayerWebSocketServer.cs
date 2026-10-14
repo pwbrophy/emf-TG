@@ -257,8 +257,10 @@ public class PlayerWebSocketServer : MonoBehaviour
         if (_started && Time.time - _lastStateUpdate >= 1.0f)
         {
             _lastStateUpdate = Time.time;
-            BroadcastStateUpdates();
-            BroadcastDisplayUpdate();
+            // Separately guarded: a throw in the phone updates used to skip the display
+            // update too, leaving the big screen stuck on its countdown overlay.
+            try { BroadcastStateUpdates(); } catch (Exception ex) { Debug.LogException(ex); }
+            try { BroadcastDisplayUpdate(); } catch (Exception ex) { Debug.LogException(ex); }
         }
     }
 
@@ -510,41 +512,74 @@ public class PlayerWebSocketServer : MonoBehaviour
 
         if (toKick.Count == 0) return;
 
-        string kickReason = EscapeJson("Game is starting — you are not assigned to a tank. Please wait for the next game.");
+        string kickReason = "Game is starting — you are not assigned to a tank. Please wait for the next game.";
 
         foreach (string playerName in toKick)
         {
-            // Kick all active connections for this player
-            var connsToRemove = new List<string>();
-            foreach (var kvp in _connToPlayer)
-                if (kvp.Value == playerName)
-                    connsToRemove.Add(kvp.Key);
-
-            foreach (string connId in connsToRemove)
-            {
-                BroadcastRaw("{\"cmd\":\"join_rejected\"" +
-                             ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
-                             ",\"reason\":\""        + kickReason         + "\"}");
-                _connToPlayer.Remove(connId);
-                _connDevice.Remove(connId);
-            }
-
-            // Remove from PlayersService (find index fresh each iteration as list shifts)
-            var pl = players.GetAll();
-            for (int i = 0; i < pl.Count; i++)
-            {
-                if (pl[i].Name == playerName)
-                {
-                    players.RemovePlayerAt(i);
-                    break;
-                }
-            }
-
+            RemovePlayerEverywhere(playerName, kickReason);
             Debug.Log("[PlayerWS] Kicked unassigned player: " + playerName);
         }
 
         BroadcastPlayerList();
         BroadcastRobotList();
+    }
+
+    /// <summary>
+    /// Operator removed a player from the lobby (the ✕ on their row). Sends their
+    /// phone(s) back to the join screen and drops every trace of them. Removing the
+    /// name from PlayersService alone left the phone mapped in _connToPlayer: the
+    /// kick at the top of the countdown (which walks PlayersService) never saw it,
+    /// it was sent game_started with no tank, and its per-second state_update threw
+    /// on the missing robot — which also stopped the display update, so the big
+    /// screen sat on the end of the countdown.
+    /// </summary>
+    public void KickPlayer(string playerName)
+    {
+        if (string.IsNullOrEmpty(playerName)) return;
+        RemovePlayerEverywhere(playerName, "You were removed from the lobby.");
+        Debug.Log("[PlayerWS] Operator removed player: " + playerName);
+        BroadcastPlayerList();
+        BroadcastRobotList();
+    }
+
+    /// <summary>
+    /// Sends join_rejected to every connection playing as playerName, unmaps them,
+    /// frees any driver/gunner slot they held and removes them from PlayersService.
+    /// </summary>
+    void RemovePlayerEverywhere(string playerName, string reason)
+    {
+        string escReason = EscapeJson(reason);
+
+        var connsToRemove = new List<string>();
+        foreach (var kvp in _connToPlayer)
+            if (kvp.Value == playerName)
+                connsToRemove.Add(kvp.Key);
+
+        foreach (string connId in connsToRemove)
+        {
+            BroadcastRaw("{\"cmd\":\"join_rejected\"" +
+                         ",\"connectionId\":\"" + EscapeJson(connId) + "\"" +
+                         ",\"reason\":\""        + escReason          + "\"}");
+            _connToPlayer.Remove(connId);
+            _connDevice.Remove(connId);
+            _lastTurretByConn.Remove(connId);
+        }
+
+        var dir = ServiceLocator.RobotDirectory;
+        if (dir != null)
+            foreach (var robot in dir.GetAll())
+            {
+                if (robot.AssignedPlayer == playerName) dir.ClearAssignedPlayer(robot.RobotId);
+                if (robot.GunnerPlayer   == playerName) dir.ClearGunnerPlayer(robot.RobotId);
+            }
+
+        var players = ServiceLocator.Players;
+        if (players != null)
+        {
+            var pl = players.GetAll();
+            for (int i = 0; i < pl.Count; i++)
+                if (pl[i].Name == playerName) { players.RemovePlayerAt(i); break; }
+        }
     }
 
     /// <summary>
@@ -1735,8 +1770,14 @@ public class PlayerWebSocketServer : MonoBehaviour
 
     void SendGameStartedToAll()
     {
-        foreach (var kvp in _connToPlayer)
-            SendGameStarted(kvp.Key, kvp.Value);
+        // Players with no tank get nothing here — RedirectUnassignedPlayers() sends
+        // them back to the join screen once StartGame() returns.
+        foreach (var kvp in _connToPlayer.ToList())
+        {
+            if (PlayerToRobotAny(kvp.Value) == null) continue;
+            try { SendGameStarted(kvp.Key, kvp.Value); }
+            catch (Exception ex) { Debug.LogException(ex); }
+        }
         SendHpToAllRobots();
     }
 
@@ -1809,8 +1850,11 @@ public class PlayerWebSocketServer : MonoBehaviour
     void BroadcastStateUpdates()
     {
         if (ServiceLocator.GameFlow?.Phase != GamePhase.Playing) return;
-        foreach (var kvp in _connToPlayer)
-            SendSingleStateUpdate(kvp.Key);
+        foreach (var connId in _connToPlayer.Keys.ToList())
+        {
+            try { SendSingleStateUpdate(connId); }
+            catch (Exception ex) { Debug.LogException(ex); }
+        }
     }
 
     void SendSingleStateUpdate(string connId)

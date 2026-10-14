@@ -127,6 +127,7 @@ public class ShootingController : MonoBehaviour
 
     public float CooldownRemaining(string robotId)
     {
+        if (string.IsNullOrEmpty(robotId)) return 0f;
         if (_nextFireTime.TryGetValue(robotId, out float t))
         {
             float now = _paused ? _pauseStartTime : Time.time;
