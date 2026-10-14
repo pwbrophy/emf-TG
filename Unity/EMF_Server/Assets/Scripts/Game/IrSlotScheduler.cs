@@ -122,6 +122,7 @@ public class IrSlotScheduler : MonoBehaviour
 
         string fireResultText = "Miss";
         var hitParts = new List<string>();
+        bool hitDeadTank = false;
 
         var playerList = players.GetAll();
         int GetAllianceIndex(string playerName)
@@ -292,7 +293,7 @@ public class IrSlotScheduler : MonoBehaviour
                 if (state != null && (state.DeadRobots.Contains(enemyId) || state.RespawningRobots.Contains(enemyId)))
                 {
                     NetLog.Log($"[IrHs]   {enemyName} is dead/respawning — skipping");
-                    if (!hitParts.Contains(AlreadyDeadText)) hitParts.Add(AlreadyDeadText);
+                    hitDeadTank = true;
                     continue;
                 }
                 if (state != null && state.InvulnerableRobots.Contains(enemyId))
@@ -321,8 +322,11 @@ public class IrSlotScheduler : MonoBehaviour
             NetLog.Log($"[IrHs] ===== Shot {slotId} DONE — aborted ======");
         }
 
+        // "Already dead" only when dead tanks were the sole thing hit — a live hit wins.
         if (hitParts.Count > 0)
             fireResultText = string.Join(" · ", hitParts);
+        else if (hitDeadTank)
+            fireResultText = AlreadyDeadText;
         ServiceLocator.PlayerServer?.SendFireResult(shooterId, fireResultText);
 
         server.OnIrEmitAck      -= OnAck;
