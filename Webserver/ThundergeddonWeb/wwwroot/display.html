@@ -843,7 +843,7 @@ conn.on('DisplayUpdate', rawJson => {
 });
 
 conn.on('DisplayEvent', text => {
-  speak(text);
+  speakDisplayEvent(text);
 });
 
 conn.on('GameOver', data => {
@@ -863,16 +863,16 @@ conn.on('CountdownTick', (count, total) => {
   const numEl = document.getElementById('countdown-number');
   numEl.textContent = count;
   numEl.style.animation = 'none'; numEl.offsetHeight; numEl.style.animation = '';
-  speak(count.toString());
+  speak(count.toString(), 'high', 1000);
 });
 
 conn.on('GamePaused',  () => {
   document.getElementById('paused-overlay').classList.remove('hidden');
-  speak('Game paused');
+  speak('Game paused', 'high', 5000);
 });
 conn.on('GameResumed', () => {
   document.getElementById('paused-overlay').classList.add('hidden');
-  speak('Game resumed');
+  speak('Game resumed', 'high', 5000);
 });
 
 // Display-only traffic (DisplayUpdate, DisplayEvent, HitEvent, KillEvent) is sent
@@ -1555,7 +1555,7 @@ function applyDisplayUpdate(data) {
     Object.keys(_milestoneFired).forEach(k => delete _milestoneFired[k]);
     _spokenCountdownSecs.clear();
     _cpFlashCounter[0] = _cpFlashCounter[1] = 0;
-    speak('To battle, show no mercy!');
+    speak('To battle, show no mercy!', 'high', 5000);
     resetGameStats();
     hideGameOver();
     startGrid();
@@ -1769,36 +1769,93 @@ function checkTimerMilestones(prev, t) {
   for (let s = 10; s >= 1; s--) {
     if (!_spokenCountdownSecs.has(s) && prev > s && t <= s) {
       _spokenCountdownSecs.add(s);
-      speak(String(s));
+      speak(String(s), 'high', 1000);
       break; // only one per update
     }
   }
 }
 
-let _speakTimer = null;
-function speak(text) {
-  if (_muted || !window.speechSynthesis) return;
-  if (_speakTimer) clearTimeout(_speakTimer);
-  if (speechSynthesis.speaking || speechSynthesis.pending) {
-    // Something is playing — cancel it, then delay before speaking to avoid
-    // Chrome's bug where speak() immediately after cancel() is silently dropped.
-    speechSynthesis.cancel();
-    _speakTimer = setTimeout(() => {
-      _speakTimer = null;
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
-      speechSynthesis.speak(utt);
-    }, 60);
-  } else {
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
-    speechSynthesis.speak(utt);
-  }
+// Announcements play one at a time from a priority queue instead of cutting
+// each other off. Each one has a priority and a max age:
+//   low    — dropped outright if anything is playing or waiting (rear hits)
+//   normal — waits its turn; discarded if it has gone stale before its turn
+//   high   — jumps ahead of queued normal items (countdowns, game over)
+// Countdown numbers get a ~1 s max age, so a long announcement makes them drop
+// rather than play late and read out the wrong second.
+const SPEECH_PRI = { low: 0, normal: 1, high: 2 };
+const _speechQueue = [];       // { text, pri, expires }, sorted high → low, FIFO within a priority
+let _speechCurrent  = null;    // utterance playing now — kept referenced so Chrome can't GC it and drop onend
+let _speechWatchdog = null;
+
+function speak(text, pri = 'normal', maxAgeMs = 10000) {
+  if (_muted || !window.speechSynthesis || !text) return;
+  const p = SPEECH_PRI[pri] ?? SPEECH_PRI.normal;
+  const busy = _speechCurrent !== null || _speechQueue.length > 0;
+  if (p === SPEECH_PRI.low && busy) return;
+  if (_speechQueue.some(q => q.text === text)) return;
+
+  const item = { text, pri: p, expires: performance.now() + maxAgeMs };
+  let i = _speechQueue.findIndex(q => q.pri < p);
+  if (i < 0) i = _speechQueue.length;
+  _speechQueue.splice(i, 0, item);
+  pumpSpeech();
+}
+
+// Server announcements arrive as plain text; rank them by content.
+function speakDisplayEvent(text) {
+  const t = String(text || '');
+  if (/^Rear hit!/i.test(t))                           speak(t, 'low');
+  else if (/^Game over!/i.test(t))                     speak(t, 'high', 30000);
+  else if (/is critical!|returned to battle/i.test(t)) speak(t, 'normal', 6000);
+  else                                                 speak(t, 'normal');
+}
+
+function pumpSpeech() {
+  if (_speechCurrent || _muted) return;
+  const now = performance.now();
+  while (_speechQueue.length && _speechQueue[0].expires < now) _speechQueue.shift();
+  const item = _speechQueue.shift();
+  if (!item) return;
+
+  const utt = new SpeechSynthesisUtterance(item.text);
+  utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
+  _speechCurrent = utt;
+  const started = now;
+
+  const done = () => {
+    if (_speechCurrent !== utt) return;
+    _speechCurrent = null;
+    clearTimeout(_speechWatchdog);
+    setTimeout(pumpSpeech, 150);   // short breath between announcements
+  };
+  utt.onend = done;
+  utt.onerror = done;
+
+  // Chrome occasionally never fires onend (or silently drops the utterance),
+  // which would stall the queue forever — fall back to polling .speaking.
+  const check = () => {
+    if (_speechCurrent !== utt) return;
+    if (speechSynthesis.speaking && performance.now() - started < 20000) {
+      _speechWatchdog = setTimeout(check, 500);
+      return;
+    }
+    if (speechSynthesis.speaking) speechSynthesis.cancel();
+    done();
+  };
+  _speechWatchdog = setTimeout(check, 1500 + item.text.length * 110);
+
+  speechSynthesis.resume();   // un-wedge Chrome if it was left paused
+  speechSynthesis.speak(utt);
 }
 
 function toggleMute() {
   _muted = !_muted;
-  if (_muted) speechSynthesis.cancel();
+  if (_muted) {
+    _speechQueue.length = 0;
+    _speechCurrent = null;
+    clearTimeout(_speechWatchdog);
+    speechSynthesis.cancel();
+  }
   document.getElementById('mute-btn').textContent = _muted ? '🔇' : '🔊';
 }
 

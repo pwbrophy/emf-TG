@@ -85,7 +85,12 @@ public class PlayerWebSocketServer : MonoBehaviour
     private readonly Dictionary<string, int>   _statVpFromKills    = new Dictionary<string, int>();
     // Accumulated drive effort: sum of (Abs(l)+Abs(r)) per drive call during Playing
     private readonly Dictionary<string, float> _statGround         = new Dictionary<string, float>();
-    private int[]  _prevTeamPoints   = { 0, 0 };
+    // Alliance last announced as holding the points lead (-1 = none yet). Sticky
+    // through ties so an out-of-phase tick race doesn't re-announce the same lead.
+    private int    _pointsLeader      = -1;
+    // A team must be this many points ahead to claim the lead — stops 1-point
+    // leapfrogging (two teams holding one capture point each) from announcing.
+    private const int LeadAnnounceMargin = 3;
     private bool[] _teamPoints50Fired = { false, false };
     private bool[] _teamPoints90Fired = { false, false };
 
@@ -1048,7 +1053,7 @@ public class PlayerWebSocketServer : MonoBehaviour
             _statVpFromCaptures.Clear();
             _statVpFromKills.Clear();
             _statGround.Clear();
-            System.Array.Clear(_prevTeamPoints,    0, _prevTeamPoints.Length);
+            _pointsLeader = -1;
             System.Array.Clear(_teamPoints50Fired, 0, _teamPoints50Fired.Length);
             System.Array.Clear(_teamPoints90Fired, 0, _teamPoints90Fired.Length);
         }
@@ -1729,8 +1734,6 @@ public class PlayerWebSocketServer : MonoBehaviour
         int max = settings.MaxTeamPoints;
         int tp0 = gs.TeamPoints.Length > 0 ? gs.TeamPoints[0] : 0;
         int tp1 = gs.TeamPoints.Length > 1 ? gs.TeamPoints[1] : 0;
-        int prev0 = _prevTeamPoints[0];
-        int prev1 = _prevTeamPoints[1];
 
         // Milestone checks (each fires at most once per game)
         for (int a = 0; a < 2; a++)
@@ -1750,20 +1753,23 @@ public class PlayerWebSocketServer : MonoBehaviour
             }
         }
 
-        // Overtake: announce when a team that was NOT leading becomes the leader.
+        // Overtake: announce only when the lead passes to a different team. The
+        // leader is remembered through ties, and a team has to get clear by
+        // LeadAnnounceMargin first — with one capture point each, the two teams'
+        // tick timers run out of phase (1-1, 2-1, 2-2, 3-2 …) and comparing against
+        // the previous tick re-announced the same lead every few seconds.
         // Require both teams to have scored to avoid "first kill = takes the lead" noise.
         if (tp0 > 0 && tp1 > 0)
         {
-            bool prev0Leading = prev0 > prev1;
-            bool prev1Leading = prev1 > prev0;
-            if (!prev0Leading && tp0 > tp1)
-                BroadcastDisplayEvent($"{AllianceName(0)} has taken the points lead!");
-            else if (!prev1Leading && tp1 > tp0)
-                BroadcastDisplayEvent($"{AllianceName(1)} has taken the points lead!");
+            int leader = tp0 - tp1 >= LeadAnnounceMargin ? 0
+                       : tp1 - tp0 >= LeadAnnounceMargin ? 1
+                       : -1;
+            if (leader >= 0 && leader != _pointsLeader)
+            {
+                _pointsLeader = leader;
+                BroadcastDisplayEvent($"{AllianceName(leader)} has taken the points lead!");
+            }
         }
-
-        _prevTeamPoints[0] = tp0;
-        _prevTeamPoints[1] = tp1;
     }
 
     // ── State update helpers ──────────────────────────────────────────────────────
