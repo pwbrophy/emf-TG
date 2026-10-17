@@ -4,407 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0d0d14">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>Thundergeddon</title>
-  <style>
-    :root {
-      --bg:       #0d0d14;
-      --surface:  #1a1a28;
-      --surface2: #232338;
-      --border:   #2e2e50;
-      --accent:   #ff4d1c;
-      --accent2:  #ff8c00;
-      --text:     #e8e8f0;
-      --muted:    #8a8ab0;
-      --gutter:   16px;
-    }
-
-    * { box-sizing: border-box; }
-
-    html, body {
-      margin: 0;
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      -webkit-text-size-adjust: 100%;
-      -webkit-tap-highlight-color: transparent;
-      overflow: hidden;
-    }
-
-    body {
-      /* Ember glow rising from the bottom, over a faint battlefield grid. */
-      background:
-        radial-gradient(120% 60% at 50% 110%, rgba(255, 77, 28, 0.28), transparent 60%),
-        linear-gradient(rgba(46, 46, 80, 0.35) 1px, transparent 1px) 0 0 / 100% 40px,
-        linear-gradient(90deg, rgba(46, 46, 80, 0.35) 1px, transparent 1px) 0 0 / 40px 100%,
-        var(--bg);
-    }
-
-    button {
-      font: inherit;
-      color: inherit;
-      cursor: pointer;
-      touch-action: manipulation;
-    }
-
-    button:focus-visible {
-      outline: 3px solid var(--accent2);
-      outline-offset: 3px;
-    }
-
-    /* ── Screens ─────────────────────────────────────────────── */
-
-    .screen {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding:
-        max(var(--gutter), env(safe-area-inset-top))
-        max(var(--gutter), env(safe-area-inset-right))
-        max(var(--gutter), env(safe-area-inset-bottom))
-        max(var(--gutter), env(safe-area-inset-left));
-      opacity: 0;
-      visibility: hidden;
-      transform: scale(1.02);
-      transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s linear 0.3s;
-    }
-
-    .screen.active {
-      opacity: 1;
-      visibility: visible;
-      transform: none;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-    }
-
-    /* ── Title screen ────────────────────────────────────────── */
-
-    .wordmark {
-      margin: 0;
-      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", system-ui, sans-serif;
-      font-weight: 900;
-      font-size: clamp(2rem, min(9.5vw, 17vh), 6.5rem);
-      line-height: 1;
-      letter-spacing: 0.03em;
-      text-align: center;
-      transform: skewX(-8deg);
-      background: linear-gradient(180deg, #fff 0%, #ffd27a 45%, var(--accent2) 65%, var(--accent) 100%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-      filter: drop-shadow(0 0 18px rgba(255, 77, 28, 0.55));
-      user-select: none;
-    }
-
-    .bolt {
-      width: clamp(44px, 10vw, 80px);
-      height: auto;
-      margin-bottom: 12px;
-      filter: drop-shadow(0 0 12px rgba(255, 140, 0, 0.8));
-      animation: flicker 4s infinite;
-    }
-
-    .tagline {
-      margin: 18px 0 0;
-      color: var(--muted);
-      font-size: clamp(0.75rem, 2.6vw, 1rem);
-      font-weight: 600;
-      letter-spacing: 0.35em;
-      text-transform: uppercase;
-      text-align: center;
-    }
-
-    .btn-continue {
-      margin-top: clamp(32px, 8vh, 72px);
-      min-width: 220px;
-      padding: 16px 36px;
-      border: none;
-      border-radius: 999px;
-      background: linear-gradient(180deg, var(--accent2), var(--accent));
-      color: #fff;
-      font-size: 1.15rem;
-      font-weight: 800;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      animation: pulse 2.2s ease-in-out infinite;
-    }
-
-    .btn-continue:active { transform: scale(0.97); }
-
-    .version {
-      position: absolute;
-      bottom: max(10px, env(safe-area-inset-bottom));
-      color: var(--muted);
-      font-size: 0.75rem;
-      opacity: 0.7;
-    }
-
-    /* Phones held sideways: tighten the title screen so nothing overlaps. */
-    @media (max-height: 480px) {
-      .bolt { display: none; }
-      .tagline { margin-top: 10px; }
-      .btn-continue { margin-top: 20px; padding: 12px 32px; }
-      .version { display: none; }
-    }
-
-    @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 28, 0.55), 0 6px 20px rgba(255, 77, 28, 0.35); }
-      50%      { box-shadow: 0 0 0 12px rgba(255, 77, 28, 0), 0 6px 28px rgba(255, 77, 28, 0.5); }
-    }
-
-    @keyframes flicker {
-      0%, 92%, 100% { opacity: 1; }
-      94%           { opacity: 0.35; }
-      96%           { opacity: 1; }
-      97%           { opacity: 0.5; }
-    }
-
-    /* ── Main menu ───────────────────────────────────────────── */
-
-    .menu-top {
-      position: absolute;
-      top: max(var(--gutter), env(safe-area-inset-top));
-      left: max(var(--gutter), env(safe-area-inset-left));
-      right: max(var(--gutter), env(safe-area-inset-right));
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .wordmark-small {
-      font-size: clamp(1.1rem, 5vw, 1.6rem);
-      filter: drop-shadow(0 0 8px rgba(255, 77, 28, 0.45));
-    }
-
-    .icon-btn {
-      display: grid;
-      place-items: center;
-      width: 48px;
-      height: 48px;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: var(--surface);
-    }
-
-    .icon-btn svg { width: 26px; height: 26px; }
-    .icon-btn:active { background: var(--surface2); }
-
-    .menu-buttons {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      width: 100%;
-      max-width: 420px;
-    }
-
-    .menu-btn {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      width: 100%;
-      padding: 20px 22px;
-      border-radius: 18px;
-      text-align: left;
-      transition: transform 0.1s ease, background 0.15s ease;
-    }
-
-    .menu-btn:active { transform: scale(0.98); }
-
-    .menu-btn svg { flex: none; width: 34px; height: 34px; }
-
-    .menu-btn .label {
-      display: block;
-      font-size: 1.3rem;
-      font-weight: 800;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    .menu-btn .sub {
-      display: block;
-      margin-top: 4px;
-      font-size: 0.9rem;
-      opacity: 0.8;
-    }
-
-    .menu-btn.primary {
-      border: none;
-      background: linear-gradient(180deg, var(--accent2), var(--accent));
-      color: #fff;
-      box-shadow: 0 8px 24px rgba(255, 77, 28, 0.35);
-    }
-
-    .menu-btn.secondary {
-      border: 2px solid var(--border);
-      background: var(--surface);
-    }
-
-    .menu-btn.secondary:active { background: var(--surface2); }
-
-    /* Phones held sideways: put the two buttons side by side. */
-    @media (orientation: landscape) and (max-height: 500px) {
-      .menu-buttons { flex-direction: row; max-width: 720px; }
-    }
-
-    /* ── Settings sheet ──────────────────────────────────────── */
-
-    .backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.55);
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 0.25s ease, visibility 0s linear 0.25s;
-    }
-
-    .settings {
-      position: fixed;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: min(380px, 100%);
-      display: flex;
-      flex-direction: column;
-      padding:
-        max(var(--gutter), env(safe-area-inset-top))
-        max(var(--gutter), env(safe-area-inset-right))
-        max(var(--gutter), env(safe-area-inset-bottom))
-        var(--gutter);
-      background: var(--surface);
-      border-left: 1px solid var(--border);
-      overflow-y: auto;
-      transform: translateX(100%);
-      visibility: hidden;
-      transition: transform 0.25s ease, visibility 0s linear 0.25s;
-    }
-
-    body.settings-open .backdrop {
-      opacity: 1;
-      visibility: visible;
-      transition: opacity 0.25s ease;
-    }
-
-    body.settings-open .settings {
-      transform: none;
-      visibility: visible;
-      transition: transform 0.25s ease;
-    }
-
-    .settings-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-
-    .settings h2 {
-      margin: 0;
-      font-size: 1.4rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    .settings h3 {
-      margin: 24px 0 8px;
-      color: var(--muted);
-      font-size: 0.8rem;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-    }
-
-    .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 14px 0;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .row .value {
-      color: var(--muted);
-      font-variant-numeric: tabular-nums;
-      text-align: right;
-      overflow-wrap: anywhere;
-    }
-
-    .link-row {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .link-row .value { font-size: 1.4rem; line-height: 1; }
-
-    .toggle {
-      position: relative;
-      flex: none;
-      width: 52px;
-      height: 30px;
-      padding: 0;
-      border: none;
-      border-radius: 999px;
-      background: var(--border);
-      transition: background 0.2s ease;
-    }
-
-    .toggle::after {
-      content: "";
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: #fff;
-      transition: transform 0.2s ease;
-    }
-
-    .toggle[aria-checked="true"] { background: var(--accent); }
-    .toggle[aria-checked="true"]::after { transform: translateX(22px); }
-
-    .note {
-      margin-top: 16px;
-      color: var(--muted);
-      font-size: 0.85rem;
-    }
-
-    /* ── Toast ───────────────────────────────────────────────── */
-
-    .toast {
-      position: fixed;
-      left: 50%;
-      bottom: max(28px, calc(env(safe-area-inset-bottom) + 16px));
-      max-width: calc(100% - 2 * var(--gutter));
-      padding: 12px 20px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--surface2);
-      font-weight: 600;
-      text-align: center;
-      opacity: 0;
-      transform: translate(-50%, 12px);
-      transition: opacity 0.2s ease, transform 0.2s ease;
-      pointer-events: none;
-    }
-
-    .toast.show {
-      opacity: 1;
-      transform: translate(-50%, 0);
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation: none !important;
-        transition-duration: 0.01ms !important;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
 </head>
 <body>
 
-  <!-- Title screen -->
+  <div class="conn-banner" id="conn-banner" hidden>Reconnecting to the game&hellip;</div>
+
+  <!-- Title -->
   <section id="screen-title" class="screen active" aria-label="Title">
     <svg class="bolt" viewBox="0 0 24 36" aria-hidden="true">
       <defs>
@@ -417,15 +26,15 @@
     </svg>
     <h1 class="wordmark">THUNDERGEDDON</h1>
     <p class="tagline">Real tanks &middot; Real battles</p>
-    <button id="btn-continue" class="btn-continue" type="button">Continue</button>
+    <button class="btn-continue" type="button" data-action="to-menu">To Battle!</button>
     <div class="version" id="version-label"></div>
   </section>
 
-  <!-- Main menu -->
+  <!-- Menu -->
   <section id="screen-menu" class="screen" aria-label="Main menu">
     <div class="menu-top">
       <span class="wordmark wordmark-small" aria-hidden="true">THUNDERGEDDON</span>
-      <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings">
+      <button class="icon-btn" type="button" data-action="open-settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -434,172 +43,150 @@
     </div>
 
     <div class="menu-buttons">
-      <button class="menu-btn primary" type="button" data-coming-soon="Host Game">
+      <button class="menu-btn primary" type="button" data-action="to-join">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 22V4"/>
-          <path d="M4 4h12l-2 4 2 4H4"/>
-        </svg>
-        <span>
-          <span class="label">Host Game</span>
-          <span class="sub">Set up a battle on this hub</span>
-        </span>
-      </button>
-      <button class="menu-btn secondary" type="button" data-coming-soon="Join Game">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9"/>
-          <circle cx="12" cy="12" r="4"/>
+          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>
           <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
         </svg>
-        <span>
-          <span class="label">Join Game</span>
-          <span class="sub">Drive a tank in a battle</span>
-        </span>
+        <span><span class="label">Join Game</span><span class="sub">Drive a tank in a battle</span></span>
       </button>
+      <button class="menu-btn secondary" type="button" data-action="to-host-login" id="btn-host">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 22V4"/><path d="M4 4h12l-2 4 2 4H4"/>
+        </svg>
+        <span><span class="label" id="host-label">Host Game</span><span class="sub" id="host-sub">Run a battle on this hub</span></span>
+      </button>
+    </div>
+    <button class="link-btn" type="button" data-action="open-howto">How to play</button>
+  </section>
+
+  <!-- Host sign-in -->
+  <section id="screen-host-login" class="screen" aria-label="Host sign in">
+    <form class="form" id="form-host-login" autocomplete="off">
+      <h2 id="host-login-title">Host Game</h2>
+      <p id="host-login-detail">Enter the host password.</p>
+      <label class="field">Host password
+        <input type="password" id="host-password" autocomplete="current-password" required>
+      </label>
+      <button class="btn primary" type="submit">Continue</button>
+      <button class="btn secondary" type="button" data-action="to-menu">Back</button>
+    </form>
+  </section>
+
+  <!-- Host console: content rendered from the game state -->
+  <section id="screen-host" class="screen page" aria-label="Host">
+    <div class="topbar">
+      <h2 id="host-title">Host</h2>
+      <button class="btn small secondary" type="button" data-action="host-menu">Menu</button>
+    </div>
+    <div class="page-inner" id="host-body"></div>
+  </section>
+
+  <!-- Join -->
+  <section id="screen-join" class="screen" aria-label="Join game">
+    <form class="form" id="form-join" autocomplete="off">
+      <h2>Join Game</h2>
+      <label class="field">Your name
+        <input type="text" id="join-name" maxlength="16" autocomplete="nickname" required>
+      </label>
+      <label class="field" id="join-password-field" hidden>Game password
+        <input type="password" id="join-password">
+      </label>
+      <button class="btn primary" type="submit">Join</button>
+      <button class="btn secondary" type="button" data-action="to-menu">Back</button>
+    </form>
+  </section>
+
+  <!-- Waiting / queue -->
+  <section id="screen-wait" class="screen page" aria-label="Waiting">
+    <div class="page-inner" id="wait-body"></div>
+  </section>
+
+  <!-- Lobby: choose a tank -->
+  <section id="screen-lobby" class="screen page" aria-label="Lobby">
+    <div class="topbar">
+      <h2>Lobby</h2>
+      <button class="btn small secondary" type="button" data-action="leave">Leave</button>
+    </div>
+    <div class="page-inner" id="lobby-body"></div>
+  </section>
+
+  <!-- Gameplay -->
+  <section id="screen-play" class="screen" aria-label="Driving">
+    <img id="video" alt="">
+    <div class="video-msg" id="video-msg">Connecting to your tank&rsquo;s camera&hellip;</div>
+
+    <div class="hud-top">
+      <span class="hud-name" id="hud-name"></span>
+      <span class="hud-timer" id="hud-timer">0:00</span>
+      <span class="hud-buttons">
+        <button class="icon-btn" type="button" data-action="host-control" id="btn-host-control" aria-label="Host controls" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <button class="icon-btn" type="button" data-action="fullscreen" aria-label="Full screen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        </button>
+      </span>
+    </div>
+    <div class="hp-bar" aria-label="Hit points"><div id="hp-fill"></div></div>
+
+    <div class="joy-base" id="joy-base" aria-label="Drive"><div class="joy-thumb" id="joy-thumb"></div></div>
+    <div class="turret-base" id="turret-base" aria-label="Turret"><div class="turret-thumb" id="turret-thumb"></div></div>
+    <button class="fire-btn" type="button" id="fire-btn">FIRE</button>
+
+    <div class="countdown" id="countdown" hidden><span id="countdown-num"></span></div>
+
+    <div class="rotate-notice">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>
+      </svg>
+      Turn your phone sideways to drive
     </div>
   </section>
 
+  <!-- Game over -->
+  <section id="screen-results" class="screen page" aria-label="Game over">
+    <div class="page-inner" id="results-body"></div>
+  </section>
+
   <!-- Settings sheet -->
-  <div class="backdrop" id="settings-backdrop"></div>
-  <aside class="settings" id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-    <div class="settings-head">
+  <div class="backdrop" id="backdrop" data-action="close-sheet"></div>
+  <aside class="sheet" id="sheet-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="sheet-head">
       <h2 id="settings-title">Settings</h2>
-      <button id="btn-settings-close" class="icon-btn" type="button" aria-label="Close settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
-          <path d="M6 6l12 12M18 6 6 18"/>
-        </svg>
+      <button class="icon-btn" type="button" data-action="close-sheet" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
     </div>
-
     <h3>Phone</h3>
-    <div class="row">
-      <span id="lbl-sound">Sound effects</span>
-      <button class="toggle" type="button" role="switch" aria-checked="true" aria-labelledby="lbl-sound" data-setting="sound"></button>
-    </div>
-    <div class="row">
-      <span id="lbl-vibrate">Vibration</span>
+    <div class="srow">
+      <span id="lbl-vibrate">Vibrate when firing</span>
       <button class="toggle" type="button" role="switch" aria-checked="true" aria-labelledby="lbl-vibrate" data-setting="vibrate"></button>
     </div>
-    <p class="note">These switches don't do anything yet.</p>
-
     <h3>Server</h3>
-    <div class="row"><span>Version</span><span class="value" id="info-version">&hellip;</span></div>
-    <div class="row"><span>Running on</span><span class="value" id="info-platform">&hellip;</span></div>
-    <div class="row"><span>Host name</span><span class="value" id="info-host">&hellip;</span></div>
-    <div class="row"><span>Up for</span><span class="value" id="info-uptime">&hellip;</span></div>
-
+    <div class="srow"><span>Version</span><span class="value" id="info-version">&hellip;</span></div>
+    <div class="srow"><span>Running on</span><span class="value" id="info-platform">&hellip;</span></div>
     <h3>Testing</h3>
-    <a class="row link-row" href="/streams.html"><span>Video load test</span><span class="value">&rsaquo;</span></a>
+    <a class="srow" href="/streams.html"><span>Video test page</span><span class="value">&rsaquo;</span></a>
+  </aside>
+
+  <!-- How to play sheet -->
+  <aside class="sheet" id="sheet-howto" role="dialog" aria-modal="true" aria-labelledby="howto-title">
+    <div class="sheet-head">
+      <h2 id="howto-title">How to play</h2>
+      <button class="icon-btn" type="button" data-action="close-sheet" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <ol>
+      <li>Tap <b>Join Game</b> and enter your name.</li>
+      <li>When there&rsquo;s room, you&rsquo;ll be let into the lobby. Choose a tank: its team is shown on the card.</li>
+      <li>When the host starts the game, turn your phone sideways. You&rsquo;ll see through your tank&rsquo;s camera.</li>
+      <li><b>Left stick</b> drives. <b>Slider</b> turns the turret. <b>FIRE</b> shoots, then needs a moment to reload.</li>
+      <li>After the game you can play again: you&rsquo;ll join the back of the queue.</li>
+    </ol>
   </aside>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-
-  <script>
-    'use strict';
-
-    const $ = (id) => document.getElementById(id);
-
-    // ── Screens ──────────────────────────────────────────────
-    // Each screen change pushes a history entry, so the phone's Back
-    // button returns to the previous screen instead of leaving the page.
-
-    function showScreen(name) {
-      document.querySelectorAll('.screen').forEach((s) => {
-        s.classList.toggle('active', s.id === 'screen-' + name);
-      });
-    }
-
-    $('btn-continue').addEventListener('click', () => {
-      history.pushState({ screen: 'menu' }, '', '#menu');
-      showScreen('menu');
-    });
-
-    window.addEventListener('popstate', (e) => {
-      closeSettings();
-      showScreen((e.state && e.state.screen) || (location.hash === '#menu' ? 'menu' : 'title'));
-    });
-
-    if (location.hash === '#menu') {
-      history.replaceState({ screen: 'menu' }, '', '#menu');
-      showScreen('menu');
-    }
-
-    // ── Dummy menu buttons ───────────────────────────────────
-
-    let toastTimer = 0;
-    function toast(text) {
-      const t = $('toast');
-      t.textContent = text;
-      t.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
-    }
-
-    document.querySelectorAll('[data-coming-soon]').forEach((btn) => {
-      btn.addEventListener('click', () => toast(btn.dataset.comingSoon + ' is coming soon'));
-    });
-
-    // ── Settings ─────────────────────────────────────────────
-
-    function openSettings() {
-      document.body.classList.add('settings-open');
-      $('btn-settings-close').focus();
-      loadInfo();
-    }
-
-    function closeSettings() {
-      if (!document.body.classList.contains('settings-open')) return;
-      document.body.classList.remove('settings-open');
-      $('btn-settings').focus();
-    }
-
-    $('btn-settings').addEventListener('click', openSettings);
-    $('btn-settings-close').addEventListener('click', closeSettings);
-    $('settings-backdrop').addEventListener('click', closeSettings);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSettings(); });
-
-    // Switches remember their position on this phone only.
-    function loadSetting(key) {
-      try { return localStorage.getItem('tg_setting_' + key); } catch { return null; }
-    }
-    function saveSetting(key, on) {
-      try { localStorage.setItem('tg_setting_' + key, on ? '1' : '0'); } catch { /* private mode */ }
-    }
-
-    document.querySelectorAll('.toggle').forEach((t) => {
-      const stored = loadSetting(t.dataset.setting);
-      if (stored !== null) t.setAttribute('aria-checked', stored === '1' ? 'true' : 'false');
-      t.addEventListener('click', () => {
-        const on = t.getAttribute('aria-checked') !== 'true';
-        t.setAttribute('aria-checked', on ? 'true' : 'false');
-        saveSetting(t.dataset.setting, on);
-      });
-    });
-
-    // ── Server info ──────────────────────────────────────────
-
-    function formatUptime(s) {
-      const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
-      if (d) return d + 'd ' + h + 'h';
-      if (h) return h + 'h ' + m + 'm';
-      if (m) return m + 'm ' + (s % 60) + 's';
-      return s + 's';
-    }
-
-    async function loadInfo() {
-      try {
-        const r = await fetch('/api/info', { cache: 'no-store' });
-        const info = await r.json();
-        $('info-version').textContent  = info.version;
-        $('info-platform').textContent = info.os + '/' + info.arch;
-        $('info-host').textContent     = info.hostname || '—';
-        $('info-uptime').textContent   = formatUptime(info.uptimeS);
-        $('version-label').textContent = info.version === 'dev' ? 'dev build' : 'v' + info.version;
-      } catch {
-        $('info-version').textContent = 'Server not reachable';
-      }
-    }
-
-    loadInfo();
-  </script>
 </body>
 </html>

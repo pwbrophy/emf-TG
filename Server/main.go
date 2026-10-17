@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net"
@@ -40,6 +41,8 @@ func main() {
 	addr := flag.String("addr", ":8088", "address to listen on")
 	tokenFile := flag.String("token-file", "ws_token.txt", "file holding the tanks' shared hello token (same as Unity's ws_token.txt)")
 	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
+	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
+	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
@@ -62,11 +65,23 @@ func main() {
 	rl := newRelay()
 	stats := startStats(rl)
 	tanks := newTankManager(rl, *tokenFile, httpPort)
+	g := newGame(tanks, *settingsFile)
+	tanks.onChange = g.tanksChanged
+	tanks.onConnected = g.tankConnected
+	go g.runClock(ctx.Done())
+	for i := 1; i <= *fakeTanks; i++ {
+		team := "Desert"
+		if i%2 == 0 {
+			team = "Jungle"
+		}
+		tanks.addFake(strconv.Itoa(i), fmt.Sprintf("%s-%02d", team, i))
+	}
 	if *discoveryPort > 0 {
 		go tanks.runDiscovery(ctx, *discoveryPort)
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /ws", g.handleWS)
 	mux.HandleFunc("/api/info", handleInfo)
 	mux.HandleFunc("GET /api/stats", stats.handle)
 	mux.HandleFunc("GET /api/tanks", tanks.handleList)
@@ -120,7 +135,8 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 // after a deploy. no-cache = always revalidate (a cheap 304 when unchanged).
 func noCacheHTML(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") {
+		if r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html") ||
+			strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
 			w.Header().Set("Cache-Control", "no-cache")
 		}
 		next.ServeHTTP(w, r)

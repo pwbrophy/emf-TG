@@ -9,7 +9,7 @@ STOP=10
 
 start_service() {
 	procd_open_instance
-	procd_set_param command /opt/thundergeddon/thundergeddon -addr :8088 -token-file /etc/thundergeddon/ws_token.txt
+	procd_set_param command /opt/thundergeddon/thundergeddon -addr :8088 -token-file /etc/thundergeddon/ws_token.txt -settings /etc/thundergeddon/settings.json
 	# Restart 5 s after a crash, forever.
 	procd_set_param respawn 3600 5 0
 	procd_set_param stdout 1

@@ -62,15 +62,28 @@ type tankManager struct {
 
 	mu    sync.Mutex
 	tanks map[string]*tankSession // by robot id
+
+	// Told when tanks come and go. Set before the server starts.
+	onChange    func()          // the set of connected tanks changed
+	onConnected func(id string) // a tank (re)connected and is ready for commands
 }
 
 type tankSession struct {
 	id, name, ip string
-	conn         *websocket.Conn
+	conn         *websocket.Conn // nil for a fake tank (-fake-tanks)
 	connectedAt  time.Time
 	lastSeen     atomic.Int64 // unix nanoseconds
 	heap         atomic.Int64 // free heap bytes from the latest heartbeat
 	stop         context.CancelFunc
+
+	// Commands queued for the tank. Sending never blocks the caller (the game
+	// holds its lock while sending); a writer goroutine drains this.
+	out chan []byte
+}
+
+// tankInfo is what the game sees of a connected tank.
+type tankInfo struct {
+	ID, Name string
 }
 
 func newTankManager(rl *relay, tokenFile string, httpPort int) *tankManager {
@@ -212,7 +225,7 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[Tanks] %s camera settings: max %d fps, frame size %d, JPEG quality %d",
 					sess.label(), *msg.FPS, *msg.FSize, *msg.FQuality)
 			}
-			sess.send("stream_on")
+			tm.announce(sess)
 		case "hb":
 			if sess != nil && msg.Heap > 0 {
 				sess.heap.Store(msg.Heap)
@@ -225,7 +238,8 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 // tank (it reconnected), and starts pulling its video.
 func (tm *tankManager) add(id, name, ip string, c *websocket.Conn) *tankSession {
 	ctx, stop := context.WithCancel(context.Background())
-	sess := &tankSession{id: id, name: name, ip: ip, conn: c, connectedAt: time.Now(), stop: stop}
+	sess := &tankSession{id: id, name: name, ip: ip, conn: c, connectedAt: time.Now(), stop: stop,
+		out: make(chan []byte, 64)}
 	sess.lastSeen.Store(time.Now().UnixNano())
 
 	tm.mu.Lock()
@@ -235,23 +249,73 @@ func (tm *tankManager) add(id, name, ip string, c *websocket.Conn) *tankSession 
 
 	if old != nil {
 		old.stop()
-		old.conn.CloseNow()
+		if old.conn != nil {
+			old.conn.CloseNow()
+		}
 	}
 	log.Printf("[Tanks] %s connected from %s", sess.label(), ip)
 
 	s := tm.rl.get(id)
 	s.setLabel(sess.label())
-	go sess.pullVideo(ctx, s)
+	go sess.writeLoop(ctx)
+	if c != nil {
+		go sess.pullVideo(ctx, s)
+	}
 	return sess
+}
+
+// addFake registers a pretend tank for testing without hardware
+// (-fake-tanks). Its commands are logged instead of sent; its video comes
+// from whatever is pushed to /api/ingest/<id> (e.g. cmd/loadtest).
+func (tm *tankManager) addFake(id, name string) {
+	tm.announce(tm.add(id, name, "fake", nil))
+}
+
+// announce turns a newly registered tank's camera on and tells the game.
+func (tm *tankManager) announce(sess *tankSession) {
+	sess.send(`{"cmd":"stream_on"}`)
+	if tm.onChange != nil {
+		tm.onChange()
+	}
+	if tm.onConnected != nil {
+		tm.onConnected(sess.id)
+	}
 }
 
 func (tm *tankManager) remove(sess *tankSession) {
 	sess.stop()
 	tm.mu.Lock()
-	if tm.tanks[sess.id] == sess {
+	removed := tm.tanks[sess.id] == sess
+	if removed {
 		delete(tm.tanks, sess.id)
 	}
 	tm.mu.Unlock()
+	if removed && tm.onChange != nil {
+		tm.onChange()
+	}
+}
+
+// list returns the connected tanks.
+func (tm *tankManager) list() []tankInfo {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	out := make([]tankInfo, 0, len(tm.tanks))
+	for _, s := range tm.tanks {
+		out = append(out, tankInfo{ID: s.id, Name: s.label()})
+	}
+	return out
+}
+
+// sendTo queues a JSON command for a tank. False if the tank isn't connected.
+func (tm *tankManager) sendTo(id, msg string) bool {
+	tm.mu.Lock()
+	s := tm.tanks[id]
+	tm.mu.Unlock()
+	if s == nil {
+		return false
+	}
+	s.send(msg)
+	return true
 }
 
 func (s *tankSession) label() string {
@@ -261,12 +325,37 @@ func (s *tankSession) label() string {
 	return s.id
 }
 
-func (s *tankSession) send(cmd string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	msg := fmt.Sprintf(`{"cmd":%q}`, cmd)
-	if err := s.conn.Write(ctx, websocket.MessageText, []byte(msg)); err != nil {
-		log.Printf("[Tanks] %s: sending %s failed: %v", s.label(), cmd, err)
+// send queues a command without waiting. If the tank is so far behind that
+// its queue is full, the command is dropped: drive commands repeat 20 times
+// a second, and a tank that can't keep up is about to time out anyway.
+func (s *tankSession) send(msg string) {
+	select {
+	case s.out <- []byte(msg):
+	default:
+		log.Printf("[Tanks] %s: command queue full, dropped %s", s.label(), msg)
+	}
+}
+
+func (s *tankSession) writeLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-s.out:
+			if s.conn == nil {
+				if !strings.Contains(string(msg), `"drive"`) && !strings.Contains(string(msg), `"turret"`) {
+					log.Printf("[Tanks] fake %s <- %s", s.label(), msg)
+				}
+				continue
+			}
+			wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err := s.conn.Write(wctx, websocket.MessageText, msg)
+			cancel()
+			if err != nil {
+				log.Printf("[Tanks] %s: send failed: %v", s.label(), err)
+				return
+			}
+		}
 	}
 }
 
