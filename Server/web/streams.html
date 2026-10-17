@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0d14">
+  <title>Video Test</title>
+  <style>
+    :root {
+      --bg:      #0d0d14;
+      --surface: #1a1a28;
+      --border:  #2e2e50;
+      --accent:  #ff4d1c;
+      --text:    #e8e8f0;
+      --muted:   #8a8ab0;
+      --ok:      #3ccf6e;
+      --warn:    #ffb020;
+      --bad:     #ff4d4d;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      padding:
+        max(12px, env(safe-area-inset-top))
+        max(16px, env(safe-area-inset-right))
+        max(16px, env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.2rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    a.back {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.95rem;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+
+    .stat .label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .stat .value {
+      display: block;
+      margin-top: 2px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ok   { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad  { color: var(--bad); }
+
+    .hint {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+    }
+
+    .tile {
+      position: relative;
+      padding: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #000;
+      aspect-ratio: 4 / 3;
+      cursor: pointer;
+    }
+
+    .tile img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tile .tag {
+      position: absolute;
+      left: 6px;
+      bottom: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.65);
+      font-size: 0.8rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tile.paused img { visibility: hidden; }
+    .tile.paused::after {
+      content: "Tap to watch";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .empty {
+      padding: 32px 16px;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Video test</h1>
+    <a class="back" href="/#menu">&larr; Menu</a>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><span class="label">Tanks</span><span class="value" id="s-tanks">&ndash;</span></div>
+    <div class="stat"><span class="label">Video in</span><span class="value" id="s-mbit">&ndash;</span></div>
+    <div class="stat"><span class="label">Viewers</span><span class="value" id="s-viewers">&ndash;</span></div>
+    <div class="stat"><span class="label">Router CPU</span><span class="value" id="s-cpu">&ndash;</span></div>
+    <div class="stat"><span class="label">Free RAM</span><span class="value" id="s-mem">&ndash;</span></div>
+  </div>
+
+  <p class="hint">Tap a tank to start or stop watching it on this phone. The number on each tile is the frame rate this phone is getting.</p>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>No tanks are sending video. Start the load test on the PC.</div>
+
+  <script>
+    'use strict';
+
+    const grid = document.getElementById('grid');
+    const tiles = new Map();   // stream id → { el, img, tag, watching }
+    const WHO = 'phone';
+
+    function setWatching(t, on) {
+      t.watching = on;
+      t.el.classList.toggle('paused', !on);
+      // Removing the src closes the connection, so a paused tile costs nothing.
+      t.img.src = on ? '/api/stream/' + encodeURIComponent(t.id) + '?who=' + WHO + '&r=' + Date.now() : '';
+      if (!on) t.tag.textContent = 'Tank ' + t.id;
+    }
+
+    function addTile(id) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'tile paused';
+      el.setAttribute('aria-label', 'Tank ' + id);
+      const img = document.createElement('img');
+      img.alt = '';
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = 'Tank ' + id;
+      el.append(img, tag);
+      grid.append(el);
+      const t = { id, el, img, tag, watching: false };
+      el.addEventListener('click', () => setWatching(t, !t.watching));
+      tiles.set(id, t);
+      // Start watching the first tank automatically.
+      if (tiles.size === 1) setWatching(t, true);
+      return t;
+    }
+
+    function cls(el, v, warnAt, badAt) {
+      el.className = 'value ' + (v >= badAt ? 'bad' : v >= warnAt ? 'warn' : 'ok');
+    }
+
+    async function refresh() {
+      let st;
+      try {
+        const r = await fetch('/api/stats', { cache: 'no-store' });
+        st = await r.json();
+      } catch {
+        return;
+      }
+
+      const live = st.streams.filter((s) => s.sources > 0);
+      let mbit = 0, viewers = 0;
+      for (const s of st.streams) {
+        mbit += s.mbitIn;
+        viewers += s.viewers.length;
+      }
+      document.getElementById('s-tanks').textContent = live.length;
+      document.getElementById('s-mbit').textContent = mbit.toFixed(1) + ' Mbit/s';
+      document.getElementById('s-viewers').textContent = viewers;
+
+      const cpuEl = document.getElementById('s-cpu');
+      const memEl = document.getElementById('s-mem');
+      if (st.system) {
+        cpuEl.textContent = Math.round(st.system.cpuBusyPct) + '%';
+        cls(cpuEl, st.system.cpuBusyPct, 60, 85);
+        memEl.textContent = Math.round(st.system.memAvailMB) + ' MB';
+      } else {
+        cpuEl.textContent = 'n/a';
+        memEl.textContent = 'n/a';
+      }
+
+      for (const s of live) {
+        const t = tiles.get(s.id) || addTile(s.id);
+        if (t.watching) {
+          const mine = s.viewers.find((v) => v.who === WHO);
+          t.tag.textContent = 'Tank ' + s.id + (mine ? ' · ' + mine.fps.toFixed(0) + ' fps' : '');
+        }
+      }
+      document.getElementById('empty').hidden = live.length > 0 || tiles.size > 0;
+    }
+
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

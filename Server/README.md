@@ -60,6 +60,33 @@ ssh root@192.168.8.1 "logread -f -e thundergeddon"             # live log (Ctrl+
 ssh root@192.168.8.1 "/etc/init.d/thundergeddon stop"          # also: start, restart
 ```
 
+## Video load test (fake tanks)
+
+`cmd/loadtest` pretends to be a fleet of tanks plus the phones and display
+watching them. Fake tanks push camera-sized MJPEG streams to the server
+(`POST /api/ingest/{id}`), fake viewers pull them back (`GET /api/stream/{id}`),
+and it prints frame rates, delay through the server, and the router's CPU and
+memory (from `GET /api/stats`).
+
+```powershell
+cd Server
+go run ./cmd/loadtest                                   # 10 tanks at 20 fps, 11 KB frames
+go run ./cmd/loadtest -tanks 20 -fps 25 -kb 15          # heavier than real
+go run ./cmd/loadtest -server http://localhost:8088     # against the PC copy
+```
+
+While it runs, open `http://192.168.8.1:8088/streams.html` on a phone on the
+router's Wi-Fi (or Settings → Video load test) to watch the relayed video and
+see the frame rate that phone gets.
+
+First results (2026-10-17, PC on the router's LAN cable, so this measures the
+router's processing, not Wi-Fi):
+
+| Load | Video in / out | Frame rate | Delay p95 | Router CPU |
+|---|---|---|---|---|
+| 10 tanks, 20 fps, 11 KB (real) | 18 / 32 Mbit/s | all 20 fps | 6 ms | 15% |
+| 20 tanks, 25 fps, 15 KB (3x) | 63 / 100 Mbit/s | all 25 fps | 14 ms | 38% |
+
 ### Remove it from the router
 
 ```powershell

@@ -4,8 +4,8 @@
 // (linux/arm64) as well as on a Windows PC for development. The web pages are
 // embedded in the binary, so deploying is one file copy.
 //
-// For now it only serves the front-end (title screen, main menu, settings).
-// It runs alongside the Unity server without touching it: different folder,
+// For now it serves the front-end (title screen, main menu, settings) and a
+// video relay used by the fake-tank load test (cmd/loadtest). It runs alongside the Unity server without touching it: different folder,
 // different port (8088 — Unity uses 8080-8082, ASP.NET 5000).
 package main
 
@@ -45,8 +45,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	rl := newRelay()
+	stats := startStats(rl)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/info", handleInfo)
+	mux.HandleFunc("GET /api/stats", stats.handle)
+	mux.HandleFunc("POST /api/ingest/{id}", rl.handleIngest)
+	mux.HandleFunc("GET /api/stream/{id}", rl.handleView)
 	mux.Handle("/", noCacheHTML(http.FileServer(http.FS(web))))
 
 	srv := &http.Server{

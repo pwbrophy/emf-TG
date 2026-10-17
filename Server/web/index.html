@@ -330,6 +330,13 @@
       overflow-wrap: anywhere;
     }
 
+    .link-row {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .link-row .value { font-size: 1.4rem; line-height: 1; }
+
     .toggle {
       position: relative;
       flex: none;
@@ -479,6 +486,9 @@
     <div class="row"><span>Running on</span><span class="value" id="info-platform">&hellip;</span></div>
     <div class="row"><span>Host name</span><span class="value" id="info-host">&hellip;</span></div>
     <div class="row"><span>Up for</span><span class="value" id="info-uptime">&hellip;</span></div>
+
+    <h3>Testing</h3>
+    <a class="row link-row" href="/streams.html"><span>Video load test</span><span class="value">&rsaquo;</span></a>
   </aside>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
