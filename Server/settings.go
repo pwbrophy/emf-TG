@@ -104,7 +104,7 @@ func defaultTuning() Tuning {
 		TurretMin: 0.4, TurretPulseMs: 20, TurretKickMs: 20, TurretBrake: true, TurretBacklashMs: 110,
 		SlowTurretSpeed: 0.2,
 		JoyDeadzone:     0.08, JoyStartSpeed: 0.4, JoyFullAt: 1, JoyCurve: 2, JoyAxisSnap: 0.15, JoyTurnSpeed: 0.7,
-		Buzzer:          true, VideoFps: 25, VideoFrameSize: 2, VideoQuality: 20,
+		Buzzer: true, VideoFps: 25, VideoFrameSize: 2, VideoQuality: 20,
 	}
 }
 
@@ -136,8 +136,9 @@ func defaultSettings() Settings {
 		SouthPointUids:  []string{"114DBB5D", "01DA2C5D", "88040AA1"},
 		CaptureSeconds:  3,
 
-		TeamNames: [2]string{"Desert Squad", "Jungle Squad"},
-		Tuning:    defaultTuning(),
+		TeamNames:    [2]string{"Desert Squad", "Jungle Squad"},
+		DebugConsole: true,
+		Tuning:       defaultTuning(),
 	}
 }
 

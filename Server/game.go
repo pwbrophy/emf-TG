@@ -727,7 +727,7 @@ func (g *game) fire(device string) {
 	p.shots++
 	g.tanks.sendTo(c.tank, `{"cmd":"flash_fire"}`)
 	// The shooter's page plays its fire beam / muzzle flash on this.
-	g.sendTo(device, map[string]any{"t": "fired"})
+	g.sendCrew(c, map[string]any{"t": "fired"})
 	g.displaySend(map[string]any{"cmd": "fire_event", "robotId": c.tank, "callsign": c.tankName})
 	if !g.ir.enqueue(shotRequest{shooter: c.tank, at: time.Now(), gen: g.match.gen}) {
 		g.sendTo(device, map[string]any{"t": "fire_result", "text": "Miss (lag)"})

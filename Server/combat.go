@@ -136,7 +136,7 @@ type playerStats struct {
 }
 
 type match struct {
-	gen        int // which game this is: shots from an earlier game are dropped
+	gen        int                   // which game this is: shots from an earlier game are dropped
 	fighters   map[string]*combatant // by tank id
 	stats      map[string]*playerStats
 	teamPoints [2]int

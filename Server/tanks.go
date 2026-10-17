@@ -64,24 +64,24 @@ type tankManager struct {
 	tanks map[string]*tankSession // by robot id
 
 	// Told when tanks come and go. Set before the server starts.
-	onChange    func()                       // the set of connected tanks changed
-	onConnected func(id string)              // a tank (re)connected and is ready for commands
+	onChange    func()                        // the set of connected tanks changed
+	onConnected func(id string)               // a tank (re)connected and is ready for commands
 	onReport    func(id string, r tankReport) // IR replies and RFID reads
 
 	fake fakeWorld // pretend IR for -fake-tanks
 }
 
 type tankSession struct {
-	id, ip string
-	nameMu       sync.Mutex
-	name         string // the tank's own name, e.g. "Desert-01" (renamable)
-	conn         *websocket.Conn // nil for a fake tank (-fake-tanks)
-	connectedAt  time.Time
-	lastSeen     atomic.Int64 // unix nanoseconds
-	heap         atomic.Int64 // free heap bytes from the latest heartbeat
-	stop         context.CancelFunc
-	flags        tankFlags // guarded by tankManager.mu
-	video        [3]int    // saved camera fps, frame size, quality from the hello (0 = unknown)
+	id, ip      string
+	nameMu      sync.Mutex
+	name        string          // the tank's own name, e.g. "Desert-01" (renamable)
+	conn        *websocket.Conn // nil for a fake tank (-fake-tanks)
+	connectedAt time.Time
+	lastSeen    atomic.Int64 // unix nanoseconds
+	heap        atomic.Int64 // free heap bytes from the latest heartbeat
+	stop        context.CancelFunc
+	flags       tankFlags // guarded by tankManager.mu
+	video       [3]int    // saved camera fps, frame size, quality from the hello (0 = unknown)
 
 	// Commands queued for the tank. Sending never blocks the caller (the game
 	// holds its lock while sending); a writer goroutine drains this.

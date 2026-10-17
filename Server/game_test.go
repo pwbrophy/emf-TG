@@ -1,8 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,7 +14,7 @@ import (
 type fakeTanks struct {
 	mu     sync.Mutex
 	ts     []tankInfo
-	sent   []string                // "id cmd-json"
+	sent   []string             // "id cmd-json"
 	onSend func(id, msg string) // optional: play the tank's part (called without locks)
 }
 

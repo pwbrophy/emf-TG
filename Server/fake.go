@@ -56,6 +56,8 @@ func (tm *tankManager) fakeCommand(id string, msg []byte) {
 		}
 		f.mu.Unlock()
 		go tm.fakeReport(id, tankReport{Cmd: "ir_window_result", Mask: &mask}, time.Duration(m.Ms)*time.Millisecond)
+	case "ping":
+		go tm.fakeReport(id, tankReport{Cmd: "pong"}, 3*time.Millisecond)
 	}
 }
 

@@ -2178,9 +2178,12 @@ class TGHub {
 let tgState = null, tgStateAt = 0;
 let tgCountdownShown = false, tgLastCount = 0;
 let tgStarted = false, tgLastTimerSec = -1, tgOver = false, tgLastHp = -1;
+let tgPaused = false, tgControls = '';
 
 function tgRemainingMs() {
-  return tgState ? Math.max(0, tgState.remainingMs - (performance.now() - tgStateAt)) : 0;
+  if (!tgState) return 0;
+  if (tgState.paused) return tgState.remainingMs; // the clock stops while paused
+  return Math.max(0, tgState.remainingMs - (performance.now() - tgStateAt));
 }
 
 function tgOnMessage(hub, m) {
@@ -2201,8 +2204,17 @@ function tgOnMessage(hub, m) {
 
   myName     = me.name || '';
   myRobotId  = me.tankName || me.tank || '';
-  myAlliance = me.team === 'Desert Squad' ? 0 : me.team === 'Jungle Squad' ? 1 : -1;
+  myAlliance = me.team ? (m.teamNames || []).indexOf(me.team) : -1;
   document.getElementById('tg-host-btn').style.display = me.isHost ? '' : 'none';
+
+  // The host's Advanced settings: joystick and turret feel, debug button.
+  const c = m.controls;
+  if (c && JSON.stringify(c) !== tgControls) {
+    tgControls = JSON.stringify(c);
+    hub.emit('JoystickSettings', c);
+    hub.emit('TurretSettings', c.slowTurretSpeed);
+    hub.emit('DebugConsole', !!c.debugConsole);
+  }
 
   if (me.status === 'playing' && m.phase === 'countdown') {
     if (!tgCountdownShown) {
@@ -2221,7 +2233,8 @@ function tgOnMessage(hub, m) {
         videoUrl:         me.tank,            // stream id: /api/robot-stream?url=<id>
         hp:               me.hp,
         maxHp:            me.maxHp,
-        role:             'solo',
+        role:             me.role || 'solo',  // driver / gunner on a 2-player tank
+        partnerName:      me.partner || '',
         cooldownDuration: m.fireCooldownMs / 1000,
       });
       // Page reopened while dead: show the death screen.
@@ -2229,6 +2242,10 @@ function tgOnMessage(hub, m) {
     } else if (me.hp !== tgLastHp) {
       tgLastHp = me.hp;
       hub.emit('StateUpdate', { hp: me.hp, maxHp: me.maxHp });
+    }
+    if (!!m.paused !== tgPaused) {
+      tgPaused = !!m.paused;
+      hub.emit(tgPaused ? 'GamePaused' : 'GameResumed');
     }
     tgTick();
     return;
@@ -2242,7 +2259,7 @@ function tgOnMessage(hub, m) {
       hub.emit('GameOver', { winnerTeam: m.winnerTeam || '', reason: m.endCode || 'manual' });
       hub.emit('PlayerStats', {
         kills: mine.kills, deaths: mine.deaths, damage: mine.damage,
-        victoryPoints: mine.victoryPoints, vpFromCaptures: 0, vpFromKills: mine.victoryPoints,
+        victoryPoints: mine.victoryPoints, vpFromCaptures: mine.vpFromCaptures, vpFromKills: mine.vpFromKills,
         nemesis: mine.nemesis || '',
       });
     }

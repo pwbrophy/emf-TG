@@ -1,0 +1,1960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thundergeddon Display</title>
+<!--
+  The spectator display for a big screen. This is the Unity-era page, kept
+  as it was; only its connection changed: TGDisplayHub (below) stands in for
+  the SignalR hub and turns the Go server's display messages (display.go)
+  into the hub events this page always handled.
+-->
+<style>
+  :root {
+    --blue:   #FFD594;  /* Desert Squad */
+    --red:    #338C2F;  /* Jungle Squad */
+    --bg:     #0d0d0d;
+    --panel:  #1a1a1a;
+    --border: #2a2a2a;
+    --text:   #e8e8e8;
+    --dim:    #666;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', Arial, sans-serif; font-size: 16px; overflow: hidden; }
+
+  /* ── LAYOUT ────────────────────────────────────────────────────── */
+  #app { display: flex; flex-direction: column; height: 100vh; padding: 12px; gap: 10px; }
+
+  /* Header */
+  #header { display: flex; justify-content: space-between; align-items: center;
+    background: var(--panel); border-radius: 8px; padding: 12px 26px; flex-shrink: 0; }
+  #title { font-size: 2.1em; font-weight: 900; letter-spacing: 2px;
+    text-transform: uppercase; color: #fff; }
+  #title span { color: #f0c040; }
+  #timer { font-size: 4em; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: #fff; min-width: 170px; text-align: right; }
+  #mute-btn { background: none; border: 1px solid #444; border-radius: 6px;
+    color: #ccc; font-size: 1.4em; cursor: pointer; padding: 4px 10px; margin-left: 16px; }
+  #mute-btn:hover { border-color: #888; color: #fff; }
+  #version { position: fixed; bottom: 6px; right: 10px; font-size: 0.65em;
+    color: #444; pointer-events: none; z-index: 9999; }
+  #timer.urgent { color: #ff4444; animation: flash 0.5s infinite alternate; }
+  @keyframes flash { from { opacity: 1; } to { opacity: 0.3; } }
+
+  /* Team points bar */
+  #teambar-wrap { background: var(--panel); border-radius: 8px; padding: 14px 22px; flex-shrink: 0; }
+  #teambar-labels { display: flex; justify-content: space-between; margin-bottom: 8px;
+    font-size: 1.3em; font-weight: 700; }
+  /* Jungle (alliance 1) on the left, Desert (alliance 0) on the right — matches the battlefield */
+  #tp-label-1 { color: var(--red); }
+  #tp-label-0 { color: var(--blue); text-align: right; }
+  #teambar-victory-marker { text-align: center; font-size: 0.9em; font-weight: 700;
+    letter-spacing: 2px; text-transform: uppercase; color: #f0c040; margin-bottom: 6px; }
+  #teambar-track { position: relative; height: 90px; background: #111; border-radius: 45px; }
+  #teambar-fill-1 { position: absolute; left: 0; top: 0; height: 100%; background: var(--red);
+    border-radius: 45px 0 0 45px; transition: width 0.4s ease; }
+  #teambar-fill-0 { position: absolute; right: 0; top: 0; height: 100%; background: var(--blue);
+    border-radius: 0 45px 45px 0; transition: width 0.4s ease; }
+  #teambar-centre { position: absolute; left: 50%; top: 0; width: 4px; height: 100%;
+    background: #fff; transform: translateX(-50%); z-index: 1; }
+  /* Victory bar flash — one-shot, triggered by JS on each score tick */
+  @keyframes bar-flash {
+    0%        { filter: brightness(1); box-shadow: none; }
+    10%       { filter: brightness(4); box-shadow: 0 0 22px 8px rgba(255,255,255,0.7); }
+    35%, 100% { filter: brightness(1); box-shadow: none; }
+  }
+  .bar-flash-once { animation: bar-flash 0.5s linear forwards; }
+
+  /* Main row: tank grid + capture-point sidebar */
+  #main-row { display: flex; gap: 10px; flex: 1; min-height: 0; }
+  #tank-grid { flex: 1; position: relative; padding: 4px; gap: 4px; background: #000;
+    border-radius: 8px; overflow: hidden; }
+
+  /* Capture points */
+  #capture-sidebar { width: 300px; flex-shrink: 0; background: var(--panel); border-radius: 8px;
+    padding: 20px; display: flex; flex-direction: column; gap: 10px; justify-content: space-around; }
+  .cp-block { display: flex; flex-direction: column; align-items: center; gap: 12px; flex: 1; justify-content: center; }
+  .cp-circle { width: 170px; height: 170px; border-radius: 50%; background: #333;
+    border: 6px solid #555; transition: background 0.4s, border-color 0.4s; }
+  .cp-circle.owner-0 { background: var(--blue); border-color: var(--blue); }
+  .cp-circle.owner-1 { background: var(--red);  border-color: var(--red); }
+  @keyframes cp-flash {
+    0%        { filter: brightness(1); box-shadow: none; }
+    10%       { filter: brightness(3); box-shadow: 0 0 16px 6px rgba(255,255,255,0.6); }
+    35%, 100% { filter: brightness(1); box-shadow: none; }
+  }
+  .cp-flash { animation: cp-flash 0.5s linear forwards; }
+  .cp-label { font-size: 1.3em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 2px; color: var(--dim); }
+
+  /* HP bar flash keyframes (used by grid-cell HP bars) */
+  @keyframes hp-hit-flash {
+    0%   { background: #ff2828; box-shadow: 0 0 6px rgba(255,40,40,0.9); }
+    50%  { background: #ff2828; box-shadow: 0 0 6px rgba(255,40,40,0.9); }
+    100% { background: #1E90FF; box-shadow: none; }
+  }
+  @keyframes hp-critical-flash {
+    0%   { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+    50%  { background: #fff;    box-shadow: 0 0 14px rgba(255,255,255,1),  0 0 30px rgba(255,100,100,0.7); }
+    100% { background: #ff2828; box-shadow: 0 0 8px rgba(255,40,40,0.95), 0 0 22px rgba(255,40,40,0.5); }
+  }
+  .grid-cell-hpbar.hp-critical { animation: hp-critical-flash 0.65s ease-in-out infinite; }
+
+  /* Kill burn — fire effect on victory bar fill when kill points awarded */
+  @keyframes bar-burn {
+    0%        { filter: brightness(1); box-shadow: none; }
+    10%       { filter: brightness(3); box-shadow: 0 0 32px 14px rgba(255,30,0,0.95); }
+    35%       { filter: brightness(3.5); box-shadow: 0 0 36px 16px rgba(255,130,0,0.8); }
+    60%       { filter: brightness(5); box-shadow: 0 0 44px 20px rgba(255,255,255,0.7); }
+    85%       { filter: brightness(2); box-shadow: 0 0 20px 8px rgba(255,80,0,0.4); }
+    100%      { filter: brightness(1); box-shadow: none; }
+  }
+  .bar-burn { animation: bar-burn 2s ease-out forwards; }
+
+  /* Kill screen pulse — full-viewport red flash */
+  @keyframes kill-screen-pulse {
+    0%   { opacity: 0; }
+    6%   { opacity: 0.55; }
+    20%  { opacity: 0.18; }
+    45%  { opacity: 0.32; }
+    70%  { opacity: 0.08; }
+    100% { opacity: 0; }
+  }
+  #kill-overlay { position: fixed; inset: 0; background: rgb(180,0,0);
+    pointer-events: none; z-index: 55; opacity: 0; }
+  #kill-overlay.kill-screen-pulse { animation: kill-screen-pulse 2s ease-out forwards; }
+
+  /* Lobby overlay — sized in vmin so text reads from a distance and scales
+     with whatever window/display it's shown on. */
+  #lobby-overlay { position: fixed; inset: 0; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding: 2.2vmin 3vmin; gap: 2.1vmin; z-index: 10; }
+  #lobby-overlay.hidden { display: none; }
+  #lobby-title { font-size: 13vmin; font-weight: 900; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #fff; line-height: 1.05; }
+  #lobby-title span { color: #f0c040; }
+  #lobby-waiting { font-size: 7.5vmin; letter-spacing: 0.06em; color: var(--dim);
+    text-transform: uppercase; }
+  #lobby-alliances { display: flex; gap: 10vmin; }
+  .lobby-team { text-align: center; }
+  .lobby-team-title { font-size: 4.8vmin; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; margin-bottom: 1.2vmin; }
+  .lobby-team-title.a0 { color: var(--blue); }
+  .lobby-team-title.a1 { color: var(--red); }
+  .lobby-player-name { font-size: 5.8vmin; padding: 0.35vmin 0; line-height: 1.15; }
+  /* A two-player crew is one line, up to "Name1 & Name2" = 27 chars. Step the
+     size down so both squad columns still fit across a 16:9 display. */
+  .lobby-player-name.crew { font-size: 4.8vmin; white-space: nowrap; }
+  .lobby-player-name.crew .amp { color: var(--dim); font-weight: 400; padding: 0 0.8vmin; }
+  #lobby-unassigned-section { text-align: center; }
+  #lobby-unassigned-title { font-size: 4.8vmin; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; margin-bottom: 1.2vmin; color: var(--dim); }
+  #lobby-unassigned { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.7vmin 4.5vmin; }
+  #lobby-unassigned .lobby-player-name { font-size: 5.8vmin; }
+  #lobby-slots { font-size: 4.2vmin; color: var(--dim); }
+  #lobby-site { font-size: 4.8vmin; font-weight: 700; letter-spacing: 0.04em; color: #f0c040; }
+
+  /* Game paused overlay */
+  #paused-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; z-index: 30; pointer-events: none; }
+  #paused-overlay.hidden { display: none; }
+  #paused-title { font-size: 4em; font-weight: 900; letter-spacing: 8px;
+    text-transform: uppercase; color: #f0c040; text-shadow: 0 0 40px #f0c040; }
+  #paused-sub { font-size: 1.1em; color: #ccc; letter-spacing: 2px; text-transform: uppercase; }
+
+  /* Connection banner */
+  #status-banner { position: fixed; bottom: 10px; right: 10px; background: #222;
+    color: #888; font-size: 0.75em; padding: 4px 10px; border-radius: 4px; z-index: 20; }
+
+  /* Countdown overlay */
+  #countdown-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.94);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 20px; z-index: 60; pointer-events: none; }
+  #countdown-overlay.hidden { display: none; }
+  #countdown-number { font-size: 35vmin; font-weight: 900; color: #fff; line-height: 1;
+    text-shadow: 0 0 80px rgba(240,192,64,0.95); animation: countpulse 0.5s cubic-bezier(0.22,1,0.36,1); }
+  #countdown-get-ready { font-size: 2em; letter-spacing: 5px; text-transform: uppercase;
+    color: #f0c040; font-weight: 700; }
+  @keyframes countpulse {
+    from { transform: scale(1.6); opacity: 0.4; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
+  /* ── Game-over sequence ─────────────────────────────────────────── */
+  #gameover-bg { position: fixed; inset: 0; z-index: 70; pointer-events: none;
+    background: rgba(0,0,0,0.92); opacity: 0; transition: opacity 0.7s; }
+  #gameover-bg.active { opacity: 1; }
+  #fireworks-canvas { position: fixed; inset: 0; z-index: 71; pointer-events: none; display: none; }
+  #gameover-overlay { position: fixed; inset: 0; z-index: 72; pointer-events: none; }
+  .go-phase { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    opacity: 0; transition: opacity 0.6s; }
+  .go-phase.visible { opacity: 1; }
+  #go-title { font-size: 12vw; font-weight: 900; letter-spacing: 6px;
+    text-transform: uppercase; color: #f0c040;
+    text-shadow: 0 0 60px rgba(240,192,64,0.9), 0 0 120px rgba(240,192,64,0.4); }
+  .go-anim-in { animation: go-in 0.55s cubic-bezier(0.22,1,0.36,1) both; }
+  @keyframes go-in {
+    from { transform: scale(1.5); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+  #go-winner-name { font-size: 7.5vw; font-weight: 900; letter-spacing: 4px;
+    text-transform: uppercase; text-shadow: 0 0 50px currentColor; }
+  #go-victory-sub { font-size: 3vw; font-weight: 700; letter-spacing: 8px;
+    text-transform: uppercase; color: #fff; text-shadow: 0 0 30px rgba(255,255,255,0.5); }
+  #go-stats { background: rgba(8,8,8,0.78); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 28px; padding: 56px 104px; min-width: 1000px; }
+  .go-stat { display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0; border-bottom: 1px solid rgba(255,255,255,0.07); gap: 64px; }
+  .go-stat:last-child { border-bottom: none; }
+  .go-stat.featured { padding: 26px 0; border-bottom: 2px solid rgba(255,255,255,0.18); margin-bottom: 12px; }
+  .gos-label { color: #777; font-size: 1.6em; letter-spacing: 1px;
+    text-transform: uppercase; white-space: nowrap; }
+  .go-stat.featured .gos-label { color: #bbb; font-size: 1.9em; }
+  .gos-value { color: #fff; font-weight: 700; text-align: right; min-width: 360px; font-size: 2em; }
+  .go-stat.featured .gos-value { color: #f0c040; font-size: 2.7em; }
+
+  /* ── Tank grid: two bands (Desert on top, Jungle on bottom) with a black gap ── */
+  #tank-grid { display: none; }
+  #tank-grid.active { display: flex; flex-direction: column; }
+
+  .squad-band { display: grid; gap: 4px; min-height: 0; }
+  .squad-band.a0 { margin-bottom: 22px; } /* the black gap between the two squads */
+
+  .squad-label { flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    height: 40px; font-size: 1.3em; font-weight: 900; letter-spacing: 0.12em;
+    text-transform: uppercase; }
+  .squad-label.a0 { background: rgba(210, 165, 55, 0.92); color: #111; margin-bottom: 4px; }
+  .squad-label.a1 { background: rgba(45, 145, 42, 0.92);  color: #fff; margin-top: 4px; }
+
+  .grid-cell { background: #111; border-radius: 4px; display: flex;
+    flex-direction: column; overflow: hidden; }
+  .grid-cell.a0 { background: rgba(200, 155, 60, 0.25); outline: 6px solid rgba(210, 165, 60, 0.9); }
+  .grid-cell.a1 { background: rgba(50, 140, 47, 0.25);  outline: 6px solid rgba(55, 155, 50, 0.9); }
+  .grid-cell.dead { outline-color: rgba(200, 40, 40, 0.55) !important; }
+  .grid-dead-msg { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(0,0,0,0.72);
+    z-index: 10; pointer-events: none; }
+  .grid-dead-msg.hidden { display: none; }
+  .grid-dead-title { font-size: 3em; font-weight: 900; color: #ff2222; letter-spacing: 4px;
+    text-transform: uppercase; text-shadow: 0 0 30px rgba(255,0,0,0.6); }
+  .grid-dead-sub { font-size: 0.8em; color: #aaa; margin-top: 10px; letter-spacing: 1px;
+    text-transform: uppercase; }
+
+  .grid-cell-video { flex: 1; min-height: 0; position: relative; background: #000;
+    /* Static mask for camera shake — see .grid-cell-shake-scale below. */
+    overflow: hidden; }
+  /* Camera shake wrappers — see the HTML comment above these elements'
+     markup for the two-layer rationale (static zoom vs. dynamic shake
+     transform). VIDEO_SHAKE_SCALE-equivalent value must match
+     .grid-cell-shake-scale's transform below. */
+  .grid-cell-shake-scale { position: absolute; inset: 0; transform: scale(1.16); transform-origin: center; }
+  .grid-cell-shake { position: absolute; inset: 0; will-change: transform; }
+  .grid-cell-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* Fire beam overlay: glowing white bolt from the barrel to the cell centre.
+     Split into a wrapper (.grid-cell-firebeam, glow only) and a child
+     (.grid-cell-firebeam-shape, the actual masked/clipped white shape).
+     Applying filter:drop-shadow() and clip-path/mask-image to the SAME
+     element is a known cross-browser footgun — several engines resolve the
+     mask/clip against the filtered result (or vice versa) inconsistently,
+     and the glow can end up cropped away by its own mask instead of
+     spreading past it. Putting the glow on a parent that merely CONTAINS the
+     already-clipped-and-masked child sidesteps the ambiguity — see the
+     matching comment in index.html's #fire-beam CSS for the fuller
+     rationale.
+     The child's clip-path is a STATIC trapezoid (wide at the muzzle,
+     narrowing to a point at centre), set once from the BEAM_* constants (see
+     BEAM_CLIP_PATH in JS). Its mask-image is a Y-axis linear-gradient
+     recomputed every tick (see updateGridFireBeamClip): it reveals a
+     travelling band that sweeps from the muzzle up to centre, with its own
+     top/bottom edges feathered by BEAM_FEATHER_FRAC of the band's current
+     height for a motion-blur look. Together, clip-path's own base line and
+     the mask's stops guarantee nothing is ever drawn below BEAM_BASE_Y (the
+     muzzle top).
+     No mix-blend-mode anywhere in this pair (i.e. normal blend) — unlike the
+     flash, the laser should read as a bright solid light source regardless
+     of what's behind it. The wrapper's opacity (not the child's) drives the
+     fade, so the glow fades together with the shape.
+     No z-index — comes before .grid-cell-fireflash in DOM order so the flash
+     paints on top of the beam. */
+  .grid-cell-firebeam {
+    position: absolute; pointer-events: none; opacity: 0;
+    /* Fallback only — overwritten by JS (computeBeamGlowFilter, called from
+       updateGridFireEffectBounds) with radii scaled to BEAM_GLOW_FALLOFF_FRAC
+       of the cell's actual rendered width once bounds are known. */
+    filter:
+      drop-shadow(0 0 7px #fff)
+      drop-shadow(0 0 17px #fff)
+      drop-shadow(0 0 32px rgba(255,255,255,0.9))
+      drop-shadow(0 0 60px rgba(255,255,255,0.7));
+  }
+  .grid-cell-firebeam-shape {
+    position: absolute; inset: 0;
+    background: #fff;
+  }
+  /* Fire flash overlay: white radial flash when the tank fires — bright centre,
+     transparent at the cell edge, with a feathered mask cutting out the gun
+     barrel silhouette at bottom-centre so the flash reads as behind the barrel.
+     mix-blend-mode:overlay multiplies dark backdrop pixels (shadows stay dark)
+     and screens light backdrop pixels (highlights brighten) — plain screen
+     blows every pixel toward white uniformly regardless of how dark it
+     started, flattening the flash into a solid white lump. Overlay keeps
+     contrast/detail visible through the flash instead. This requires no
+     ancestor between here and .grid-cell-canvas to establish a stacking
+     context (z-index/opacity/transform/filter/isolation), so no z-index here;
+     painting order relies on DOM position (after .grid-cell-firebeam, so the
+     flash paints on top of the beam, and after the canvas).
+     left/top/width/height are set by JS (updateGridFireEffectBounds) to the
+     canvas's actual rendered rect, excluding the object-fit:contain letterbox
+     bars, so the flash never lightens the black bars around the picture. */
+  .grid-cell-fireflash {
+    position: absolute; pointer-events: none; opacity: 0;
+    mix-blend-mode: overlay;
+    background: radial-gradient(ellipse farthest-side at center,
+      rgba(255,255,255,1) 0%, rgba(255,255,255,0.85) 45%, rgba(255,255,255,0) 100%);
+    -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+      rgba(0,0,0,0) 50%, #000 95%);
+    mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+      rgba(0,0,0,0) 50%, #000 95%);
+  }
+  /* Red directional hit overlay — mirrors index.html's #hit-overlay /
+     .hit-effect so the display grid shows the same "you got hit" feedback
+     the player's own phone sees. Sized relative to the cell (closest-side /
+     percentages) rather than index.html's vmin, since vmin is relative to
+     the whole viewport and would be wildly oversized for a small grid cell. */
+  .grid-cell-hit-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  @keyframes gridHitFlash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+  .grid-cell-hit-effect { position: absolute; inset: 0; opacity: 0; }
+  .grid-cell-hit-effect.flash { animation: gridHitFlash 0.6s ease-out forwards; }
+  .grid-cell-hit-front { background: radial-gradient(circle closest-side at center,
+    rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 100%); }
+  .grid-cell-hit-left { background: linear-gradient(to right,
+    rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%); }
+  .grid-cell-hit-right { background: linear-gradient(to left,
+    rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%); }
+  .grid-cell-hit-rear { background: radial-gradient(ellipse at center,
+    rgba(255,0,0,0) 35%, rgba(255,0,0,0.85) 100%); }
+  .grid-cell-nolvideo { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #444; font-size: 0.85em; }
+
+  .grid-cell-namelabel {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    font-size: 3em; font-weight: 800; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,1);
+    background: rgba(0,0,0,0.45); padding: 3px 22px; border-radius: 16px;
+    white-space: nowrap; pointer-events: none; z-index: 2;
+    max-width: 88%; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* HP footer — Desert cells put it at the top, Jungle cells at the bottom */
+  .grid-cell-footer { display: flex; align-items: center; gap: 10px;
+    background: rgba(0,0,0,0.78); padding: 8px 14px; flex-shrink: 0; }
+  .grid-cell.footer-top .grid-cell-footer { order: 0; }
+  .grid-cell.footer-top .grid-cell-video  { order: 1; }
+  .grid-cell.footer-bottom .grid-cell-video  { order: 0; }
+  .grid-cell.footer-bottom .grid-cell-footer { order: 1; }
+  .grid-cell-name { font-size: 1em; font-weight: 700; color: #eee;
+    flex-shrink: 0; white-space: nowrap; max-width: 30%; overflow: hidden; text-overflow: ellipsis; }
+  .grid-cell-hpwrap { flex: 1; height: 42px; background: #333; border-radius: 21px; overflow: hidden; }
+  .grid-cell-hpbar { height: 100%; border-radius: 21px; background: #1E90FF; transition: width 0.3s; }
+  .grid-cell-hpbar.dead-bar { background: #444; }
+  .grid-cell-hpbar.hit-flash { animation: hp-hit-flash 0.35s ease-out forwards; }
+  .grid-cell-hpnum { font-size: 0.95em; color: #888; flex-shrink: 0; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div id="version">display v14</div>
+<div id="app">
+  <!-- Header -->
+  <div id="header">
+    <div id="title">&#9889; <span>THUNDERGEDDON</span></div>
+    <div id="timer">--:--</div>
+    <button id="mute-btn" onclick="toggleMute()" title="Toggle announcer">&#128266;</button>
+  </div>
+
+  <!-- Team points bar -->
+  <div id="teambar-wrap">
+    <div id="teambar-labels">
+      <span id="tp-label-1">Jungle Squad — 0 pts</span>
+      <span id="tp-label-0">0 pts — Desert Squad</span>
+    </div>
+    <div id="teambar-victory-marker">&#127942; Victory &#127942;</div>
+    <div id="teambar-track">
+      <div id="teambar-fill-0" style="width:0%"></div>
+      <div id="teambar-fill-1" style="width:0%"></div>
+      <div id="teambar-centre"></div>
+    </div>
+  </div>
+
+  <!-- Tank grid + capture points -->
+  <div id="main-row">
+    <div id="tank-grid"></div>
+    <div id="capture-sidebar">
+      <div class="cp-block">
+        <div class="cp-circle" id="cp-0"></div>
+        <div class="cp-label">North</div>
+      </div>
+      <div class="cp-block">
+        <div class="cp-circle" id="cp-1"></div>
+        <div class="cp-label">Centre</div>
+      </div>
+      <div class="cp-block">
+        <div class="cp-circle" id="cp-2"></div>
+        <div class="cp-label">South</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lobby overlay -->
+<div id="lobby-overlay">
+  <div id="lobby-title">&#9889; <span>THUNDERGEDDON</span></div>
+  <div id="lobby-waiting">Waiting to Start</div>
+  <div id="lobby-unassigned-section">
+    <div id="lobby-unassigned-title">Unassigned</div>
+    <div id="lobby-unassigned"></div>
+  </div>
+  <!-- Jungle Squad (left) + Desert Squad (right) — matches the battlefield layout -->
+  <div id="lobby-alliances">
+    <div class="lobby-team">
+      <div class="lobby-team-title a1">Jungle Squad</div>
+      <div id="lobby-team-1"></div>
+    </div>
+    <div class="lobby-team">
+      <div class="lobby-team-title a0">Desert Squad</div>
+      <div id="lobby-team-0"></div>
+    </div>
+  </div>
+  <div id="lobby-slots">— / — slots available</div>
+  <div id="lobby-site">www.thundergeddon.com</div>
+</div>
+
+<div id="countdown-overlay" class="hidden">
+  <div id="countdown-number">5</div>
+  <div id="countdown-get-ready">GET READY!</div>
+</div>
+
+<div id="paused-overlay" class="hidden">
+  <div id="paused-title">&#9646;&#9646; PAUSED</div>
+  <div id="paused-sub">Game paused by operator</div>
+</div>
+
+<div id="kill-overlay"></div>
+
+<div id="gameover-bg"></div>
+<canvas id="fireworks-canvas"></canvas>
+<div id="gameover-overlay">
+  <div class="go-phase" id="go-phase1">
+    <div id="go-title">GAME OVER</div>
+  </div>
+  <div class="go-phase" id="go-phase2">
+    <div id="go-winner-name"></div>
+    <div id="go-victory-sub">ARE VICTORIOUS!</div>
+  </div>
+  <div class="go-phase" id="go-phase3">
+    <div id="go-stats">
+      <div class="go-stat featured">
+        <span class="gos-label">&#11088;&nbsp; Best Player</span>
+        <span class="gos-value" id="gos-best">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Kills</span>
+        <span class="gos-value" id="gos-kills">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Deaths</span>
+        <span class="gos-value" id="gos-deaths">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Damage Given</span>
+        <span class="gos-value" id="gos-damage-gvn">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Damage Taken</span>
+        <span class="gos-value" id="gos-damage-tkn">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Points Captured</span>
+        <span class="gos-value" id="gos-captures">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Points Gained</span>
+        <span class="gos-value" id="gos-points">—</span>
+      </div>
+      <div class="go-stat">
+        <span class="gos-label">Most Ground Covered</span>
+        <span class="gos-value" id="gos-ground">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="status-banner">Connecting&hellip;</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+let state = {
+  phase: 'mainmenu',
+  timer: 0,
+  playerCount: 0,
+  maxPlayers: 6,
+  teamPoints: [0, 0],
+  maxTeamPoints: 300,
+  allianceNames: ['Desert Squad', 'Jungle Squad'],
+  players: [],
+  robots: [],
+  capturePoints: [{ name:'North', owner:-1 }, { name:'Centre', owner:-1 }, { name:'South', owner:-1 }]
+};
+
+// ── Game-over client-side stat accumulation ───────────────────────────────
+let _csDeaths     = {};  // { playerName: count }
+let _csKills      = {};  // { playerName: count } — inferred from KillEvent
+let _csHpSnap     = {};  // { callsign: lastKnownHp }
+let _csDmgRcvd    = {};  // { playerName: totalDamageReceived }
+let _gameOverActive = false;
+let _goTimers       = [];
+
+function _goDelay(fn, ms) { const t = setTimeout(fn, ms); _goTimers.push(t); }
+function _goClearTimers()  { _goTimers.forEach(clearTimeout); _goTimers = []; }
+
+function resetGameStats() { _csDeaths = {}; _csKills = {}; _csHpSnap = {}; _csDmgRcvd = {}; }
+
+function trackHpForStats(robots) {
+  if (!robots) return;
+  robots.forEach(r => {
+    if (!r.callsign) return;
+    const prev = _csHpSnap[r.callsign];
+    if (prev != null && r.hp < prev) {
+      const p = r.player || r.callsign;
+      _csDmgRcvd[p] = (_csDmgRcvd[p] || 0) + (prev - r.hp);
+    }
+    _csHpSnap[r.callsign] = r.hp;
+  });
+}
+
+function trackDeathForStats(targetCallsign) {
+  const victim = (state.robots || []).find(x => x.callsign === targetCallsign);
+  const vp = victim ? (victim.player || targetCallsign) : targetCallsign;
+  if (vp) _csDeaths[vp] = (_csDeaths[vp] || 0) + 1;
+
+  // Infer kill: if the opposing team has exactly one alive robot (excluding the victim), credit it
+  if (!victim) return;
+  const killerTeam = victim.alliance === 0 ? 1 : 0;
+  const candidates = (state.robots || []).filter(
+    r => r.alliance === killerTeam && !r.dead && r.callsign !== targetCallsign
+  );
+  if (candidates.length === 1) {
+    const kp = candidates[0].player || candidates[0].callsign;
+    if (kp) _csKills[kp] = (_csKills[kp] || 0) + 1;
+  }
+}
+
+function csStatWinner(map) {
+  let best = null, bestVal = -Infinity;
+  Object.entries(map).forEach(([k, v]) => { if (v > bestVal) { best = k; bestVal = v; } });
+  return best ? { player: best, value: bestVal } : null;
+}
+
+// ── Fireworks engine (identical to player client) ─────────────────────────
+const SQUAD_FW_COLORS = {
+  0: ['#FF8C00','#FFD700','#FFC300','#FF6000','#FFAA00','#FFE566'],
+  1: ['#00D400','#50FF00','#FFFFFF','#ADFF2F','#00FF88','#CCFF33'],
+};
+const FW_SPARK_SCALE   = 0.25;
+const FW_GRAVITY_SPARK = 180;
+let _goFireworksRaf = null;
+let _goParticles    = [];
+
+// ── Firework sound effect (synthesized — no audio assets needed) ──────────
+let _fwAudioCtx = null;
+function fwAudioCtx() {
+  if (!_fwAudioCtx) _fwAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_fwAudioCtx.state === 'suspended') _fwAudioCtx.resume().catch(() => {});
+  return _fwAudioCtx;
+}
+// Autoplay policies suspend a fresh AudioContext until a user gesture — unlock on the first one.
+['click', 'keydown', 'touchstart'].forEach(evt =>
+  window.addEventListener(evt, () => fwAudioCtx(), { once: true, passive: true }));
+
+function playPop() {
+  if (_muted) return;
+  const ctx = fwAudioCtx();
+  const now = ctx.currentTime;
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150 + Math.random() * 50, now);
+  osc.frequency.exponentialRampToValueAtTime(45, now + 0.12);
+  gain.gain.setValueAtTime(0.3, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.17);
+}
+
+function startGoFireworks(colors, canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  _goParticles  = [];
+
+  let lastT      = 0;
+  let nextRocket = 0;
+
+  function launchRocket() {
+    const apexX = canvas.width  * (0.12 + Math.random() * 0.76);
+    const apexY = canvas.height * (0.04 + Math.random() * 0.24);
+    const T     = 1.4 + Math.random() * 1.0;
+    const h     = canvas.height - apexY;
+    const vy0   = -2 * h / T;
+    const grav  = 2 * h / (T * T);
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const vx      = (Math.random() * 2 - 1) * Math.abs(vy0) * 0.5774;
+    const launchX = Math.max(0, Math.min(canvas.width, apexX - vx * T));
+    _goParticles.push({ type:'rocket', x:launchX, y:canvas.height, vx, vy:vy0, grav, trail:[], color });
+  }
+
+  function explodeRocket(rx, ry) {
+    _goParticles.push({ type:'flash', x:rx, y:ry });
+    playPop();
+    const count = 54 + Math.floor(Math.random() * 32);
+    for (let i = 0; i < count; i++) {
+      const angle   = Math.random() * Math.PI * 2;
+      const speed   = 180 + Math.random() * 570;
+      const maxLife = 0.24 + Math.random() * 0.20;
+      const size    = 3.3 + Math.random() * 5.7;
+      const color   = colors[Math.floor(Math.random() * colors.length)];
+      _goParticles.push({
+        type:'spark', x:rx, y:ry,
+        vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
+        life:maxLife, maxLife, color, size,
+        freq:  10 + Math.random() * 22,
+        phase: Math.random() * Math.PI * 2,
+        age:   0,
+      });
+    }
+  }
+
+  function frame(t) {
+    const dt = Math.min((t - lastT) / 1000, 0.05);
+    lastT = t;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (t >= nextRocket) {
+      launchRocket();
+      nextRocket = t + 266 + Math.random() * 334;
+    }
+    const alive = [];
+    for (const p of _goParticles) {
+      if (p.type === 'rocket') {
+        p.trail.push({x:p.x, y:p.y});
+        if (p.trail.length > 10) p.trail.shift();
+        p.vy += p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.vy >= 0) {
+          explodeRocket(p.x, p.y);
+        } else {
+          for (let i = 0; i < p.trail.length; i++) {
+            ctx.globalAlpha = (i / p.trail.length) * 0.8;
+            ctx.fillStyle   = p.color;
+            ctx.beginPath(); ctx.arc(p.trail[i].x, p.trail[i].y, 1.6, 0, Math.PI*2); ctx.fill();
+          }
+          ctx.globalAlpha = 1; ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 2.8, 0, Math.PI*2); ctx.fill();
+          alive.push(p);
+        }
+      } else if (p.type === 'flash') {
+        const flashR = Math.min(canvas.width, canvas.height) * 0.25;
+        const flashG = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, flashR);
+        flashG.addColorStop(0, 'rgba(255,255,255,0.75)'); flashG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 1;
+        ctx.fillStyle = flashG; ctx.beginPath(); ctx.arc(p.x, p.y, flashR, 0, Math.PI*2); ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        const sdt = dt * FW_SPARK_SCALE;
+        p.age += dt;
+        const drag = 1 - 0.08 * sdt * 60;
+        p.vx *= drag; p.vy *= drag; p.vy += FW_GRAVITY_SPARK * sdt;
+        p.x += p.vx * sdt; p.y += p.vy * sdt; p.life -= sdt;
+        if (p.life > 0) {
+          const frac    = p.life / p.maxLife;
+          const flicker = 0.5 + 0.5 * Math.sin(p.age * p.freq * Math.PI * 2 + p.phase);
+          const endFade = frac < 0.20 ? (frac / 0.20) : 1.0;
+          const alpha   = flicker * endFade;
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = alpha * 0.6;
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
+          glowGrad.addColorStop(0, p.color); glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = glowGrad; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI*2); ctx.fill();
+          ctx.globalAlpha = alpha;
+          const bodyGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+          bodyGrad.addColorStop(0, p.color); bodyGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = bodyGrad; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+          if (flicker > 0.45) {
+            const coreFrac = (flicker - 0.45) / 0.55;
+            ctx.globalAlpha = alpha * coreFrac; ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI*2); ctx.fill();
+          }
+          if (flicker > 0.80) {
+            const peakFrac = (flicker - 0.80) / 0.20;
+            const len = p.size * 3.5 * Math.max(0.3, frac);
+            ctx.globalAlpha = alpha * peakFrac * 0.95; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9;
+            ctx.beginPath();
+            ctx.moveTo(p.x - len, p.y); ctx.lineTo(p.x + len, p.y);
+            ctx.moveTo(p.x, p.y - len); ctx.lineTo(p.x, p.y + len);
+            ctx.stroke();
+          }
+          ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+          alive.push(p);
+        }
+      }
+    }
+    _goParticles    = alive;
+    _goFireworksRaf = requestAnimationFrame(frame);
+  }
+  _goFireworksRaf = requestAnimationFrame(t0 => { lastT = t0; _goFireworksRaf = requestAnimationFrame(frame); });
+}
+
+function stopGoFireworks() {
+  if (_goFireworksRaf) { cancelAnimationFrame(_goFireworksRaf); _goFireworksRaf = null; }
+  _goParticles = [];
+}
+
+// ── Game-over sequence ────────────────────────────────────────────────────
+function showGameOver(winnerTeam, serverStats) {
+  if (_gameOverActive) return;
+  _gameOverActive = true;
+  _goClearTimers();
+
+  const bg     = document.getElementById('gameover-bg');
+  const p1     = document.getElementById('go-phase1');
+  const p2     = document.getElementById('go-phase2');
+  const p3     = document.getElementById('go-phase3');
+  const nameEl = document.getElementById('go-winner-name');
+
+  const allianceIdx = (state.allianceNames || []).indexOf(winnerTeam);
+  nameEl.textContent = winnerTeam || 'WINNER';
+  nameEl.style.color = allianceIdx === 0 ? 'var(--blue)' : allianceIdx === 1 ? 'var(--red)' : '#f0c040';
+
+  p1.classList.remove('visible'); p2.classList.remove('visible'); p3.classList.remove('visible');
+  bg.classList.add('active');
+
+  // Phase 1: "GAME OVER" with scale-in animation
+  _goDelay(() => {
+    const titleEl = document.getElementById('go-title');
+    titleEl.classList.remove('go-anim-in'); void titleEl.offsetWidth; titleEl.classList.add('go-anim-in');
+    p1.classList.add('visible');
+  }, 100);
+
+  // Phase 2: victory proclamation + fireworks start
+  _goDelay(() => {
+    p1.classList.remove('visible');
+    const _fwCv = document.getElementById('fireworks-canvas');
+    _fwCv.style.display = 'block';
+    startGoFireworks(SQUAD_FW_COLORS[allianceIdx] || SQUAD_FW_COLORS[0], _fwCv);
+    _goDelay(() => p2.classList.add('visible'), 200);
+  }, 2500);
+
+  // Phase 3: stats (fireworks keep running)
+  _goDelay(() => {
+    p2.classList.remove('visible');
+    populateGoStats(serverStats);
+    _goDelay(() => p3.classList.add('visible'), 300);
+  }, 7000);
+}
+
+function hideGameOver() {
+  if (!_gameOverActive) return;
+  _gameOverActive = false;
+  _goClearTimers();
+  stopGoFireworks();
+  const _fwCv = document.getElementById('fireworks-canvas');
+  if (_fwCv) { _fwCv.getContext('2d').clearRect(0, 0, _fwCv.width, _fwCv.height); _fwCv.style.display = 'none'; }
+  document.getElementById('gameover-bg').classList.remove('active');
+  ['go-phase1','go-phase2','go-phase3'].forEach(id =>
+    document.getElementById(id).classList.remove('visible'));
+}
+
+function populateGoStats(serverStats) {
+  const s      = serverStats || {};
+  const deathW = csStatWinner(_csDeaths);
+  const killsW = csStatWinner(_csKills);
+  const dmgW   = csStatWinner(_csDmgRcvd);
+
+  // Best player: server value, or highest-HP surviving winner robot
+  let bestPlayer = (s.bestPlayer && s.bestPlayer.player) ? s.bestPlayer : null;
+  if (!bestPlayer) {
+    const an    = state.allianceNames || [];
+    const wText = document.getElementById('go-winner-name').textContent;
+    const wIdx  = an.indexOf(wText);
+    const alive = (state.robots || []).filter(r => r.alliance === wIdx && !r.dead);
+    if (alive.length) {
+      const best = alive.reduce((a, b) => a.hp > b.hp ? a : b);
+      bestPlayer = { player: best.player || best.callsign, value: best.hp + ' HP' };
+    }
+  }
+
+  const rows = [
+    { id: 'gos-best',       data: bestPlayer },
+    { id: 'gos-kills',      data: s.mostKills       || killsW },
+    { id: 'gos-deaths',     data: s.mostDeaths      || deathW },
+    { id: 'gos-damage-gvn', data: s.mostDamageGiven || null },
+    { id: 'gos-damage-tkn', data: s.mostDamageTaken || dmgW   },
+    { id: 'gos-captures',   data: s.mostCaptures    || null },
+    { id: 'gos-points',     data: s.mostPoints      || null },
+    { id: 'gos-ground',     data: s.mostGround      || null },
+  ];
+
+  rows.forEach(({ id, data }) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!data || !data.player) { el.textContent = '—'; return; }
+    el.textContent = data.value != null ? `${data.player}  (${data.value})` : data.player;
+  });
+}
+
+// ── HP hit-flash queue (populated before state merge, applied after render) ──
+const _pendingHpFlashes = new Set();
+
+function applyPendingHpFlashes() {
+  _pendingHpFlashes.forEach(cs => {
+    const idx = (state.robots || []).findIndex(r => r.callsign === cs);
+    if (idx >= 0) {
+      const gel = document.getElementById('grid-hp-' + idx);
+      if (gel) { gel.classList.remove('hit-flash'); void gel.offsetWidth; gel.classList.add('hit-flash'); setTimeout(() => gel.classList.remove('hit-flash'), 370); }
+    }
+  });
+  _pendingHpFlashes.clear();
+}
+
+// ── Timer milestone tracking ──────────────────────────────────────────────
+let _prevTimer = null;
+const _milestoneFired = {};
+const _spokenCountdownSecs = new Set();
+
+// ── SignalR connection ────────────────────────────────────────────────────
+// ── Connection to the Go server ──────────────────────────────────────────
+// Stands in for the SignalR connection: on / invoke / start and the
+// reconnect callbacks, over /ws. The server sends display_update snapshots
+// and events (see Server/display.go); they become the events below.
+class TGDisplayHub {
+  constructor() {
+    this.handlers = {};
+    this._onReconnecting = []; this._onReconnected = []; this._onClose = [];
+    this._everOpen = false;
+    this._retryMs = 500;
+    this._countdown = false;
+    this._paused = false;
+    this._device = 'display-' + Math.random().toString(16).slice(2, 10);
+    setInterval(() => this._raw({ t: 'ping' }), 5000);
+  }
+  on(name, fn)       { this.handlers[name] = fn; }
+  onreconnecting(fn) { this._onReconnecting.push(fn); }
+  onreconnected(fn)  { this._onReconnected.push(fn); }
+  onclose(fn)        { this._onClose.push(fn); }
+  invoke()           { return Promise.resolve(); }   // JoinDisplay: the hello does it
+  start() {
+    return new Promise((resolve) => { this._connect(resolve); });
+  }
+  emit(name, ...args) {
+    const fn = this.handlers[name];
+    if (!fn) return;
+    try { fn(...args); } catch (e) { console.error('handler ' + name, e); }
+  }
+  _raw(obj) {
+    if (this._ws && this._ws.readyState === WebSocket.OPEN) this._ws.send(JSON.stringify(obj));
+  }
+  _connect(onFirstOpen) {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    this._ws = ws;
+    ws.onopen = () => {
+      this._retryMs = 500;
+      ws.send(JSON.stringify({ t: 'hello', device: this._device, display: true }));
+      if (this._everOpen) this._onReconnected.forEach((f) => f());
+      this._everOpen = true;
+      if (onFirstOpen) { onFirstOpen(); onFirstOpen = null; }
+    };
+    ws.onmessage = (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch (_) { return; }
+      this._message(m);
+    };
+    ws.onclose = () => {
+      if (this._ws !== ws) return;
+      this._onReconnecting.forEach((f) => f());
+      setTimeout(() => this._connect(), this._retryMs);
+      this._retryMs = Math.min(this._retryMs * 2, 4000);
+    };
+  }
+  _message(m) {
+    switch (m.cmd) {
+      case 'display_update':
+        // The countdown overlay: shown when a countdown starts.
+        if (m.phase === 'countdown' && !this._countdown) {
+          this._countdown = true;
+          this.emit('CountdownStarted', '');
+        }
+        if (m.phase !== 'countdown') this._countdown = false;
+        if (m.paused !== this._paused) {
+          this._paused = m.paused;
+          this.emit(m.paused ? 'GamePaused' : 'GameResumed');
+        }
+        this.emit('DisplayUpdate', m);
+        break;
+      case 'countdown_tick':
+        if (!this._countdown) { this._countdown = true; this.emit('CountdownStarted', m.count); }
+        this.emit('CountdownTick', m.count, m.total);
+        break;
+      case 'display_event': this.emit('DisplayEvent', m.text); break;
+      case 'kill_event':    this.emit('KillEvent', m); break;
+      case 'fire_event':    this.emit('FireEvent', m); break;
+      case 'hit_event':     this.emit('HitEvent', m); break;
+      case 'game_over':     this.emit('GameOver', { winnerTeam: m.winnerTeam, reason: m.reason, stats: m.stats }); break;
+    }
+  }
+}
+
+const conn = new TGDisplayHub();
+
+conn.on('DisplayUpdate', rawJson => {
+  try {
+    const data = (typeof rawJson === 'string') ? JSON.parse(rawJson) : rawJson;
+    applyDisplayUpdate(data);
+  } catch(e) { console.error('DisplayUpdate parse error', e); }
+});
+
+conn.on('DisplayEvent', text => {
+  speakDisplayEvent(text);
+});
+
+conn.on('GameOver', data => {
+  const msg = data.winnerTeam ? `${data.winnerTeam} wins!` : `Game over!`;
+  // Full spoken announcement arrives via DisplayEvent just before this — don't cancel it
+  showGameOver(data.winnerTeam || '', data.stats || null);
+});
+
+conn.on('CountdownStarted', total => {
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = total;
+  numEl.style.animation = 'none'; numEl.offsetHeight; numEl.style.animation = '';
+  document.getElementById('countdown-overlay').classList.remove('hidden');
+});
+
+conn.on('CountdownTick', (count, total) => {
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = count;
+  numEl.style.animation = 'none'; numEl.offsetHeight; numEl.style.animation = '';
+  speak(count.toString(), 'high', 1000);
+});
+
+conn.on('GamePaused',  () => {
+  document.getElementById('paused-overlay').classList.remove('hidden');
+  speak('Game paused', 'high', 5000);
+});
+conn.on('GameResumed', () => {
+  document.getElementById('paused-overlay').classList.add('hidden');
+  speak('Game resumed', 'high', 5000);
+});
+
+// Display-only traffic (DisplayUpdate, DisplayEvent, HitEvent, KillEvent) is sent
+// only to the "display" group, so join it on every (re)connect — a reconnect is a
+// new connection id and loses group membership.
+function joinDisplayGroup() {
+  conn.invoke('JoinDisplay').catch(e => console.error('JoinDisplay failed', e));
+}
+
+conn.onreconnecting(() => setBanner('Reconnecting…'));
+conn.onreconnected(() => { setBanner('Connected'); joinDisplayGroup(); });
+conn.onclose(() => setBanner('Disconnected — refresh to reconnect'));
+
+async function startConnection() {
+  try {
+    await conn.start();
+    setBanner('Connected');
+    joinDisplayGroup();
+    // Do NOT call JoinLobby — display page is read-only
+  } catch(e) {
+    setBanner('Connection failed — retrying…');
+    setTimeout(startConnection, 3000);
+  }
+}
+startConnection();
+
+// ── WebSocket JPEG stream ────────────────────────────────────────────────
+// Uses /api/video-ws instead of /api/robot-stream to avoid Firefox's
+// 6-connection-per-server limit on HTTP/1.1 (WebSockets are not counted).
+// Frame-rate cap for the tank grid: the tiles are small, and decoding up to ten
+// full-rate streams is real work for the laptop that also runs Unity and the
+// stream proxy. The server drops the extra frames before sending. Override with
+// display.html?maxfps=25 (0 = uncapped).
+const DISPLAY_MAX_FPS = (() => {
+  const v = parseInt(new URLSearchParams(location.search).get('maxfps'), 10);
+  return Number.isFinite(v) && v >= 0 ? v : 15;
+})();
+
+function videoWsUrl(robotUrl) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(robotUrl)}` +
+         `&who=display&maxfps=${DISPLAY_MAX_FPS}`;
+}
+
+// Decodes one JPEG (ArrayBuffer) off the main thread via createImageBitmap where
+// supported, falling back to <img> + blob URL. Same helper as index.html.
+function decodeJpegFrame(buf) {
+  const blob = new Blob([buf], { type: 'image/jpeg' });
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('jpeg decode')); };
+    img.src = url;
+  });
+}
+
+// ── Fire effect overlay: two pieces per tank's video cell, both
+// overlay-blended (see .grid-cell-fireflash / .grid-cell-firebeam CSS) and
+// masked around the gun barrel. Triggered by the server-broadcast FireEvent,
+// keyed by callsign.
+//   - .grid-cell-fireflash: white radial flash, snaps to 100% instantly then
+//     decays exponentially over FIRE_FLASH_MS.
+//   - .grid-cell-firebeam: glowing trapezoid from the barrel to the cell
+//     centre. The trapezoid shape itself is static; a clip-path band sweeps
+//     from the barrel up to the centre over BEAM_MS, shrinking in height as
+//     it goes, to sell a bolt travelling away from the camera (see
+//     updateGridFireBeamClip).
+//
+// Both are stepped by real decoded video frames (the canvas decode path's
+// img.onload, called once per JPEG actually received) rather than a smooth
+// rAF ramp, so neither effect ever appears to update at a different rate
+// than the footage it's screened over — see the matching comment in
+// index.html's onVideoFrameTick for the fuller rationale.
+const FIRE_FLASH_MS = 500;
+const FIRE_FLASH_K  = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+const BEAM_MS            = 130;
+const BEAM_EASE_K        = 0.6; // gentle ease-out: still moving at ~55% of its starting speed at
+                                 // the end (exp(-K)), not grinding to a halt like a stronger K would
+const BEAM_FADE_MS       = 33;  // trailing portion of BEAM_MS spent fading opacity to 0, so the
+                                 // shape doesn't just vanish mid-frame when the sweep finishes
+const BEAM_APEX_Y        = 50;  // % — cell's visual centre (no reticule on this spectator view)
+const BEAM_BASE_Y        = 68;  // % — top of the muzzle. Was 65; brought back down ~1/3 of the way
+                                 // toward the previous (75) value per request. Still an estimate —
+                                 // retune against the real FPV video if it still looks off.
+const BEAM_APEX_HALF_W   = 0.75; // % — near-point tip at the centre (half the previous width)
+const BEAM_BASE_HALF_W   = 7.5;  // % — wide base at the barrel (half the previous width)
+const BEAM_BAND_H_START  = 14;   // % — traveling band's height when it starts (close, so "tall") —
+                                  // doubled so the beam reads as a stretched bolt, not a short blob
+const BEAM_BAND_H_END    = 2;    // % — band's height once it reaches the centre (far, so "short")
+const BEAM_FEATHER_FRAC  = 0.4;  // 40% of the band's current height, feathered at both edges (motion blur)
+const BEAM_GLOW_FALLOFF_FRAC = 0.10; // glow fades to ~0 by this fraction of the cell's rendered width
+const _gridFireFlashActive = {}; // index → bool
+const _gridFireBeamActive  = {}; // index → bool
+const _gridFireStart       = {}; // index → performance.now() at trigger (shared: flash + beam fire together)
+
+// Static barrel→centre trapezoid outline (X taper), computed once from the
+// BEAM_* constants — the apex/base positions never change, so this doesn't
+// need to be recomputed per tick like the mask (see updateGridFireBeamClip).
+const BEAM_CLIP_PATH = (() => {
+  const pts = [
+    [50 - BEAM_APEX_HALF_W, BEAM_APEX_Y],
+    [50 + BEAM_APEX_HALF_W, BEAM_APEX_Y],
+    [50 + BEAM_BASE_HALF_W, BEAM_BASE_Y],
+    [50 - BEAM_BASE_HALF_W, BEAM_BASE_Y],
+  ];
+  return `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
+})();
+
+// Builds a cell's firebeam glow filter so it reaches ~0 opacity by
+// BEAM_GLOW_FALLOFF_FRAC of the cell's actual rendered width — see the
+// matching comment on index.html's computeBeamGlowFilter for the fuller
+// rationale (fixed px radii can't represent "~10% of width" once cell size
+// varies with grid layout / screen size).
+function computeBeamGlowFilter(widthPx) {
+  const d = widthPx * BEAM_GLOW_FALLOFF_FRAC;
+  return `drop-shadow(0 0 ${d * 0.06}px #fff)` +
+    `drop-shadow(0 0 ${d * 0.15}px #fff)` +
+    `drop-shadow(0 0 ${d * 0.3}px #fff)` +
+    `drop-shadow(0 0 ${d * 0.55}px rgba(255,255,255,0.85))` +
+    `drop-shadow(0 0 ${d}px rgba(255,255,255,0.6))`;
+}
+
+// Sizes/positions a cell's fireflash/firebeam divs to the canvas's actual
+// rendered rect within .grid-cell-video, excluding the object-fit:contain
+// letterbox bars, so neither effect lightens the black bars around the feed.
+// Also rebuilds the cell's firebeam glow filter (see computeBeamGlowFilter)
+// since its radii are relative to this same width.
+function updateGridFireEffectBounds(index) {
+  const canvas = document.getElementById(`grid-canvas-${index}`);
+  if (!canvas) return;
+  // canvas.parentElement is .grid-cell-shake now (nested inside the camera
+  // shake wrappers), but that's inset:0 same as .grid-cell-video used to be,
+  // so its clientWidth/Height are identical — no change needed here.
+  const container = canvas.parentElement;
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const nw = canvas.width, nh = canvas.height;
+  let left = 0, top = 0, width = cw, height = ch;
+  if (nw && nh && cw && ch) {
+    const videoAspect = nw / nh, containerAspect = cw / ch;
+    if (videoAspect > containerAspect) {
+      width = cw; height = cw / videoAspect; left = 0; top = (ch - height) / 2;
+    } else {
+      height = ch; width = ch * videoAspect; top = 0; left = (cw - width) / 2;
+    }
+  }
+  for (const prefix of ['grid-firefx-', 'grid-firebeam-']) {
+    const el = document.getElementById(`${prefix}${index}`);
+    if (!el) continue;
+    el.style.left   = left + 'px';
+    el.style.top    = top + 'px';
+    el.style.width  = width + 'px';
+    el.style.height = height + 'px';
+  }
+  const beamEl = document.getElementById(`grid-firebeam-${index}`);
+  if (beamEl) beamEl.style.filter = computeBeamGlowFilter(width);
+}
+
+// Gentle ease-out: mostly-constant speed with only a slight slowdown near the
+// cell centre (see BEAM_EASE_K) — a strong ease-out reads as the beam
+// drifting to a stop, which looks wrong for something meant to still be
+// moving fast when it arrives. Normalised so p(0)=0 and p(BEAM_MS)=1 exactly.
+function beamEaseProgress(elapsedMs) {
+  const t = Math.min(1, elapsedMs / BEAM_MS);
+  const norm = 1 - Math.exp(-BEAM_EASE_K);
+  return (1 - Math.exp(-BEAM_EASE_K * t)) / norm;
+}
+
+// Fades the beam out over the trailing BEAM_FADE_MS of its life instead of
+// cutting it at full opacity — an instant cut reads as a visible "pop" right
+// as the sweep finishes.
+function beamOpacityAt(elapsedMs) {
+  const fadeStart = BEAM_MS - BEAM_FADE_MS;
+  if (elapsedMs <= fadeStart) return 1;
+  if (elapsedMs >= BEAM_MS) return 0;
+  return 1 - (elapsedMs - fadeStart) / BEAM_FADE_MS;
+}
+
+// Updates a cell's firebeam-shape mask-image to the current sweep position: a
+// travelling band, feathered at both edges, whose TRAILING (muzzle-side)
+// edge sweeps from the muzzle (BEAM_BASE_Y%) toward the centre
+// (BEAM_APEX_Y%) as the LEADING edge trails behind it by the current band
+// height — so the band always sits within [apexY, baseY], never past the
+// muzzle. Band height shrinks toward the centre (perspective), and the
+// feather width (BEAM_FEATHER_FRAC of the current band height) shrinks along
+// with it. Combined with the shape's static clip-path (the X taper), the
+// visible slice narrows in both X and Y as it recedes, reading as
+// perspective. The wrapper's (.grid-cell-firebeam's) opacity is what
+// actually fades — see beamOpacityAt — so the glow fades together with the
+// shape. Position keeps advancing for the full BEAM_MS independently of that
+// fade, so the beam is still moving as it fades rather than freezing then
+// vanishing.
+function updateGridFireBeamClip(index, elapsedMs) {
+  const wrapperEl = document.getElementById(`grid-firebeam-${index}`);
+  const shapeEl   = document.getElementById(`grid-firebeam-shape-${index}`);
+  if (!wrapperEl || !shapeEl) return;
+  const p = beamEaseProgress(elapsedMs);
+  const trailY = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
+  const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
+  const leadY  = trailY - bandH;
+  const feather      = Math.min(BEAM_FEATHER_FRAC * bandH, bandH / 2);
+  const innerTop    = leadY + feather;
+  const innerBottom = trailY - feather;
+  const mask = `linear-gradient(to bottom,` +
+    `rgba(0,0,0,0) 0%, rgba(0,0,0,0) ${leadY}%,` +
+    `#000 ${innerTop}%, #000 ${innerBottom}%,` +
+    `rgba(0,0,0,0) ${trailY}%, rgba(0,0,0,0) 100%)`;
+  shapeEl.style.webkitMaskImage = mask;
+  shapeEl.style.maskImage = mask;
+  wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
+}
+
+// ════════════════════════════════════════════════════════
+// Camera shake — applied only to a cell's .grid-cell-shake (the video +
+// fire-beam/fire-flash group — see the matching comment in index.html's
+// #video-shake-scale for the full rationale), never the cell's footer (name/
+// HP). Per-cell state since multiple cells can shake independently.
+// ════════════════════════════════════════════════════════
+const SHAKE_TIER_RANK = { fire: 1, hit: 2, destroy: 3 };
+const SHAKE_TIERS = {
+  fire:    { durationMs: 180, decayK: 5,   ampVpct: 0.6, ampHpct: 0,   ampRdeg: 0 }, // vertical only
+  hit:     { durationMs: 380, decayK: 4.5, ampVpct: 2.2, ampHpct: 0.9, ampRdeg: 0 }, // + a little horizontal
+  destroy: { durationMs: 900, decayK: 4,   ampVpct: 4.5, ampHpct: 3.2, ampRdeg: 3 }, // + rotation, a lot
+};
+const _gridShakeTier  = {}; // index → 'fire' | 'hit' | 'destroy'
+const _gridShakeStart = {}; // index → performance.now() at trigger
+
+function triggerGridShake(index, tierName) {
+  const cfg = SHAKE_TIERS[tierName];
+  if (!cfg) return;
+  const now = performance.now();
+  const current = _gridShakeTier[index];
+  const activeDone = !current || (now - _gridShakeStart[index]) >= SHAKE_TIERS[current].durationMs;
+  if (activeDone || SHAKE_TIER_RANK[tierName] >= SHAKE_TIER_RANK[current]) {
+    _gridShakeTier[index]  = tierName;
+    _gridShakeStart[index] = now;
+  }
+}
+
+function updateGridShakeTransform(index) {
+  const el = document.getElementById(`grid-shake-${index}`);
+  if (!el) return;
+  const tier = _gridShakeTier[index];
+  if (!tier) { el.style.transform = ''; return; }
+  const cfg = SHAKE_TIERS[tier];
+  const elapsed = performance.now() - _gridShakeStart[index];
+  if (elapsed >= cfg.durationMs) {
+    delete _gridShakeTier[index];
+    el.style.transform = '';
+    return;
+  }
+  const envelope = Math.exp(-cfg.decayK * elapsed / cfg.durationMs);
+  const rand = () => Math.random() * 2 - 1;
+  const dy  = cfg.ampVpct * envelope * rand();
+  const dx  = cfg.ampHpct * envelope * rand();
+  const rot = cfg.ampRdeg * envelope * rand();
+  el.style.transform = `translate(${dx}%, ${dy}%) rotate(${rot}deg)`;
+}
+
+// Called once per real decoded frame for this cell while any of fire-flash,
+// fire-beam, or camera shake is active — driven directly by the WS decode
+// path's img.onload (see startGridStream), so unlike index.html's fallback
+// timer, no separate "keep ticking" plumbing is needed: as long as frames
+// keep arriving for this cell, this keeps firing regardless of active state.
+function onGridVideoFrameTick(index) {
+  if (_gridFireFlashActive[index]) {
+    const el = document.getElementById(`grid-firefx-${index}`);
+    const elapsed = performance.now() - _gridFireStart[index];
+    if (el) {
+      if (elapsed >= FIRE_FLASH_MS) {
+        el.style.opacity = '0';
+        delete _gridFireFlashActive[index];
+      } else {
+        el.style.opacity = String(Math.exp(-FIRE_FLASH_K * elapsed / FIRE_FLASH_MS));
+      }
+    }
+  }
+  if (_gridFireBeamActive[index]) {
+    const elapsed = performance.now() - _gridFireStart[index];
+    updateGridFireBeamClip(index, elapsed);
+    if (elapsed >= BEAM_MS) delete _gridFireBeamActive[index];
+  }
+  updateGridShakeTransform(index);
+}
+
+function playGridFireFx(index) {
+  const flashEl = document.getElementById(`grid-firefx-${index}`);
+  const beamEl  = document.getElementById(`grid-firebeam-${index}`);
+  const beamShapeEl = document.getElementById(`grid-firebeam-shape-${index}`);
+  if (!flashEl || !beamEl || !beamShapeEl) return;
+  updateGridFireEffectBounds(index);
+  _gridFireStart[index]       = performance.now();
+  _gridFireFlashActive[index] = true;
+  _gridFireBeamActive[index]  = true;
+  flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
+  beamShapeEl.style.clipPath = beamShapeEl.style.webkitClipPath = BEAM_CLIP_PATH;
+  updateGridFireBeamClip(index, 0);
+  triggerGridShake(index, 'fire');
+}
+
+function findGridIndexByCallsign(callsign) {
+  if (!callsign) return -1;
+  const robots = [...(state.robots || [])].sort((a, b) => (a.alliance ?? 0) - (b.alliance ?? 0));
+  return robots.findIndex(r => r.callsign === callsign);
+}
+
+// ── Tank grid — always-on multi-tank spectator view during Playing ────────
+const _gridWs = {};   // index → WebSocket
+const _gridLastFrame = {};   // index → Date.now() of last decoded frame
+let _gridBuilt = false;
+
+// Dead-camera watchdog: a crashed robot camera leaves its WebSocket open but
+// silent, so the canvas freezes on the last frame and spectators can't tell the
+// feed is stale. Flag any open stream with no frame for 5s.
+setInterval(() => {
+  Object.keys(_gridWs).forEach(k => {
+    const noVid = document.getElementById(`grid-nolvideo-${k}`);
+    const cell  = document.getElementById(`grid-cell-${k}`);
+    if (!noVid || (cell && cell.classList.contains('dead'))) return;
+    const last = _gridLastFrame[k] || 0;
+    if (last && Date.now() - last > 5000) {
+      noVid.textContent = 'CAMERA DOWN';
+      noVid.style.display = '';
+    }
+  });
+}, 2000);
+
+function buildGridCell(r, i, footerCls) {
+  const isDead   = r.dead || r.hp === 0;
+  const pct      = isDead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+  const alCls    = r.alliance === 0 ? 'a0' : r.alliance === 1 ? 'a1' : '';
+  const hpBarCls = isDead ? 'dead-bar' : '';
+  const hpLabel  = isDead ? 'DEAD' : String(r.hp);
+  const nameText = escHtml(r.callsign || '?');
+  const playerLabel = r.gunnerPlayer
+    ? escHtml((r.player || '?') + ' & ' + r.gunnerPlayer)
+    : escHtml(r.player || '');
+
+  const cell = document.createElement('div');
+  cell.className = 'grid-cell ' + footerCls + (isDead ? ' dead' : '') + (alCls ? ' ' + alCls : '');
+  cell.id = `grid-cell-${i}`;
+  cell.innerHTML =
+    `<div class="grid-cell-video">` +
+      // Camera shake: only the video + fire-beam/fire-flash shakes — the
+      // no-stream/dead/name-label overlays below stay put (UI). See the
+      // matching HTML comment on index.html's #video-shake-scale for the
+      // two-layer (static zoom + dynamic shake) rationale.
+      `<div class="grid-cell-shake-scale"><div class="grid-cell-shake" id="grid-shake-${i}">` +
+        `<canvas class="grid-cell-canvas" id="grid-canvas-${i}"></canvas>` +
+        `<div class="grid-cell-firebeam" id="grid-firebeam-${i}">` +
+          `<div class="grid-cell-firebeam-shape" id="grid-firebeam-shape-${i}"></div>` +
+        `</div>` +
+        `<div class="grid-cell-fireflash" id="grid-firefx-${i}"></div>` +
+        `<div class="grid-cell-hit-overlay" id="grid-hitoverlay-${i}">` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-front"></div>` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-left"></div>` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-right"></div>` +
+          `<div class="grid-cell-hit-effect grid-cell-hit-rear"></div>` +
+        `</div>` +
+      `</div></div>` +
+      `<div class="grid-cell-nolvideo" id="grid-nolvideo-${i}"` +
+        (isDead ? ' style="display:none"' : '') + `>no stream</div>` +
+      `<div class="grid-dead-msg${isDead ? '' : ' hidden'}" id="grid-dead-${i}">` +
+        `<div class="grid-dead-title">DEAD</div>` +
+        `<div class="grid-dead-sub">Return to base to respawn</div>` +
+      `</div>` +
+      (playerLabel ? `<div class="grid-cell-namelabel">${playerLabel}</div>` : '') +
+    `</div>` +
+    `<div class="grid-cell-footer">` +
+      `<span class="grid-cell-name">${nameText}</span>` +
+      `<div class="grid-cell-hpwrap">` +
+        `<div class="grid-cell-hpbar ${hpBarCls}" id="grid-hp-${i}" style="width:${pct}%"></div>` +
+      `</div>` +
+      `<span class="grid-cell-hpnum" id="grid-hpnum-${i}">${hpLabel}</span>` +
+    `</div>`;
+
+  return cell;
+}
+
+function buildSquadBand(container, robots, offset, alCls, footerCls) {
+  const band = document.createElement('div');
+  band.className = 'squad-band ' + alCls;
+  const n = Math.max(robots.length, 1);
+  // Always a single row, side by side — never wraps into a square, however many robots join (up to 10 total).
+  band.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+  band.style.gridTemplateRows    = `1fr`;
+  band.style.flex = `1 1 0%`;
+  // Attach the band to the live document BEFORE populating it — startGridStream
+  // looks up the canvas via document.getElementById, which only finds elements
+  // that are actually in the connected DOM tree, not ones sitting in a detached subtree.
+  container.appendChild(band);
+  robots.forEach((r, i) => {
+    const idx = offset + i;
+    band.appendChild(buildGridCell(r, idx, footerCls));
+    const isDead = r.dead || r.hp === 0;
+    if (r.videoUrl && !isDead) startGridStream(idx, r.videoUrl);
+  });
+}
+
+function startGrid() {
+  stopGrid();
+  const container = document.getElementById('tank-grid');
+  const desert = (state.robots || []).filter(r => (r.alliance ?? 0) === 0);
+  const jungle = (state.robots || []).filter(r => r.alliance === 1);
+  if (desert.length === 0 && jungle.length === 0) { container.classList.remove('active'); return; }
+
+  container.innerHTML = '';
+  const squadNames = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+
+  if (desert.length) {
+    const label = document.createElement('div');
+    label.className = 'squad-label a0';
+    label.textContent = squadNames[0];
+    container.appendChild(label);
+    // Desert cells show their name + HP bar at the TOP of the cell.
+    buildSquadBand(container, desert, 0, 'a0', 'footer-top');
+  }
+  if (jungle.length) {
+    // Jungle cells show their name + HP bar at the BOTTOM of the cell.
+    buildSquadBand(container, jungle, desert.length, 'a1', 'footer-bottom');
+    const label = document.createElement('div');
+    label.className = 'squad-label a1';
+    label.textContent = squadNames[1];
+    container.appendChild(label);
+  }
+
+  container.classList.add('active');
+  _gridBuilt = true;
+}
+
+function stopGrid() {
+  Object.keys(_gridWs).forEach(k => {
+    try { _gridWs[k].close(); } catch(_) {}
+    delete _gridWs[k];
+  });
+  for (const k in _gridFireFlashActive) delete _gridFireFlashActive[k];
+  for (const k in _gridFireBeamActive)  delete _gridFireBeamActive[k];
+  for (const k in _gridFireStart)       delete _gridFireStart[k];
+  for (const k in _gridShakeTier)       delete _gridShakeTier[k];
+  for (const k in _gridShakeStart)      delete _gridShakeStart[k];
+  const container = document.getElementById('tank-grid');
+  container.classList.remove('active');
+  container.innerHTML = '';
+  _gridBuilt = false;
+}
+
+function startGridStream(index, robotUrl) {
+  const canvas = document.getElementById(`grid-canvas-${index}`);
+  const noVid  = document.getElementById(`grid-nolvideo-${index}`);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  const ws = new WebSocket(videoWsUrl(robotUrl));
+  ws.binaryType = 'arraybuffer';
+  _gridWs[index] = ws;
+
+  ws.onopen  = () => { _gridLastFrame[index] = Date.now(); if (noVid) noVid.style.display = 'none'; };
+  // One decode in flight per cell, holding only the newest waiting frame, so a
+  // busy display PC skips stale frames rather than queuing them and lagging.
+  let decoding = false;
+  let pending  = null;
+  const drawNext = () => {
+    if (decoding || !pending) return;
+    const data = pending;
+    pending  = null;
+    decoding = true;
+    decodeJpegFrame(data).then(img => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!canvas.width  || canvas.width  !== w) canvas.width  = w || canvas.offsetWidth;
+      if (!canvas.height || canvas.height !== h) canvas.height = h || canvas.offsetHeight;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
+      onGridVideoFrameTick(index); // step this cell's fire-flash decay in lockstep with real decoded frames
+    }).catch(() => { /* corrupt frame — skip it */ })
+      .finally(() => { decoding = false; drawNext(); });
+  };
+  ws.onmessage = (e) => {
+    _gridLastFrame[index] = Date.now();
+    if (noVid && noVid.style.display !== 'none') noVid.style.display = 'none';
+    pending = e.data;
+    drawNext();
+  };
+  ws.onerror = () => { if (noVid) { noVid.textContent = 'no stream'; noVid.style.display = ''; } };
+  ws.onclose = () => {
+    if (_gridWs[index] === ws) {
+      delete _gridWs[index];
+      delete _gridLastFrame[index];
+      // Unexpected close (not the intentional close on robot death) — tell spectators.
+      const cell = document.getElementById(`grid-cell-${index}`);
+      if (noVid && !(cell && cell.classList.contains('dead'))) {
+        noVid.textContent = 'no stream';
+        noVid.style.display = '';
+      }
+    }
+  };
+}
+
+function updateGrid() {
+  if (!_gridBuilt) return;
+  // Use same sort order as startGrid() so indices match DOM element IDs
+  const robots = [...(state.robots || [])].sort((a, b) => (a.alliance ?? 0) - (b.alliance ?? 0));
+  robots.forEach((r, i) => {
+    const hpBar  = document.getElementById(`grid-hp-${i}`);
+    const hpNum  = document.getElementById(`grid-hpnum-${i}`);
+    const cell   = document.getElementById(`grid-cell-${i}`);
+    const deadMsg = document.getElementById(`grid-dead-${i}`);
+    if (!hpBar || !hpNum || !cell) return;
+
+    const isDead = r.dead || r.hp === 0;
+    const pct    = isDead ? 0 : Math.max(0, Math.min(100, (r.hp / (r.maxHp || 100)) * 100));
+    hpBar.style.width = pct + '%';
+    hpBar.classList.toggle('hp-critical', !isDead && r.hp > 0 && pct < 15);
+    hpNum.textContent = isDead ? 'DEAD' : String(r.hp);
+    if (deadMsg) deadMsg.classList.toggle('hidden', !isDead);
+
+    if (isDead && !cell.classList.contains('dead')) {
+      // Transition → dead
+      cell.classList.add('dead');
+      hpBar.classList.add('dead-bar');
+      if (_gridWs[i]) {
+        try { _gridWs[i].close(); } catch(_) {}
+        delete _gridWs[i];
+      }
+    } else if (!isDead && cell.classList.contains('dead')) {
+      // Transition → alive (respawned)
+      cell.classList.remove('dead');
+      hpBar.classList.remove('dead-bar');
+      if (r.videoUrl && !_gridWs[i]) {
+        const noVid = document.getElementById(`grid-nolvideo-${i}`);
+        if (noVid) { noVid.textContent = 'no stream'; noVid.style.display = ''; }
+        startGridStream(i, r.videoUrl);
+      }
+    }
+  });
+}
+
+// ── Victory bar flash (event-driven, synced to Unity score ticks) ─────────
+const _flashTimers = [[], []];
+
+function triggerBarFlashes(teamIndex, count) {
+  _flashTimers[teamIndex].forEach(id => clearTimeout(id));
+  _flashTimers[teamIndex] = [];
+  const interval = 3000 / count;
+  for (let i = 0; i < count; i++) {
+    const id = setTimeout(() => _doBarFlash(teamIndex), i * interval);
+    _flashTimers[teamIndex].push(id);
+  }
+}
+
+function _doBarFlash(teamIndex) {
+  const id = teamIndex === 0 ? 'teambar-fill-0' : 'teambar-fill-1';
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('bar-flash-once');
+  void el.offsetWidth;
+  el.classList.add('bar-flash-once');
+}
+
+// ── Kill burn (bar fire + ground shake + red pulse when a tank is destroyed) ─
+let _killBarResetTimer = null;
+
+conn.on('KillEvent', data => {
+  const callsign = (data && data.targetCallsign) ? data.targetCallsign : '';
+  triggerKillBurn((data && data.teamIndex != null) ? data.teamIndex : -1);
+  if (callsign) trackDeathForStats(callsign);
+  const idx = findGridIndexByCallsign(callsign);
+  if (idx >= 0) triggerGridShake(idx, 'destroy');
+});
+
+conn.on('FireEvent', data => {
+  const idx = findGridIndexByCallsign(data && data.callsign);
+  if (idx >= 0) playGridFireFx(idx);
+});
+
+conn.on('HitEvent', data => {
+  const idx = findGridIndexByCallsign(data && data.callsign);
+  if (idx >= 0) {
+    triggerGridShake(idx, 'hit');
+    showGridHitEffect(idx, (data && data.dir || '').toUpperCase());
+  }
+});
+
+// Mirrors index.html's dirToHitEffect/showHitEffect so the display grid's
+// red hit flash matches what the player's own phone shows.
+function dirToGridHitEffect(dir) {
+  if (dir === 'S' || dir === 'SE' || dir === 'SW') return 'grid-cell-hit-rear';
+  if (dir === 'E')                                  return 'grid-cell-hit-right';
+  if (dir === 'W')                                  return 'grid-cell-hit-left';
+  return 'grid-cell-hit-front'; // N, NE, NW (and unknown)
+}
+
+function showGridHitEffect(index, dir) {
+  const overlay = document.getElementById(`grid-hitoverlay-${index}`);
+  if (!overlay) return;
+  const cls = dirToGridHitEffect(dir);
+  const el = overlay.querySelector(`.${cls}`);
+  if (!el) return;
+  el.classList.remove('flash');
+  void el.offsetWidth; // force reflow to restart animation
+  el.classList.add('flash');
+}
+
+function triggerKillBurn(teamIndex) {
+  // Full-screen red pulse
+  const overlay = document.getElementById('kill-overlay');
+  if (overlay) {
+    overlay.classList.remove('kill-screen-pulse');
+    void overlay.offsetWidth;
+    overlay.classList.add('kill-screen-pulse');
+  }
+
+  // Camera shake is now per-cell (see the KillEvent handler above, which
+  // calls triggerGridShake) so it stays confined to the destroyed robot's
+  // own video instead of shaking the whole page including the UI/HUD.
+
+  if (teamIndex < 0) return;
+
+  const id = teamIndex === 0 ? 'teambar-fill-0' : 'teambar-fill-1';
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  // Slow bar slide to 2 s and play fire animation
+  el.style.transition = 'width 2s ease';
+  el.classList.remove('bar-burn');
+  void el.offsetWidth;
+  el.classList.add('bar-burn');
+
+  // Restore fast transition once bar has finished sliding
+  if (_killBarResetTimer) clearTimeout(_killBarResetTimer);
+  _killBarResetTimer = setTimeout(() => {
+    _killBarResetTimer = null;
+    el.style.transition = '';
+  }, 2100);
+}
+
+// ── Capture point flash (round-robin per team, synced to score ticks) ────────
+const _cpFlashCounter = [0, 0];
+
+function triggerCpFlash(teamIndex) {
+  const cps = state.capturePoints || [];
+  const owned = cps.map((cp, i) => ({ owner: cp.owner, i })).filter(cp => cp.owner === teamIndex);
+  if (owned.length === 0) return;
+  const cpIndex = owned[_cpFlashCounter[teamIndex] % owned.length].i;
+  _cpFlashCounter[teamIndex]++;
+  const el = document.getElementById('cp-' + cpIndex);
+  if (!el) return;
+  el.classList.remove('cp-flash');
+  void el.offsetWidth;
+  el.classList.add('cp-flash');
+}
+
+// ── Apply state update ────────────────────────────────────────────────────
+function applyDisplayUpdate(data) {
+  const wasPlaying = (state.phase === 'playing');
+  const prevTimerVal = _prevTimer;
+  const oldTp = (state.teamPoints || [0, 0]).slice();
+
+  // Track HP deltas before state merges so we can compute damage received per player
+  if (wasPlaying && data.robots) trackHpForStats(data.robots);
+
+  // Detect HP decreases — queue bar flash (applied after render rebuilds the DOM)
+  if (wasPlaying && data.robots) {
+    data.robots.forEach(r => {
+      const prev = (state.robots || []).find(x => x.callsign === r.callsign);
+      if (prev && r.hp < prev.hp && !r.dead) _pendingHpFlashes.add(r.callsign);
+    });
+  }
+
+  state = Object.assign(state, data);
+  const nowPlaying = (state.phase === 'playing');
+
+  document.getElementById('paused-overlay')
+    .classList.toggle('hidden', !state.paused);
+
+  if (!wasPlaying && nowPlaying) {
+    document.getElementById('countdown-overlay').classList.add('hidden');
+    // Reset milestone flags so the new game gets fresh announcements
+    Object.keys(_milestoneFired).forEach(k => delete _milestoneFired[k]);
+    _spokenCountdownSecs.clear();
+    _cpFlashCounter[0] = _cpFlashCounter[1] = 0;
+    speak('To battle, show no mercy!', 'high', 5000);
+    resetGameStats();
+    hideGameOver();
+    startGrid();
+  }
+
+  // Close the tank streams once the match is over and we're back in the lobby.
+  // Checked on _gridBuilt, not on "was playing": a real match goes
+  // playing → ended → lobby, so a playing→lobby test never matched and all the
+  // grid's video connections stayed open through every lobby, with the server
+  // reconnecting to each (paused) tank every few seconds until the next match.
+  if (_gridBuilt && (state.phase === 'lobby' || state.phase === 'mainmenu')) {
+    stopGrid();
+  }
+
+  // Dismiss game-over overlay when operator returns to lobby / main menu
+  if (_gameOverActive && (state.phase === 'lobby' || state.phase === 'mainmenu')) {
+    hideGameOver();
+  }
+
+  // Check timer milestones each update (function guards on phase + paused)
+  checkTimerMilestones(prevTimerVal, state.timer);
+  _prevTimer = state.timer;
+
+  // Trigger bar + CP flashes when tick points arrive (gained 1–3 = tick, >3 = kill bonus → skip)
+  const newTp = state.teamPoints || [0, 0];
+  for (let i = 0; i < 2; i++) {
+    const gained = (newTp[i] || 0) - (oldTp[i] || 0);
+    if (gained >= 1 && gained <= 3) {
+      triggerBarFlashes(i, gained);
+      triggerCpFlash(i);
+    }
+  }
+
+  render();
+  applyPendingHpFlashes();
+  updateGrid();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+function render() {
+  renderLobbyOverlay();
+  renderTimer();
+  renderTeamBar();
+  renderCapturePoints();
+}
+
+function renderLobbyOverlay() {
+  const isLobby = (state.phase === 'lobby' || state.phase === 'mainmenu');
+  const el = document.getElementById('lobby-overlay');
+  el.classList.toggle('hidden', !isLobby);
+
+  if (!isLobby) return;
+
+  const avail = state.maxPlayers - state.playerCount;
+  document.getElementById('lobby-slots').textContent =
+    `${avail} / ${state.maxPlayers} slots available`;
+
+  // Update squad name headings
+  const lobbyAn = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+  document.querySelector('.lobby-team-title.a0').textContent = lobbyAn[0];
+  document.querySelector('.lobby-team-title.a1').textContent = lobbyAn[1];
+
+  // Build unassigned + per-alliance player lists
+  const unEl = document.getElementById('lobby-unassigned');
+  const t0   = document.getElementById('lobby-team-0');
+  const t1   = document.getElementById('lobby-team-1');
+  unEl.innerHTML = ''; t0.innerHTML = ''; t1.innerHTML = '';
+
+  const players = state.players || [];
+  const unassigned = players.filter(p => p.alliance !== 0 && p.alliance !== 1);
+  document.getElementById('lobby-unassigned-section').style.display =
+    unassigned.length ? '' : 'none';
+
+  renderLobbyNames(unEl, unassigned);
+  renderLobbyNames(t0, players.filter(p => p.alliance === 0));
+  renderLobbyNames(t1, players.filter(p => p.alliance === 1));
+  fitLobbyCrewLines();
+}
+
+// Crew lines are nowrap and can be up to "Name1 & Name2" = 27 characters, which
+// at the base size overflows the squad columns on a narrow display (or with wide
+// all-caps names). Shrink them — and only them — until the row fits. No-op when
+// the names are short, which is the normal case.
+function fitLobbyCrewLines() {
+  const row = document.getElementById('lobby-alliances');
+  if (!row) return;
+
+  const crews = row.querySelectorAll('.lobby-player-name.crew');
+  crews.forEach(e => { e.style.fontSize = ''; });
+  if (!crews.length) return;
+
+  const vmin  = Math.min(window.innerWidth, window.innerHeight) / 100;
+  const avail = document.documentElement.clientWidth - (6 * vmin); // overlay side padding
+
+  let size = 4.8;
+  while (row.getBoundingClientRect().width > avail && size > 2.4) {
+    size -= 0.2;
+    crews.forEach(e => { e.style.fontSize = size.toFixed(1) + 'vmin'; });
+  }
+}
+
+// Two players sharing a tank get one line, "Driver & Gunner", instead of two
+// separate entries. Pairing is only collapsed when both crew members are in the
+// same list, so a crew split across squads still shows under each squad.
+function buildCrewLabels(list) {
+  const byName  = new Map(list.map(p => [p.name, p]));
+  const seen    = new Set();
+  const entries = [];
+
+  list.forEach(p => {
+    const name = p.name || '?';
+    if (seen.has(name)) return;
+    seen.add(name);
+
+    const mate = p.partner && byName.has(p.partner) ? byName.get(p.partner) : null;
+    if (!mate) { entries.push({ crew: false, names: [name] }); return; }
+
+    seen.add(mate.name);
+    const driver = p.role === 'gunner' ? mate : p;
+    const gunner = p.role === 'gunner' ? p    : mate;
+    entries.push({ crew: true, names: [driver.name || '?', gunner.name || '?'] });
+  });
+
+  return entries;
+}
+
+function renderLobbyNames(container, list) {
+  buildCrewLabels(list).forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'lobby-player-name' + (e.crew ? ' crew' : '');
+    if (!e.crew) {
+      div.textContent = e.names[0];      // textContent — names are untrusted
+    } else {
+      // Built from text nodes so names are never parsed as markup.
+      div.appendChild(document.createTextNode(e.names[0]));
+      const amp = document.createElement('span');
+      amp.className = 'amp';
+      amp.textContent = '&';
+      div.appendChild(amp);
+      div.appendChild(document.createTextNode(e.names[1]));
+    }
+    container.appendChild(div);
+  });
+}
+
+function renderTimer() {
+  const el = document.getElementById('timer');
+  const s  = Math.ceil(state.timer);
+  const m  = Math.floor(s / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  el.textContent = (state.phase === 'playing') ? `${m}:${ss}` : '--:--';
+  el.classList.toggle('urgent', state.phase === 'playing' && s <= 10 && s > 0);
+}
+
+function renderTeamBar() {
+  const tp  = state.teamPoints || [0, 0];
+  const max = state.maxTeamPoints || 300;
+
+  // Each side fills inward from its edge; full points = reaches centre (50%)
+  const w0 = Math.min(50, (tp[0] / max) * 50);
+  const w1 = Math.min(50, (tp[1] / max) * 50);
+
+  document.getElementById('teambar-fill-0').style.width = w0 + '%';
+  document.getElementById('teambar-fill-1').style.width = w1 + '%';
+  const an2 = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
+  // Jungle (1) label on the left, Desert (0) label on the right
+  document.getElementById('tp-label-1').textContent = `${an2[1]} — ${tp[1]} pts`;
+  document.getElementById('tp-label-0').textContent = `${tp[0]} pts — ${an2[0]}`;
+}
+
+function renderCapturePoints() {
+  const pts = state.capturePoints || [];
+  for (let i = 0; i < 3; i++) {
+    const circle = document.getElementById('cp-' + i);
+    if (!circle) continue;
+    const owner = pts[i] ? pts[i].owner : -1;
+    // Use classList so cp-flash is never clobbered
+    circle.classList.remove('owner-0', 'owner-1');
+    if (owner >= 0) circle.classList.add('owner-' + owner);
+  }
+}
+
+// ── Text-to-speech announcer ──────────────────────────────────────────────
+let _muted = false;
+
+function checkTimerMilestones(prev, t) {
+  if (state.phase !== 'playing' || state.paused) return;
+  if (prev === null) return; // first update — no delta yet
+
+  const md      = state.matchDuration || 600;
+  const halfway = md / 2;
+
+  if (!_milestoneFired.halfway && prev > halfway && t <= halfway) {
+    _milestoneFired.halfway = true;
+    const mins = Math.round(t / 60);
+    speak(`${mins} minute${mins !== 1 ? 's' : ''} remaining`);
+  }
+  if (!_milestoneFired.twoMin && prev > 120 && t <= 120) {
+    _milestoneFired.twoMin = true;
+    speak('2 minutes remaining');
+  }
+  if (!_milestoneFired.oneMin && prev > 60 && t <= 60) {
+    _milestoneFired.oneMin = true;
+    speak('1 minute remaining');
+  }
+  if (!_milestoneFired.thirtySec && prev > 30 && t <= 30) {
+    _milestoneFired.thirtySec = true;
+    speak('30 seconds');
+  }
+  // 10-second countdown — speak each integer crossing once
+  for (let s = 10; s >= 1; s--) {
+    if (!_spokenCountdownSecs.has(s) && prev > s && t <= s) {
+      _spokenCountdownSecs.add(s);
+      speak(String(s), 'high', 1000);
+      break; // only one per update
+    }
+  }
+}
+
+// Announcements play one at a time from a priority queue instead of cutting
+// each other off. Each one has a priority and a max age:
+//   low    — dropped outright if anything is playing or waiting (rear hits)
+//   normal — waits its turn; discarded if it has gone stale before its turn
+//   high   — jumps ahead of queued normal items (countdowns, game over)
+// Countdown numbers get a ~1 s max age, so a long announcement makes them drop
+// rather than play late and read out the wrong second.
+const SPEECH_PRI = { low: 0, normal: 1, high: 2 };
+const _speechQueue = [];       // { text, pri, expires }, sorted high → low, FIFO within a priority
+let _speechCurrent  = null;    // utterance playing now — kept referenced so Chrome can't GC it and drop onend
+let _speechWatchdog = null;
+
+function speak(text, pri = 'normal', maxAgeMs = 10000) {
+  if (_muted || !window.speechSynthesis || !text) return;
+  const p = SPEECH_PRI[pri] ?? SPEECH_PRI.normal;
+  const busy = _speechCurrent !== null || _speechQueue.length > 0;
+  if (p === SPEECH_PRI.low && busy) return;
+  if (_speechQueue.some(q => q.text === text)) return;
+
+  const item = { text, pri: p, expires: performance.now() + maxAgeMs };
+  let i = _speechQueue.findIndex(q => q.pri < p);
+  if (i < 0) i = _speechQueue.length;
+  _speechQueue.splice(i, 0, item);
+  pumpSpeech();
+}
+
+// Server announcements arrive as plain text; rank them by content.
+function speakDisplayEvent(text) {
+  const t = String(text || '');
+  if (/^Rear hit!/i.test(t))                           speak(t, 'low');
+  else if (/^Game over!/i.test(t))                     speak(t, 'high', 30000);
+  else if (/is critical!|returned to battle/i.test(t)) speak(t, 'normal', 6000);
+  else                                                 speak(t, 'normal');
+}
+
+function pumpSpeech() {
+  if (_speechCurrent || _muted) return;
+  const now = performance.now();
+  while (_speechQueue.length && _speechQueue[0].expires < now) _speechQueue.shift();
+  const item = _speechQueue.shift();
+  if (!item) return;
+
+  const utt = new SpeechSynthesisUtterance(item.text);
+  utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
+  _speechCurrent = utt;
+  const started = now;
+
+  const done = () => {
+    if (_speechCurrent !== utt) return;
+    _speechCurrent = null;
+    clearTimeout(_speechWatchdog);
+    setTimeout(pumpSpeech, 150);   // short breath between announcements
+  };
+  utt.onend = done;
+  utt.onerror = done;
+
+  // Chrome occasionally never fires onend (or silently drops the utterance),
+  // which would stall the queue forever — fall back to polling .speaking.
+  const check = () => {
+    if (_speechCurrent !== utt) return;
+    if (speechSynthesis.speaking && performance.now() - started < 20000) {
+      _speechWatchdog = setTimeout(check, 500);
+      return;
+    }
+    if (speechSynthesis.speaking) speechSynthesis.cancel();
+    done();
+  };
+  _speechWatchdog = setTimeout(check, 1500 + item.text.length * 110);
+
+  speechSynthesis.resume();   // un-wedge Chrome if it was left paused
+  speechSynthesis.speak(utt);
+}
+
+function toggleMute() {
+  _muted = !_muted;
+  if (_muted) {
+    _speechQueue.length = 0;
+    _speechCurrent = null;
+    clearTimeout(_speechWatchdog);
+    speechSynthesis.cancel();
+  }
+  document.getElementById('mute-btn').textContent = _muted ? '🔇' : '🔊';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function setBanner(msg) {
+  document.getElementById('status-banner').textContent = msg;
+}
+
+// Initial render
+render();
+</script>
+</body>
+</html>

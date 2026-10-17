@@ -13,26 +13,37 @@
 
   <div class="conn-banner" id="conn-banner" hidden>Reconnecting to the game&hellip;</div>
 
+  <!--
+    Every screen has the same frame: a top bar, optional tabs, content that
+    scrolls, and a bottom bar with Back on the left and Next / Start on the
+    right.
+  -->
+
   <!-- Title -->
-  <section id="screen-title" class="screen active" aria-label="Title">
-    <svg class="bolt" viewBox="0 0 24 36" aria-hidden="true">
-      <defs>
-        <linearGradient id="bolt-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ffe08a"/>
-          <stop offset="1" stop-color="#ff4d1c"/>
-        </linearGradient>
-      </defs>
-      <path d="M15 0 2 20h8l-3 16L22 13h-8l5-13z" fill="url(#bolt-fill)"/>
-    </svg>
-    <h1 class="wordmark">THUNDERGEDDON</h1>
-    <p class="tagline">Real tanks &middot; Real battles</p>
-    <button class="btn-continue" type="button" data-action="to-menu">To Battle!</button>
-    <div class="version" id="version-label"></div>
+  <section id="screen-title" class="screen" aria-label="Title">
+    <main class="content center">
+      <svg class="bolt" viewBox="0 0 24 36" aria-hidden="true">
+        <defs>
+          <linearGradient id="bolt-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffe08a"/>
+            <stop offset="1" stop-color="#ff4d1c"/>
+          </linearGradient>
+        </defs>
+        <path d="M15 0 2 20h8l-3 16L22 13h-8l5-13z" fill="url(#bolt-fill)"/>
+      </svg>
+      <h1 class="wordmark">THUNDERGEDDON</h1>
+      <p class="tagline">Real tanks &middot; Real battles</p>
+    </main>
+    <footer class="navbar">
+      <span class="nav-left version" id="version-label"></span>
+      <span class="nav-mid"></span>
+      <button class="nav-btn next pulse" type="button" data-action="to-menu">To Battle!</button>
+    </footer>
   </section>
 
   <!-- Menu -->
   <section id="screen-menu" class="screen" aria-label="Main menu">
-    <div class="menu-top">
+    <header class="appbar">
       <span class="wordmark wordmark-small" aria-hidden="true">THUNDERGEDDON</span>
       <button class="icon-btn" type="button" data-action="open-settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -40,80 +51,109 @@
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
-    </div>
-
-    <div class="menu-buttons">
-      <button class="menu-btn primary" type="button" data-action="to-join">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>
-          <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
-        </svg>
-        <span><span class="label">Join Game</span><span class="sub">Drive a tank in a battle</span></span>
-      </button>
-      <button class="menu-btn secondary" type="button" data-action="to-host-login" id="btn-host">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 22V4"/><path d="M4 4h12l-2 4 2 4H4"/>
-        </svg>
-        <span><span class="label" id="host-label">Host Game</span><span class="sub" id="host-sub">Run a battle on this hub</span></span>
-      </button>
-    </div>
-    <button class="link-btn" type="button" data-action="open-howto">How to play</button>
+    </header>
+    <main class="content center">
+      <div class="menu-buttons">
+        <button class="menu-btn primary" type="button" data-action="to-join">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>
+            <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
+          </svg>
+          <span><span class="label">Join Game</span><span class="sub">Drive a tank in a battle</span></span>
+        </button>
+        <button class="menu-btn secondary" type="button" data-action="to-host-login" id="btn-host">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 22V4"/><path d="M4 4h12l-2 4 2 4H4"/>
+          </svg>
+          <span><span class="label" id="host-label">Host Game</span><span class="sub" id="host-sub">Run a battle on this hub</span></span>
+        </button>
+        <button class="link-btn" type="button" data-action="open-howto">How to play</button>
+      </div>
+    </main>
+    <footer class="navbar">
+      <button class="nav-btn back" type="button" data-action="to-title">Back</button>
+      <span class="nav-mid"></span>
+      <span class="nav-right"></span>
+    </footer>
   </section>
 
   <!-- Host sign-in -->
   <section id="screen-host-login" class="screen" aria-label="Host sign in">
-    <form class="form" id="form-host-login" autocomplete="off">
-      <h2 id="host-login-title">Host Game</h2>
-      <p id="host-login-detail">Enter the host password.</p>
-      <label class="field">Host password
-        <input type="password" id="host-password" autocomplete="current-password" required>
-      </label>
-      <button class="btn primary" type="submit">Continue</button>
-      <button class="btn secondary" type="button" data-action="to-menu">Back</button>
-    </form>
-  </section>
-
-  <!-- Host console: content rendered from the game state -->
-  <section id="screen-host" class="screen page" aria-label="Host">
-    <div class="topbar">
-      <h2 id="host-title">Host</h2>
-      <button class="btn small secondary" type="button" data-action="host-menu">Menu</button>
-    </div>
-    <div class="page-inner" id="host-body"></div>
+    <header class="appbar"><h2 id="host-login-title">Host Game</h2></header>
+    <main class="content center">
+      <form class="form" id="form-host-login" autocomplete="off">
+        <p id="host-login-detail">Enter the host password.</p>
+        <label class="field">Host password
+          <input type="password" id="host-password" autocomplete="current-password" required>
+        </label>
+      </form>
+    </main>
+    <footer class="navbar">
+      <button class="nav-btn back" type="button" data-action="to-menu">Back</button>
+      <span class="nav-mid"></span>
+      <button class="nav-btn next" type="submit" form="form-host-login">Continue</button>
+    </footer>
   </section>
 
   <!-- Join -->
   <section id="screen-join" class="screen" aria-label="Join game">
-    <form class="form" id="form-join" autocomplete="off">
-      <h2>Join Game</h2>
-      <label class="field">Your name
-        <input type="text" id="join-name" maxlength="16" autocomplete="nickname" required>
-      </label>
-      <label class="field" id="join-password-field" hidden>Game password
-        <input type="password" id="join-password">
-      </label>
-      <button class="btn primary" type="submit">Join</button>
-      <button class="btn secondary" type="button" data-action="to-menu">Back</button>
-    </form>
+    <header class="appbar"><h2>Join Game</h2></header>
+    <main class="content center">
+      <form class="form" id="form-join" autocomplete="off">
+        <label class="field">Your name
+          <input type="text" id="join-name" maxlength="16" autocomplete="nickname" required>
+        </label>
+        <label class="field" id="join-password-field" hidden>Game password
+          <input type="password" id="join-password">
+        </label>
+      </form>
+    </main>
+    <footer class="navbar">
+      <button class="nav-btn back" type="button" data-action="to-menu">Back</button>
+      <span class="nav-mid"></span>
+      <button class="nav-btn next" type="submit" form="form-join">Join</button>
+    </footer>
   </section>
 
-  <!-- Waiting / queue -->
-  <section id="screen-wait" class="screen page" aria-label="Waiting">
-    <div class="page-inner" id="wait-body"></div>
+  <!-- Screens drawn from the game state: host console, waiting, lobby,
+       results. app.js fills in each part. -->
+  <section id="screen-host" class="screen" aria-label="Host">
+    <header class="appbar"><h2 id="host-title">Host</h2><span class="appbar-info" id="host-info"></span></header>
+    <nav class="tabs" id="host-tabs" role="tablist"></nav>
+    <main class="content" id="host-body"></main>
+    <footer class="navbar" id="host-nav"></footer>
   </section>
 
-  <!-- Lobby: choose a tank -->
-  <section id="screen-lobby" class="screen page" aria-label="Lobby">
-    <div class="topbar">
-      <h2>Lobby</h2>
-      <button class="btn small secondary" type="button" data-action="leave">Leave</button>
-    </div>
-    <div class="page-inner" id="lobby-body"></div>
+  <section id="screen-wait" class="screen" aria-label="Waiting">
+    <header class="appbar"><h2 id="wait-title">Waiting</h2></header>
+    <main class="content center" id="wait-body"></main>
+    <footer class="navbar">
+      <button class="nav-btn back" type="button" data-action="leave">Leave</button>
+      <span class="nav-mid" id="wait-mid"></span>
+      <span class="nav-right"></span>
+    </footer>
   </section>
 
-  <!-- Game over -->
-  <section id="screen-results" class="screen page" aria-label="Game over">
-    <div class="page-inner" id="results-body"></div>
+  <section id="screen-lobby" class="screen" aria-label="Lobby">
+    <header class="appbar"><h2>Lobby</h2><span class="appbar-info" id="lobby-info"></span></header>
+    <nav class="tabs" id="lobby-tabs" role="tablist"></nav>
+    <main class="content" id="lobby-body"></main>
+    <footer class="navbar">
+      <button class="nav-btn back" type="button" data-action="leave">Leave</button>
+      <span class="nav-mid" id="lobby-mid"></span>
+      <span class="nav-right"></span>
+    </footer>
+  </section>
+
+  <section id="screen-results" class="screen" aria-label="Game over">
+    <header class="appbar"><h2>Game Over</h2></header>
+    <nav class="tabs" id="results-tabs" role="tablist"></nav>
+    <main class="content" id="results-body"></main>
+    <footer class="navbar">
+      <button class="nav-btn back" type="button" data-action="leave">Leave</button>
+      <span class="nav-mid"></span>
+      <button class="nav-btn next" type="button" data-action="play-again">Play Again</button>
+    </footer>
   </section>
 
   <!-- Settings sheet -->
@@ -133,7 +173,8 @@
     <h3>Server</h3>
     <div class="srow"><span>Version</span><span class="value" id="info-version">&hellip;</span></div>
     <div class="srow"><span>Running on</span><span class="value" id="info-platform">&hellip;</span></div>
-    <h3>Testing</h3>
+    <h3>Pages</h3>
+    <a class="srow" href="/display.html"><span>Spectator display (big screen)</span><span class="value">&rsaquo;</span></a>
     <a class="srow" href="/streams.html"><span>Video test page</span><span class="value">&rsaquo;</span></a>
   </aside>
 
@@ -147,9 +188,11 @@
     </div>
     <ol>
       <li>Tap <b>Join Game</b> and enter your name.</li>
-      <li>When there&rsquo;s room, you&rsquo;ll be let into the lobby. Choose a tank: its team is shown on the card.</li>
+      <li>When there&rsquo;s room, you&rsquo;ll be let into the lobby. Choose a tank: its team is shown on the card. On a 2-player tank one of you drives and the other is the gunner.</li>
       <li>When the host starts the game, turn your phone sideways. You&rsquo;ll see through your tank&rsquo;s camera.</li>
       <li><b>Left stick</b> drives. <b>Slider</b> turns the turret. <b>FIRE</b> shoots, then needs a moment to reload.</li>
+      <li>Hits from behind do the most damage. When you&rsquo;re destroyed, drive back to your base tag to respawn.</li>
+      <li>Drive over a capture point&rsquo;s tag to take it: points you hold score for your team.</li>
       <li>After the game you can play again: you&rsquo;ll join the back of the queue.</li>
     </ol>
   </aside>
