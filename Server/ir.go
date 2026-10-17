@@ -203,13 +203,13 @@ func (s *irScheduler) execute(r shotRequest) {
 		g.sendSetHp(target)
 		switch {
 		case killed:
-			parts = append(parts, "You killed "+target.name+"!")
+			parts = append(parts, "You killed "+target.crewNames()+"!")
 		case dir == "S":
-			parts = append(parts, "Hit "+target.name+" on rear")
+			parts = append(parts, "Hit "+target.crewNames()+" on rear")
 		case dir == "N":
-			parts = append(parts, "Hit "+target.name+" on front")
+			parts = append(parts, "Hit "+target.crewNames()+" on front")
 		default:
-			parts = append(parts, "Hit "+target.name+" on flank")
+			parts = append(parts, "Hit "+target.crewNames()+" on flank")
 		}
 		if g.phase != phasePlaying {
 			break // that kill won the game
@@ -222,7 +222,7 @@ func (s *irScheduler) execute(r shotRequest) {
 		text = "That tank is already dead!"
 	}
 	if c := m.fighters[r.shooter]; c != nil {
-		g.sendTo(c.device, map[string]any{"t": "fire_result", "text": text})
+		g.sendTo(c.shooter().device, map[string]any{"t": "fire_result", "text": text})
 	}
 	g.broadcast()
 }
@@ -273,6 +273,6 @@ func (s *irScheduler) fireResult(r shotRequest, text string) {
 		return
 	}
 	if c := g.match.fighters[r.shooter]; c != nil {
-		g.sendTo(c.device, map[string]any{"t": "fire_result", "text": text})
+		g.sendTo(c.shooter().device, map[string]any{"t": "fire_result", "text": text})
 	}
 }

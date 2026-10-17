@@ -20,7 +20,8 @@ import (
 const clientSilenceTimeout = 15 * time.Second
 
 type client struct {
-	device string // set by the page's hello; guarded by game.mu
+	device  string // set by the page's hello; guarded by game.mu
+	display bool   // the spectator display (display.html): gets display updates, not snapshots
 
 	out       chan []byte
 	closeOnce sync.Once

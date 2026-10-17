@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,32 @@ func (f *fakeTanks) sendTo(id, msg string) bool {
 		hook(id, msg)
 	}
 	return true
+}
+
+func (f *fakeTanks) rename(id, name string) {
+	f.mu.Lock()
+	for i := range f.ts {
+		if f.ts[i].ID == id {
+			f.ts[i].Name = name
+		}
+	}
+	f.mu.Unlock()
+	f.sendTo(id, `{"cmd":"set_name","name":"`+name+`"}`)
+}
+
+func (f *fakeTanks) setFlags(id string, fl tankFlags) {
+	f.mu.Lock()
+	for i := range f.ts {
+		if f.ts[i].ID == id {
+			f.ts[i].Flags = fl
+		}
+	}
+	f.mu.Unlock()
+	f.sendTo(id, `{"cmd":"set_drive_config"}`)
+}
+
+func (f *fakeTanks) setVideo(id string, fps, size, q int) {
+	f.sendTo(id, fmt.Sprintf(`{"cmd":"set_video","fps":%d,"framesize":%d,"quality":%d}`, fps, size, q))
 }
 
 func (f *fakeTanks) count(substr string) int {
@@ -223,7 +250,7 @@ func TestFullGameAndBackOfQueue(t *testing.T) {
 	}
 
 	g.phaseEndsAt = time.Now() // skip the countdown
-	g.tick()
+	g.tick(200 * time.Millisecond)
 	if g.phase != phasePlaying || ft.count("a "+`{"cmd":"motors_on"}`) != 1 {
 		t.Fatalf("phase %s, motors_on sent %d times", g.phase, ft.count("motors_on"))
 	}
@@ -251,7 +278,7 @@ func TestFullGameAndBackOfQueue(t *testing.T) {
 	}
 
 	g.phaseEndsAt = time.Now() // time's up
-	g.tick()
+	g.tick(200 * time.Millisecond)
 	sa := a.state()
 	if g.phase != phaseEnded || sa.Me.Status != "finished" || len(sa.Results) != 1 || sa.Results[0].Shots != 1 {
 		t.Fatalf("after the game: phase %s, Alice %+v, results %+v", g.phase, sa.Me, sa.Results)
@@ -305,7 +332,7 @@ func TestDisconnectedDriverStopsTank(t *testing.T) {
 	a.send(inMsg{T: "pick_tank", Tank: "a"})
 	h.send(inMsg{T: "host_start"})
 	g.phaseEndsAt = time.Now()
-	g.tick()
+	g.tick(200 * time.Millisecond)
 
 	g.clientGone(a.c)
 	if ft.count(`a {"cmd":"drive","l":0,"r":0}`) != 1 {

@@ -87,7 +87,7 @@ func combatGame(t *testing.T, tune func(*Settings)) (*game, *fakeTanks, *irWorld
 	g.mu.Lock()
 	g.phaseEndsAt = time.Now()
 	g.mu.Unlock()
-	g.tick()
+	g.tick(200 * time.Millisecond)
 	if g.phase != phasePlaying {
 		t.Fatalf("phase %s, want playing", g.phase)
 	}
@@ -220,7 +220,7 @@ func TestDeathReturnToBaseAndRespawn(t *testing.T) {
 
 	// After the explosion: return to base, motors back on.
 	time.Sleep(60 * time.Millisecond)
-	g.tick()
+	g.tick(200 * time.Millisecond)
 	if g.match.fighters["b"].life != returning || ft.count(`b {"cmd":"motors_on"}`) < 2 {
 		t.Fatalf("Bob should be returning to base with motors on (life %v)", g.match.fighters["b"].life)
 	}
@@ -244,7 +244,7 @@ func TestDeathReturnToBaseAndRespawn(t *testing.T) {
 		t.Fatal("invulnerable tank took damage")
 	}
 	time.Sleep(320 * time.Millisecond)
-	g.tick()
+	g.tick(200 * time.Millisecond)
 	if ft.count(`b {"cmd":"invuln_end"}`) != 1 {
 		t.Fatal("invulnerability didn't end")
 	}
@@ -313,7 +313,7 @@ func TestTimeUpWinner(t *testing.T) {
 	g.mu.Lock()
 	g.phaseEndsAt = time.Now()
 	g.mu.Unlock()
-	g.tick()
+	g.tick(200 * time.Millisecond)
 	st := b.state()
 	if st.WinnerTeam != "Desert Squad" || st.EndCode != "time" {
 		t.Fatalf("winner %q code %q", st.WinnerTeam, st.EndCode)

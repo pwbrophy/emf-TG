@@ -66,6 +66,8 @@ func main() {
 	stats := startStats(rl)
 	tanks := newTankManager(rl, *tokenFile, httpPort)
 	g := newGame(tanks, *settingsFile)
+	g.beacons = newBeaconManager()
+	g.beacons.onHello = g.beaconConnected
 	tanks.onChange = g.tanksChanged
 	tanks.onConnected = g.tankConnected
 	tanks.onReport = g.tankMessage
@@ -88,6 +90,7 @@ func main() {
 	mux.HandleFunc("GET /api/stats", stats.handle)
 	mux.HandleFunc("GET /api/tanks", tanks.handleList)
 	mux.HandleFunc("GET /esp32", tanks.handleControl)
+	mux.HandleFunc("GET /beacon", g.beacons.handle) // capture-point beacons (any path works for them; this is what discovery tells them)
 	mux.HandleFunc("POST /api/ingest/{id}", rl.handleIngest)
 	mux.HandleFunc("GET /api/stream/{id}", rl.handleView)
 	mux.HandleFunc("GET /api/robot-stream", rl.handleViewByQuery) // addresses the in-game page uses

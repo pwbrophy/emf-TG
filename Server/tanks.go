@@ -72,12 +72,16 @@ type tankManager struct {
 }
 
 type tankSession struct {
-	id, name, ip string
+	id, ip string
+	nameMu       sync.Mutex
+	name         string // the tank's own name, e.g. "Desert-01" (renamable)
 	conn         *websocket.Conn // nil for a fake tank (-fake-tanks)
 	connectedAt  time.Time
 	lastSeen     atomic.Int64 // unix nanoseconds
 	heap         atomic.Int64 // free heap bytes from the latest heartbeat
 	stop         context.CancelFunc
+	flags        tankFlags // guarded by tankManager.mu
+	video        [3]int    // saved camera fps, frame size, quality from the hello (0 = unknown)
 
 	// Commands queued for the tank. Sending never blocks the caller (the game
 	// holds its lock while sending); a writer goroutine drains this.
@@ -88,7 +92,19 @@ type tankSession struct {
 
 // tankInfo is what the game sees of a connected tank.
 type tankInfo struct {
-	ID, Name string
+	ID, Name, IP string
+	Flags        tankFlags
+	Video        [3]int // fps, frame size, quality the tank has saved (0 = unknown)
+}
+
+// tankFlags are settings each tank keeps (in its own memory) and reports in
+// its hello: camera flips and reversed controls.
+type tankFlags struct {
+	HFlip       bool `json:"hflip"`
+	VFlip       bool `json:"vflip"`
+	InvThrottle bool `json:"invThrottle"`
+	InvSteer    bool `json:"invSteer"`
+	InvTurret   bool `json:"invTurret"`
 }
 
 func newTankManager(rl *relay, tokenFile string, httpPort int) *tankManager {
@@ -132,9 +148,6 @@ func (tm *tankManager) runDiscovery(ctx context.Context, addr string) {
 		if json.Unmarshal(buf[:n], &msg) != nil || msg.RobotID == "" {
 			continue
 		}
-		if msg.Kind == "beacon" {
-			continue // capture-point beacons aren't handled yet
-		}
 		ua, ok := addr.(*net.UDPAddr)
 		if !ok {
 			continue
@@ -143,11 +156,15 @@ func (tm *tankManager) runDiscovery(ctx context.Context, addr string) {
 		if local == "" {
 			continue
 		}
-		reply := fmt.Sprintf(`{"ws":"ws://%s:%d/esp32"}`, local, tm.httpPort)
+		path := "/esp32"
+		if msg.Kind == "beacon" {
+			path = "/beacon" // capture-point beacons (beacons.go)
+		}
+		reply := fmt.Sprintf(`{"ws":"ws://%s:%d%s"}`, local, tm.httpPort, path)
 		_, _ = pc.WriteTo([]byte(reply), addr)
 		if !replied[msg.RobotID] {
 			replied[msg.RobotID] = true
-			log.Printf("[Discovery] tank %s at %s -> %s", msg.RobotID, ua.IP, reply)
+			log.Printf("[Discovery] %s %s at %s -> %s", map[bool]string{true: "beacon", false: "tank"}[msg.Kind == "beacon"], msg.RobotID, ua.IP, reply)
 		}
 	}
 }
@@ -209,6 +226,12 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			FPS      *int `json:"fps"`
 			FSize    *int `json:"fsize"`
 			FQuality *int `json:"fquality"`
+			// Saved flips and reversed controls (hello only).
+			HFlip       int `json:"hflip"`
+			VFlip       int `json:"vflip"`
+			InvThrottle int `json:"inv_throttle"`
+			InvSteer    int `json:"inv_steer"`
+			InvTurret   int `json:"inv_turret"`
 			tankReport
 		}
 		if json.Unmarshal(data, &msg) != nil {
@@ -230,6 +253,13 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 				ip, _, _ = net.SplitHostPort(r.RemoteAddr)
 			}
 			sess = tm.add(msg.ID, msg.Name, ip, c)
+			tm.mu.Lock()
+			sess.flags = tankFlags{HFlip: msg.HFlip != 0, VFlip: msg.VFlip != 0,
+				InvThrottle: msg.InvThrottle != 0, InvSteer: msg.InvSteer != 0, InvTurret: msg.InvTurret != 0}
+			if msg.FPS != nil && msg.FSize != nil && msg.FQuality != nil {
+				sess.video = [3]int{*msg.FPS, *msg.FSize, *msg.FQuality}
+			}
+			tm.mu.Unlock()
 			if msg.FPS != nil && msg.FSize != nil && msg.FQuality != nil {
 				log.Printf("[Tanks] %s camera settings: max %d fps, frame size %d, JPEG quality %d",
 					sess.label(), *msg.FPS, *msg.FSize, *msg.FQuality)
@@ -239,7 +269,7 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			if sess != nil && msg.Heap > 0 {
 				sess.heap.Store(msg.Heap)
 			}
-		case "ir_emit_ack", "ir_window_result", "rfid":
+		case "ir_emit_ack", "ir_window_result", "rfid", "pong":
 			if sess != nil && tm.onReport != nil {
 				tm.onReport(sess.id, msg.tankReport)
 			}
@@ -330,9 +360,53 @@ func (tm *tankManager) list() []tankInfo {
 	defer tm.mu.Unlock()
 	out := make([]tankInfo, 0, len(tm.tanks))
 	for _, s := range tm.tanks {
-		out = append(out, tankInfo{ID: s.id, Name: s.label()})
+		out = append(out, tankInfo{ID: s.id, Name: s.label(), IP: s.ip, Flags: s.flags, Video: s.video})
 	}
 	return out
+}
+
+// rename saves a new name on the tank (it reports it in future hellos) and
+// uses it straight away.
+func (tm *tankManager) rename(id, name string) {
+	tm.mu.Lock()
+	s := tm.tanks[id]
+	if s != nil {
+		s.nameMu.Lock()
+		s.name = name
+		s.nameMu.Unlock()
+	}
+	tm.mu.Unlock()
+	if s == nil {
+		return
+	}
+	b, _ := json.Marshal(map[string]string{"cmd": "set_name", "name": name})
+	s.send(string(b))
+	tm.rl.get(id).setLabel(s.label())
+	if tm.onChange != nil {
+		tm.onChange()
+	}
+}
+
+// setFlags changes a tank's flips / reversed controls; the tank saves them.
+func (tm *tankManager) setFlags(id string, f tankFlags) {
+	tm.mu.Lock()
+	s := tm.tanks[id]
+	if s != nil {
+		s.flags = f
+	}
+	tm.mu.Unlock()
+	if s == nil {
+		return
+	}
+	b2i := func(b bool) int {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	s.send(fmt.Sprintf(`{"cmd":"set_video_flip","h":%d,"v":%d}`, b2i(f.HFlip), b2i(f.VFlip)))
+	s.send(fmt.Sprintf(`{"cmd":"set_drive_config","inv_throttle":%d,"inv_steer":%d,"inv_turret":%d}`,
+		b2i(f.InvThrottle), b2i(f.InvSteer), b2i(f.InvTurret)))
 }
 
 // sendTo queues a JSON command for a tank. False if the tank isn't connected.
@@ -348,6 +422,8 @@ func (tm *tankManager) sendTo(id, msg string) bool {
 }
 
 func (s *tankSession) label() string {
+	s.nameMu.Lock()
+	defer s.nameMu.Unlock()
 	if s.name != "" {
 		return s.name
 	}
@@ -468,7 +544,7 @@ func (tm *tankManager) handleList(w http.ResponseWriter, r *http.Request) {
 	for _, s := range tm.tanks {
 		list = append(list, tankStatus{
 			ID:           s.id,
-			Name:         s.name,
+			Name:         s.label(),
 			IP:           s.ip,
 			ConnectedS:   int(time.Since(s.connectedAt).Seconds()),
 			LastSeenAgoS: round1(time.Since(time.Unix(0, s.lastSeen.Load())).Seconds()),
@@ -488,4 +564,17 @@ func quietErr(err error) error {
 		return errors.New("timed out or closed")
 	}
 	return err
+}
+
+// setVideo changes a tank's camera settings; the tank saves them.
+func (tm *tankManager) setVideo(id string, fps, frameSize, quality int) {
+	tm.mu.Lock()
+	s := tm.tanks[id]
+	if s != nil {
+		s.video = [3]int{fps, frameSize, quality}
+	}
+	tm.mu.Unlock()
+	if s != nil {
+		s.send(fmt.Sprintf(`{"cmd":"set_video","fps":%d,"framesize":%d,"quality":%d}`, fps, frameSize, quality))
+	}
 }
