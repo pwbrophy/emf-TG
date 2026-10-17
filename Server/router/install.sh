@@ -25,7 +25,10 @@ done
 rm -rf $D
 
 /etc/init.d/thundergeddon enable
-/etc/init.d/thundergeddon restart
+# stop + start rather than restart: on a first install there is nothing to
+# stop, and restart then prints a misleading "Command failed: Not found".
+/etc/init.d/thundergeddon stop 2>/dev/null || true
+/etc/init.d/thundergeddon start
 sleep 2
 
 if wget -q -O - http://127.0.0.1:8088/api/info; then
