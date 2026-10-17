@@ -1,0 +1,4360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-fullscreen">
+  <title>Thundergeddon</title>
+  <!--
+    The in-game screen: the Unity-era player page (Webserver/ThundergeddonWeb/
+    wwwroot/index.html), kept as it was so the controls and look are identical.
+    It used to talk to the ASP.NET SignalR hub; now TGHub (see "Bridge to the
+    Go server" below) stands in for that connection and turns the Go server's
+    state snapshots into the hub events this page already handles. Joining,
+    queueing and the lobby live on the main page (/), which sends players here
+    when their game starts and gets them back afterwards.
+  -->
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box; margin: 0; padding: 0;
+      /* iOS Safari decides whether a double-tap zooms by looking at the tapped
+         element's touch-action. Set it explicitly on every element rather than
+         relying on it being derived from html/body (which has not been enough
+         in practice). Elements with their own touch-action: none still win. */
+      touch-action: manipulation;
+    }
+
+    :root {
+      --bg:       #0d0d14;
+      --surface:  #1a1a28;
+      --border:   #2e2e50;
+      --accent:   #ff4d1c;
+      --accent2:  #ff8c00;
+      --text:     #e8e8f0;
+      --muted:    #6b6b90;
+      --green:    #2a7a2a;
+      --hp-fill:  #1E90FF;
+      --hp-low:   #ee3333;
+      /* Extra clearance above the bottom edge so on-screen controls don't
+         overlap the browser's own chrome (e.g. iOS Safari's landscape
+         toolbar, which sits over the page rather than resizing it).
+         Same value on every platform so control layout stays consistent. */
+      --ctrl-bottom: max(10vmin, calc(env(safe-area-inset-bottom) + 5.33vmin));
+      --ctrl-right:  max(10vmax, calc(env(safe-area-inset-right)  + 16vmin));
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 16px;
+      overflow: hidden;
+      touch-action: none;
+      /* Turn off iOS text autosizing. WebKit inflates font sizes when it
+         thinks a text column is wider than the screen — which the rotated
+         portrait game layout is (body width = 100vh) — and re-evaluates on
+         orientation and zoom changes. Text then outgrows its vmin-sized
+         boxes and the HUD overlaps itself; only a page-zoom change in the
+         aA menu forced a re-layout. */
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
+    /* During play, give every element touch-action: none directly — including
+       overlays outside #screen-playing (dead screen, pause, game over). iOS
+       checks the touched element for double-tap/pinch zoom; don't depend on
+       it deriving the value from an ancestor. Taps and clicks still work. */
+    body.game-active, body.game-active * { touch-action: none; }
+
+    /* Shown only while the page is zoomed in. Lives on <html> (not <body>) so
+       the portrait game-active rotation doesn't apply to it; JS pins it to the
+       visual viewport and counter-scales it so it reads at normal size. */
+    #zoom-hint {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      z-index: 100000;
+      padding: 10px 14px;
+      background: rgba(255,77,28,0.95);
+      color: #fff;
+      font: 700 16px system-ui, -apple-system, sans-serif;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    /* ── Shared screen container ── */
+    .screen {
+      display: none;
+      position: absolute;
+      inset: 0;
+    }
+    .screen.active { display: block; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 1 — JOIN
+    ═══════════════════════════════════════════════════ */
+    #screen-join {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100%;
+      padding: 24px 20px;
+      text-align: center;
+    }
+    #screen-join.active { display: flex; }
+
+    h1 {
+      font-size: 2.4rem;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 6px;
+    }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 40px; }
+
+    .join-box { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 14px; }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1.1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--muted); }
+
+    button.primary {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button.primary:active { opacity: 0.8; }
+    button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Waiting-for-server state: solid grey, full opacity (not faded) */
+    #join-btn.btn-waiting { background: var(--muted); }
+    #join-btn.btn-waiting:disabled { opacity: 1; }
+
+    .btn-secondary {
+      width: 100%;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      transition: opacity 0.15s;
+    }
+    .btn-secondary:active { opacity: 0.8; }
+
+    .status { margin-top: 12px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+    .status.error { color: #e05050; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 2 — LOBBY
+    ═══════════════════════════════════════════════════ */
+    #screen-lobby {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100%;
+      padding: 24px 16px;
+      text-align: center;
+      overflow-y: auto;
+    }
+    #screen-lobby.active { display: flex; }
+
+    .lobby-header { margin-bottom: 20px; }
+    .lobby-header h2 { font-size: 1.6rem; font-weight: 800; margin-bottom: 6px; }
+    .lobby-header p  { color: var(--muted); font-size: 0.9rem; }
+
+    /* Lobby sections */
+    .lobby-section {
+      width: 100%;
+      max-width: 360px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .lobby-section-title {
+      padding: 8px 14px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    /* Side-by-side squad sections */
+    .lobby-squads {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .lobby-squads .lobby-section {
+      flex: 1;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+
+    /* Unassigned players carry no controls, just a name, so pack them onto
+       wrapped lines separated by | rather than giving each its own ~40px row —
+       a full lobby of them pushed the squad lists off the bottom of the screen.
+       Each name keeps its trailing separator inside one flex item, so the | can
+       never start a line and names never break mid-word. */
+    #lobby-unassigned.inline-names {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      padding: 9px 14px;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      text-align: left;
+    }
+    #lobby-unassigned.inline-names .un-item { white-space: nowrap; }
+    #lobby-unassigned.inline-names .un-sep  { color: var(--muted); padding: 0 7px; }
+    .player-name-self { font-weight: 700; color: var(--accent2); }
+    .player-robot { font-size: 0.75em; color: var(--muted); margin-top: 2px; }
+    .empty-state { padding: 14px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+
+    /* Robot selection rows in lobby squads */
+    .robot-row {
+      display: flex;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      gap: 10px;
+    }
+    .robot-row:last-child { border-bottom: none; }
+    .robot-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .robot-name { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .robot-player-assigned {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #fff;
+      margin-top: 3px;
+      line-height: 1.25;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .robot-actions { flex-shrink: 0; max-width: 38%; }
+    .role-btn {
+      padding: 7px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: filter 0.12s, opacity 0.12s;
+    }
+    .role-btn:active:not(:disabled) { filter: brightness(0.82); }
+    .role-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .role-btn.available { background: var(--accent); color: #fff; }
+    .role-btn.mine      { background: var(--accent2); color: #000; }
+    .role-btn.taken     { background: #2a2a3a; color: var(--muted); }
+
+    .waiting-anim {
+      display: inline-block;
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 3 — PLAYING
+    ═══════════════════════════════════════════════════ */
+    #screen-playing {
+      background: #000;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+      -webkit-user-select: none;
+      /* The static mask for camera shake: #video-shake-scale below is
+         permanently overscanned so its dynamic shake transform never reveals
+         its own edges, and this clips that overscanned margin to the true
+         screen bounds. */
+      overflow: hidden;
+    }
+
+    /* Camera shake wrappers — see the HTML comment above #video-shake-scale
+       for the two-layer rationale (static zoom vs. dynamic shake transform).
+       VIDEO_SHAKE_SCALE in JS must match this value. */
+    #video-shake-scale {
+      position: absolute;
+      inset: 0;
+      transform: scale(1.16);
+      transform-origin: center;
+    }
+    #video-shake {
+      position: absolute;
+      inset: 0;
+      will-change: transform;
+    }
+
+    /* Camera stream fills the whole screen */
+    #stream {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      pointer-events: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #stream-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      pointer-events: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #stream-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 3.84vmin;
+      background: #000;
+      pointer-events: none;
+    }
+
+    /* ── HP bar — pill-shaped, inset from the top edge, 70% of screen width ──
+       NOTE: every layout dimension on the playing screen is expressed in vmin/vmax,
+       never px/rem. Safari's per-site page zoom (the aA menu) scales the CSS pixel,
+       so a px-sized HUD balloons when a player zooms — but viewport units are
+       measured against the (also-scaled) viewport, so the layout stays physically
+       identical at any zoom level. Reference viewport is 812x375, i.e. 1vmin =
+       3.75px. Borders stay in px: box-sizing is border-box so they don't affect
+       layout, and hairlines render badly at sub-pixel widths. */
+    #hp-bar-wrap {
+      position: absolute;
+      top: 3.2vmin;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 70vmax;
+      height: 8vmin;
+      border-radius: 4vmin;
+      border: 2px solid rgba(255,255,255,0.9);
+      background: rgba(10,10,16,0.65);
+      overflow: hidden;
+      z-index: 10;
+    }
+    #hp-bar-fill {
+      height: 100%;
+      background: var(--hp-fill);
+      transition: width 0.3s ease, background 0.3s ease;
+      width: 100%;
+    }
+    /* Colour only: the old blurred box-shadow glow was mostly clipped by
+       #hp-bar-wrap's overflow:hidden, yet animating it repainted a blur every
+       frame for as long as HP stayed critical — real work on older phones. */
+    @keyframes hp-critical-flash {
+      0%   { background: #ff2828; }
+      50%  { background: #fff; }
+      100% { background: #ff2828; }
+    }
+    #hp-bar-fill.hp-critical { animation: hp-critical-flash 0.65s ease-in-out infinite; }
+    #hp-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3.63vmin;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+
+    /* ── Timer (under the HP bar, right-aligned to its right edge) ── */
+    #timer-label {
+      position: absolute;
+      top: 13.33vmin; right: 15vmax;
+      font-size: 4.27vmin;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+    }
+
+
+    /* ── Robot callsign (under the HP bar, mirroring the timer on the left) ── */
+    #robot-label {
+      position: absolute;
+      top: 13.33vmin; left: 15vmax;
+      font-size: 3.63vmin;
+      font-weight: 600;
+      color: rgba(255,255,255,0.75);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+    }
+
+    /* ── Role / partner labels ── */
+    #role-label {
+      position: absolute;
+      top: 13.33vmin; left: 2.67vmin;
+      font-size: 3.07vmin;
+      font-weight: 700;
+      color: rgba(255,200,0,0.9);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+      letter-spacing: 0.08em;
+    }
+    #partner-label {
+      position: absolute;
+      top: 17.07vmin; left: 2.67vmin;
+      font-size: 2.9vmin;
+      font-weight: 600;
+      color: rgba(255,255,255,0.6);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      z-index: 10;
+    }
+
+    /* ── Controls overlay (full screen so children can use vh/vw) ── */
+    #controls {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none; /* children opt-in */
+    }
+
+    /* ── Joystick (bottom-left, 5% inset) ── */
+    #joystick-base {
+      position: absolute;
+      left: 5vmax;
+      bottom: var(--ctrl-bottom);
+      width: 58.93vmin;
+      height: 58.93vmin;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.3);
+      pointer-events: all;
+      touch-action: none;
+    }
+    /* Axis-snap cross: the bands along the stick's axes where it drives dead
+       straight / spins on the spot.  Arm half-width = --axis-snap x the thumb's
+       travel radius, which is 40.05% of the base width ((58.93 - 11.73) / 2 / 58.93),
+       so full arm width = axis-snap x 80.1% of the base.  Clipped to the circle. */
+    #joystick-cross {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #joystick-cross::before, #joystick-cross::after {
+      content: '';
+      position: absolute;
+      background: rgba(255,255,255,0.13);
+    }
+    #joystick-cross::before {   /* vertical arm: straight forwards / backwards */
+      top: 0; bottom: 0; left: 50%;
+      width: calc(var(--axis-snap, 0.15) * 80.1%);
+      transform: translateX(-50%);
+    }
+    #joystick-cross::after {    /* horizontal arm: turn on the spot */
+      left: 0; right: 0; top: 50%;
+      height: calc(var(--axis-snap, 0.15) * 80.1%);
+      transform: translateY(-50%);
+    }
+    #joystick-thumb {
+      position: absolute;
+      width: 11.73vmin;
+      height: 11.73vmin;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.55);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: background 0.1s;
+    }
+
+    /* ── Turret slider (bottom-right, 5% inset) — drag left/right, springs to centre on release ──
+       Track is shaded into 5 zones matching turretSpeedForOffset's thresholds (±0.15 / ±0.6 of
+       radius) so the slow/fast/dead zones are visible without needing to look at the thumb. */
+    #turret-buttons {
+      position: absolute;
+      right: var(--ctrl-right);
+      bottom: var(--ctrl-bottom);
+      width: 92.27vmin;
+      height: 18.67vmin;
+      border-radius: 9.33vmin;
+      background: linear-gradient(to right,
+        rgba(255,255,255,0.22)  0%,    rgba(255,255,255,0.22)  20%,
+        rgba(255,255,255,0.11)  20%,   rgba(255,255,255,0.11)  42.5%,
+        rgba(0,0,0,0.30)        42.5%, rgba(0,0,0,0.30)        57.5%,
+        rgba(255,255,255,0.11)  57.5%, rgba(255,255,255,0.11)  80%,
+        rgba(255,255,255,0.22)  80%,   rgba(255,255,255,0.22)  100%
+      );
+      border: 2px solid rgba(255,255,255,0.3);
+      pointer-events: all;
+      touch-action: none;
+    }
+    #turret-thumb {
+      position: absolute;
+      width: 15.47vmin;
+      height: 15.47vmin;
+      border-radius: 50%;
+      background: #c4c4cc;
+      border: 2px solid rgba(0,0,0,0.35);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: background 0.1s;
+      /* "TURRET" label sits on the thumb — at rest it completely covers the centre dead zone */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(0,0,0,0.6);
+      font-size: 2.6vmin;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* Zone labels centred in each shaded band of the track gradient */
+    .turret-zone-label {
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.75);
+      font-size: 3.2vmin;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #turret-thumb.zone-slow { background: #e4e4ea; }
+    #turret-thumb.zone-fast { background: #ffffff; }
+
+
+    /* ── Fire button ── */
+    #fire-btn {
+      position: absolute;
+      right: calc(var(--ctrl-right) + 10.67vmin);
+      bottom: calc(var(--ctrl-bottom) + 23.73vmin);
+      width: 23.47vmin;
+      height: 23.47vmin;
+      border-radius: 50%;
+      background: radial-gradient(circle at 38% 38%, #ff6b3d, #cc1100);
+      border: 2px solid rgba(255,120,60,0.6);
+      box-shadow: 0 0 10px rgba(255,60,0,0.5);
+      pointer-events: all;
+      touch-action: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: opacity 0.15s, transform 0.08s;
+    }
+    #fire-btn:active       { transform: scale(0.92); }
+    #fire-btn.cooldown     { opacity: 0.4; pointer-events: none; }
+    #fire-btn-text         { color: #fff; font-size: 3.2vmin; font-weight: 900; letter-spacing: 0.05em; text-align: center; pointer-events: none; }
+    #fire-countdown        { display: none; font-size: 4.69vmin; font-weight: 900; }
+    #fire-countdown.active { display: block; }
+    #fire-word             { display: block; }
+    #fire-word.hidden      { display: none; }
+
+    /* ── Target reticle (centred on video, z-index 8 = above stream/hit, below HUD) ── */
+    #reticle {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 26.67vmin; height: 26.67vmin;
+      pointer-events: none;
+      z-index: 8;
+    }
+    #reticle::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: 0; right: 0; height: 1.5px;
+      background: rgba(255,255,255,0.5);
+      transform: translateY(-50%);
+    }
+    #reticle::after {
+      content: '';
+      position: absolute;
+      left: 50%; top: 0; bottom: 0; width: 1.5px;
+      background: rgba(255,255,255,0.5);
+      transform: translateX(-50%);
+    }
+    #reticle-circle {
+      position: absolute;
+      inset: 5.33vmin;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255,255,255,0.5);
+    }
+    #reticle-dot {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 1.33vmin; height: 1.33vmin;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.9);
+      transform: translate(-50%, -50%);
+    }
+
+    /* ═══════════════════════════════════════════════════
+       GAME PAUSED overlay (sits above controls, below dead)
+    ═══════════════════════════════════════════════════ */
+    #game-paused-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.70);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 45;
+      text-align: center;
+      gap: 10px;
+      /* No pointer-events: none — overlay must swallow taps so fire/joystick/turret can't be triggered while paused */
+    }
+    #game-paused-overlay.active { display: flex; }
+    #game-paused-overlay h2 {
+      font-size: 2.8rem;
+      font-weight: 900;
+      color: #f0c040;
+      text-shadow: 0 0 30px rgba(240,192,64,0.6);
+      letter-spacing: 0.08em;
+    }
+    #game-paused-overlay p { color: var(--muted); font-size: 0.9rem; letter-spacing: 0.06em; }
+
+    #fire-toast {
+      position: absolute;
+      left: 50%;
+      top: 9.6vmin;
+      transform: translateX(-50%);
+      z-index: 25;
+      background: rgba(0,0,0,0.72);
+      color: #fff;
+      font-size: 5.33vmin;
+      font-weight: 700;
+      padding: 2.67vmin 5.87vmin;
+      border-radius: 6.4vmin;
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #fire-toast.visible { opacity: 1; }
+
+    /* ═══════════════════════════════════════════════════
+       SCREEN 4 — DEAD overlay (sits on top of playing)
+    ═══════════════════════════════════════════════════ */
+    #screen-dead {
+      background: rgba(0,0,0,0.75);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      text-align: center;
+      gap: 10px;
+    }
+    #screen-dead.active { display: flex; }
+    /* In dead-walk mode the overlay is decorative only — let touches through, no darkening */
+    #screen-dead.walkmode { pointer-events: none; background: transparent; }
+    #dead-title {
+      font-size: 3rem;
+      font-weight: 900;
+      color: #ff2222;
+      text-shadow: 0 0 30px rgba(255,0,0,0.6);
+      letter-spacing: 0.05em;
+    }
+    #screen-dead.walkmode #dead-title {
+      font-size: 2rem;
+      color: #ff8844;
+      text-shadow: 0 0 20px rgba(255,100,0,0.5);
+    }
+    #dead-countdown {
+      font-size: 3.5rem;
+      font-weight: 900;
+      color: #ff2222;
+      text-shadow: 0 0 20px rgba(255,0,0,0.5);
+      line-height: 1;
+      min-height: 1em;
+    }
+    #dead-subtitle {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: rgba(255,140,68,0.9);
+    }
+
+    /* ═══════════════════════════════════════════════════
+       GAME OVER OVERLAY — multi-phase animated sequence
+    ═══════════════════════════════════════════════════ */
+    #go-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      pointer-events: none;
+    }
+    #go-overlay.active { display: block; }
+
+    /* Phase 1: GAME OVER text (transparent bg — video shows through) */
+    #go-p1 {
+      position: absolute;
+      inset: 0;
+      z-index: 2;   /* stay above the blackout overlay */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+    #go-p1.visible { opacity: 1; }
+
+    #go-title {
+      font-size: clamp(2.6rem, 14vmin, 7rem);
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 0.12em;
+      text-align: center;
+      animation: go-pulse 0.9s ease-in-out infinite alternate;
+    }
+    @keyframes go-pulse {
+      from { text-shadow: 0 0 10px rgba(255,255,255,0.7), 0 0 30px rgba(255,80,0,0.5), 0 0 60px rgba(255,0,0,0.2); }
+      to   { text-shadow: 0 0 30px rgba(255,255,255,1),   0 0 80px rgba(255,80,0,0.9), 0 0 150px rgba(255,0,0,0.4); }
+    }
+
+    /* Black fade overlay — sits between video (z0) and GAME OVER text (z2) */
+    #go-blackout {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      background: #000;
+      opacity: 0;
+      transition: opacity 2s ease;
+    }
+    #go-blackout.fading { opacity: 1; }
+
+    /* Phase 2: Victory or defeat result — z-index 3 keeps it above the blackout (z1) and p1 (z2) */
+    #go-p2 {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 1.2s ease;
+      text-align: center;
+      padding: 24px;
+    }
+    #go-p2.visible { opacity: 1; pointer-events: all; }
+
+    #go-fireworks {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #go-skull {
+      position: relative;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity 1.4s ease 0.6s;
+      margin-bottom: 12px;
+    }
+    #go-skull.visible { opacity: 1; }
+
+    #go-result-msg {
+      position: relative;
+      z-index: 1;
+      font-size: clamp(1.8rem, 8vw, 3.4rem);
+      font-weight: 900;
+      letter-spacing: 0.03em;
+      color: #fff;
+      text-align: center;
+      opacity: 0;
+      transition: opacity 0.9s ease 0.3s;
+      margin-bottom: 8px;
+      text-shadow: 0 0 40px currentColor;
+    }
+    #go-result-msg.visible { opacity: 1; }
+
+    #go-proceed-btn {
+      position: relative;
+      z-index: 1;
+      margin-top: 32px;
+      padding: 14px 44px;
+      background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.45);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s ease 2s, background 0.12s;
+    }
+    #go-proceed-btn.visible { opacity: 1; pointer-events: all; }
+    #go-proceed-btn:active { background: rgba(255,255,255,0.28); }
+
+    /* Phase 3: Stats */
+    #go-p3 {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+      text-align: center;
+      padding: 32px 24px;
+      overflow-y: auto;
+    }
+    #go-p3.visible { opacity: 1; pointer-events: all; }
+
+    #go-p3 h2 {
+      font-size: 1.5rem;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      margin-bottom: 28px;
+    }
+
+    .go-stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      width: 100%;
+      max-width: 320px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+      gap: 16px;
+    }
+    .go-stat-row:last-of-type { border-bottom: none; }
+    .go-stat-label { color: var(--muted); font-size: 0.95rem; text-align: left; }
+    .go-stat-value { font-weight: 700; font-size: 1.2rem; color: var(--text); flex-shrink: 0; }
+
+    .go-nemesis { color: var(--accent) !important; }
+
+    .go-stat-sub {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      width: 100%;
+      max-width: 320px;
+      padding: 4px 0 4px 12px;
+      gap: 16px;
+    }
+    .go-stat-sub .go-stat-label { font-size: 0.8rem; }
+    .go-stat-sub .go-stat-value { font-size: 0.95rem; font-weight: 600; color: var(--muted); }
+
+    .go-btn-row {
+      margin-top: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 300px;
+    }
+    .go-btn-row button {
+      width: 100%;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .go-btn-row button:active { opacity: 0.8; }
+    .go-btn-primary  { background: var(--accent); color: #fff; border: none; }
+    .go-btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+
+    /* ── Connection lost overlay ── */
+    #reconnect-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.82);
+      z-index: 9999;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      color: var(--fg);
+      text-align: center;
+      padding: 32px;
+    }
+    #reconnect-overlay.visible { display: flex; }
+    #reconnect-overlay p { color: var(--muted); font-size: 0.95rem; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid rgba(255,255,255,0.15);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Fire beam overlay: glowing white bolt from the barrel to the reticule.
+       Split into a wrapper (#fire-beam, glow only) and a child
+       (#fire-beam-shape, the actual masked/clipped white shape). Applying
+       filter:drop-shadow() and clip-path/mask-image to the SAME element is a
+       known cross-browser footgun — several engines resolve the mask/clip
+       against the filtered result (or vice versa) inconsistently, and the
+       glow can end up cropped away by its own mask instead of spreading past
+       it, which read as "no glow, still crisp edges". Putting the glow on a
+       parent that merely CONTAINS the already-clipped-and-masked child
+       sidesteps the ambiguity entirely — the child is fully resolved first,
+       then the parent's filter operates on that finished result.
+       #fire-beam-shape's clip-path is a STATIC trapezoid (wide at the
+       muzzle, narrowing to a point at the reticule), set once from the
+       BEAM_* constants (see BEAM_CLIP_PATH in JS) — it never needs per-tick
+       updates since the apex/base positions are fixed. Its mask-image is a
+       Y-axis linear-gradient recomputed every tick (see updateFireBeamClip):
+       it reveals a travelling band that sweeps from the muzzle up to the
+       reticule, with its own top/bottom edges feathered by BEAM_FEATHER_FRAC
+       of the band's current height for a motion-blur look. Together,
+       clip-path's own base line and the mask's stops guarantee nothing is
+       ever drawn below BEAM_BASE_Y (the muzzle top).
+       No mix-blend-mode anywhere in this pair (i.e. normal blend) — unlike
+       the flash, the laser should read as a bright solid light source
+       regardless of what's behind it, not blend with the backdrop's own
+       contrast. #fire-beam's opacity (not the child's) drives the fade, so
+       the glow fades together with the shape.
+       left/top/width/height set by JS (updateFireEffectBounds) to the video's
+       actual rendered rect, same as #fire-flash. No z-index — comes before
+       #fire-flash in DOM order so the flash paints on top of the beam. ── */
+    #fire-beam {
+      position: absolute;
+      pointer-events: none;
+      opacity: 0;
+      /* display:none while idle (JS shows it for each shot): a filtered layer
+         sitting over the video at opacity 0 can still cost compositing work on
+         every video frame on weaker GPUs. */
+      display: none;
+      /* Fallback only — overwritten by JS (computeBeamGlowFilter, called from
+         updateFireEffectBounds) with radii scaled to BEAM_GLOW_FALLOFF_FRAC
+         of the video's actual rendered width once bounds are known. Kept to
+         two layers with a modest max radius: this whole chain is re-rasterised
+         every video frame while the beam sweeps (the child's mask changes each
+         tick), and a big multi-layer Gaussian blur there is what stutters
+         lower-power phones on fire. */
+      filter:
+        drop-shadow(0 0 10px #fff)
+        drop-shadow(0 0 26px rgba(255,255,255,0.72));
+    }
+    #fire-beam-shape {
+      position: absolute;
+      inset: 0;
+      background: #fff;
+    }
+
+    /* ── Fire flash overlay: white radial flash when this tank fires.
+       Bright at centre, fully transparent by the screen edge. A feathered
+       radial mask cuts a dark hole at bottom-centre matching the gun barrel
+       silhouette so the flash reads as coming from behind the barrel.
+       mix-blend-mode:overlay multiplies dark backdrop pixels (shadows stay
+       dark) and screens light backdrop pixels (highlights brighten) — plain
+       screen blows every pixel toward white uniformly regardless of how dark
+       it started, flattening the flash into a solid white lump. Overlay keeps
+       contrast/detail visible through the flash instead.
+       left/top/width/height are set by JS (updateFireEffectBounds) to the
+       video's actual rendered rect, excluding the object-fit:contain letterbox
+       bars, so the flash never bleeds into the black bars around the picture.
+       No z-index — comes after #fire-beam in DOM order so it paints on top of
+       the beam (and still after #stream, before #hit-overlay). mix-blend-mode
+       requires no ancestor between here and #stream to create a stacking
+       context (z-index/opacity/transform/filter/isolation), or the blend
+       isolates against nothing and renders opaque. ── */
+    #fire-flash {
+      position: absolute;
+      pointer-events: none;
+      opacity: 0;
+      /* display:none while idle, like #fire-beam: an element with a blend mode
+         makes the browser blend the whole video group every frame, even when
+         the element itself is fully transparent. */
+      display: none;
+      mix-blend-mode: overlay;
+      background: radial-gradient(ellipse farthest-side at center,
+        rgba(255,255,255,1) 0%,
+        rgba(255,255,255,0.85) 45%,
+        rgba(255,255,255,0) 100%);
+      -webkit-mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+      mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
+        rgba(0,0,0,0) 50%, #000 95%);
+    }
+
+    /* ── Hit direction overlay ── */
+    #hit-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      overflow: hidden;
+    }
+
+    @keyframes hitFlash {
+      0%   { opacity: 0.85; }
+      100% { opacity: 0; }
+    }
+
+    .hit-effect {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      display: none; /* four full-screen gradients — only present while flashing */
+    }
+    .hit-effect.flash {
+      display: block;
+      animation: hitFlash 0.6s ease-out forwards;
+    }
+
+    /* Front: large radial red circle centred */
+    #hit-front {
+      background: radial-gradient(circle 45vmin at center,
+        rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 100%);
+    }
+
+    /* Sides: gradient spreading 65% across from the corresponding edge */
+    #hit-left {
+      background: linear-gradient(to right,
+        rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%);
+    }
+    #hit-right {
+      background: linear-gradient(to left,
+        rgba(255,0,0,0.85) 0%, rgba(255,0,0,0) 65%);
+    }
+
+    /* Rear: vignette highlights all four edges */
+    #hit-rear {
+      background: radial-gradient(ellipse at center,
+        rgba(255,0,0,0) 35%, rgba(255,0,0,0.85) 100%);
+    }
+
+    /* Hit-by label: same capsule style as fire-toast but red-tinted */
+    #hit-by-label {
+      position: absolute;
+      left: 50%;
+      top: 9.6vmin;
+      transform: translateX(-50%);
+      z-index: 25;
+      background: rgba(160,0,0,0.88);
+      color: #fff;
+      font-size: 4.69vmin;
+      font-weight: 700;
+      padding: 2.4vmin 5.33vmin;
+      border-radius: 6.4vmin;
+      border: 1px solid rgba(255,80,60,0.55);
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #hit-by-label.visible { opacity: 1; }
+
+    /* ── RFID toast ── */
+    #rfid-toast {
+      position: fixed;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(30,30,40,0.95);
+      border: 1px solid var(--accent);
+      color: var(--fg);
+      padding: 10px 22px;
+      border-radius: 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      z-index: 999;
+      white-space: nowrap;
+    }
+    #rfid-toast.visible { opacity: 1; }
+
+    /* ── Countdown overlay ── */
+    #countdown-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.93);
+      z-index: 300;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    #countdown-overlay.active { display: flex; }
+    #countdown-number {
+      font-size: 40vmin;
+      font-weight: 900;
+      color: #fff;
+      line-height: 1;
+      text-shadow: 0 0 60px rgba(255,77,28,0.9);
+      animation: countpulse 0.5s cubic-bezier(0.22,1,0.36,1);
+    }
+    #countdown-label {
+      font-size: 1.3rem;
+      color: var(--muted);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    #tank-color-label, #countdown-color-label {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      margin-top: 10px;
+      padding: 6px 18px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.08);
+    }
+    #tank-color-label:empty, #countdown-color-label:empty { display: none; }
+    @keyframes countpulse {
+      from { transform: scale(1.5); opacity: 0.5; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
+    /* ── Force landscape during countdown + gameplay only ── */
+    @media (orientation: portrait) {
+      body.game-active {
+        position: fixed;
+        overflow: hidden;
+        width: 100vh;
+        height: 100vw;
+        top: calc((100vh - 100vw) / 2);
+        left: calc((100vw - 100vh) / 2);
+        transform: rotate(90deg);
+        transform-origin: center;
+      }
+      body.game-active #countdown-number { font-size: 40vmax; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Countdown overlay ───────────────────────────────────────────── -->
+<div id="countdown-overlay">
+  <div id="countdown-number">5</div>
+  <div id="countdown-label">Get ready!</div>
+  <div id="countdown-color-label"></div>
+</div>
+
+<!-- ── Connection lost overlay ────────────────────────────────────── -->
+<div id="reconnect-overlay">
+  <div class="spinner"></div>
+  <h2 id="reconnect-title">Connection Lost</h2>
+  <p id="reconnect-msg">Trying to reconnect…</p>
+</div>
+
+<!-- ── RFID toast ─────────────────────────────────────────────────── -->
+<div id="rfid-toast"></div>
+
+
+<!-- ── Screen 1: Join ──────────────────────────────────────────────── -->
+<div id="screen-join" class="screen">
+  <h1>THUNDERGEDDON</h1>
+  <p class="subtitle">RC tank battle</p>
+  <div class="join-box">
+    <input id="name-input" type="text" placeholder="Enter your name"
+           maxlength="12" autocomplete="off" spellcheck="false" />
+    <button class="primary btn-waiting" id="join-btn" onclick="joinLobby()" disabled>WAITING FOR SERVER</button>
+    <button class="btn-secondary" onclick="visitThundergeddon()">VISIT THUNDERGEDDON.COM</button>
+    <div id="join-status" class="status"></div>
+  </div>
+</div>
+
+<!-- ── Screen 2: Lobby ─────────────────────────────────────────────── -->
+<div id="screen-lobby" class="screen">
+  <div class="lobby-header">
+    <div id="lobby-pick-squad-msg">
+      <h2>LOBBY</h2>
+      <p>Pick a tank below to join a squad</p>
+    </div>
+    <div id="lobby-waiting-msg" style="display:none">
+      <div class="waiting-anim"></div>
+      <h2>LOBBY</h2>
+      <p>Waiting for the game to start…</p>
+      <div id="tank-color-label"></div>
+    </div>
+  </div>
+
+  <!-- Unassigned players -->
+  <div class="lobby-section">
+    <div class="lobby-section-title">UNASSIGNED</div>
+    <div id="lobby-unassigned"><div class="empty-state">–</div></div>
+  </div>
+
+  <!-- Robots without a squad assignment (hidden when empty) -->
+  <div class="lobby-section" id="lobby-other-section" style="display:none">
+    <div class="lobby-section-title">AVAILABLE TANKS</div>
+    <div id="lobby-other"></div>
+  </div>
+
+  <!-- Jungle Squad (left) + Desert Squad (right) side by side — matches the battlefield layout -->
+  <div class="lobby-squads">
+    <div class="lobby-section">
+      <div class="lobby-section-title" style="color:#338C2F">JUNGLE SQUAD</div>
+      <div id="lobby-jungle"><div class="empty-state">No robots</div></div>
+    </div>
+    <div class="lobby-section">
+      <div class="lobby-section-title" style="color:#FFD594">DESERT SQUAD</div>
+      <div id="lobby-desert"><div class="empty-state">No robots</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Screen 3: Playing ───────────────────────────────────────────── -->
+<div id="screen-playing" class="screen">
+  <!-- Camera shake: only the video and anything "inside" it (fire beam, fire
+       flash, hit markers) shakes — everything else in #screen-playing (HUD,
+       controls, reticle) sits outside these wrappers and stays put.
+       #video-shake-scale is a STATIC zoom (see CSS) that overscans the video
+       just enough that #video-shake's dynamic translate/rotate (driven by
+       JS, see updateShakeTransform) never reveals its own edges within the
+       viewport — #screen-playing's overflow:hidden is the actual mask that
+       hides the overscanned margin. -->
+  <div id="video-shake-scale"><div id="video-shake">
+    <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
+    <canvas id="stream-canvas" style="display:none"></canvas>
+    <div id="stream-placeholder" style="display:none">No video stream</div>
+
+    <!-- Fire beam overlay: glowing bolt travelling from the barrel to the reticule.
+         #fire-beam (glow only) wraps #fire-beam-shape (the masked/clipped white
+         shape) — see the CSS comment for why these must be separate elements. -->
+    <div id="fire-beam"><div id="fire-beam-shape"></div></div>
+    <!-- Fire flash overlay: white radial flash masked around the gun barrel. Comes
+         after #fire-beam so the flash paints on top of it. -->
+    <div id="fire-flash"></div>
+
+    <!-- Hit direction overlay (above video, below HP bar / controls) -->
+    <div id="hit-overlay">
+      <div id="hit-front" class="hit-effect"></div>
+      <div id="hit-left"  class="hit-effect"></div>
+      <div id="hit-right" class="hit-effect"></div>
+      <div id="hit-rear"  class="hit-effect"></div>
+    </div>
+  </div></div>
+
+  <!-- Target reticle: crosshair + circle + dot, centred on video -->
+  <div id="reticle">
+    <div id="reticle-circle"></div>
+    <div id="reticle-dot"></div>
+  </div>
+
+  <!-- Hit-by label: capsule toast, z-index 25, sits above hit-overlay stacking context -->
+  <div id="hit-by-label"></div>
+
+  <!-- HP bar -->
+  <div id="hp-bar-wrap">
+    <div id="hp-bar-fill"></div>
+    <div id="hp-text">HP</div>
+  </div>
+
+  <!-- Timer & robot label -->
+  <div id="timer-label">3:00</div>
+  <div id="robot-label"></div>
+  <div id="role-label"></div>
+  <div id="partner-label"></div>
+
+  <!-- Fullscreen button (hidden automatically once fullscreen is active — see updateFullscreenBtnVisibility) -->
+  <div id="fullscreen-control" style="position:absolute;top:3.2vmin;left:2vmax;z-index:15;display:flex;flex-direction:column;align-items:center;gap:1.07vmin;">
+    <button id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"
+      style="width:22.4vmin;height:22.4vmin;display:flex;align-items:center;justify-content:center;
+             background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);
+             border-radius:4.8vmin;color:rgba(255,255,255,0.8);font-size:10.24vmin;
+             cursor:pointer;line-height:1;">⛶</button>
+    <div style="font-size:2.77vmin;font-weight:600;letter-spacing:0.05em;color:rgba(255,255,255,0.7);text-shadow:0 1px 3px rgba(0,0,0,0.8);">FULLSCREEN</div>
+  </div>
+
+  <!-- Controls -->
+  <div id="controls">
+    <!-- Joystick -->
+    <div id="joystick-base">
+      <div id="joystick-cross"></div>
+      <div id="joystick-thumb"></div>
+    </div>
+
+    <!-- Fire button -->
+    <div id="fire-btn" onpointerdown="onFire()">
+      <div id="fire-btn-text">
+        <span id="fire-word">FIRE</span>
+        <span id="fire-countdown"></span>
+      </div>
+    </div>
+
+    <!-- Turret slider -->
+    <div id="turret-buttons">
+      <span class="turret-zone-label" style="left:10%">FAST</span>
+      <span class="turret-zone-label" style="left:31.25%">SLOW</span>
+      <span class="turret-zone-label" style="left:68.75%">SLOW</span>
+      <span class="turret-zone-label" style="left:90%">FAST</span>
+      <div id="turret-thumb">TURRET</div>
+    </div>
+  </div>
+
+  <!-- Fire result toast -->
+  <div id="fire-toast"></div>
+
+  <!-- Host who is also playing: back to the host console (Go server addition) -->
+  <button id="tg-host-btn" onclick="tgToHostConsole()" style="display:none;position:absolute;top:3.2vmin;right:2vmax;z-index:15;
+    padding:1.6vmin 3.2vmin;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);border-radius:4.8vmin;
+    color:rgba(255,255,255,0.8);font-size:3.2vmin;font-weight:700;letter-spacing:0.08em;cursor:pointer;">HOST</button>
+</div>
+
+<!-- ── Game paused overlay ─────────────────────────────────────────── -->
+<div id="game-paused-overlay">
+  <h2>&#9646;&#9646; PAUSED</h2>
+  <p>Game paused by operator</p>
+</div>
+
+<!-- ── Screen 4: Dead (overlay) ───────────────────────────────────── -->
+<div id="screen-dead" class="screen">
+  <h2 id="dead-title">YOU ARE DEAD</h2>
+  <div id="dead-countdown"></div>
+  <p id="dead-subtitle"></p>
+</div>
+
+<!-- ── Game over overlay (multi-phase, not part of .screen system) ──────── -->
+<div id="go-overlay">
+
+  <!-- Phase 1: pulsing GAME OVER text over video -->
+  <div id="go-p1">
+    <div id="go-title">GAME OVER</div>
+  </div>
+
+  <!-- Animated black fade -->
+  <div id="go-blackout"></div>
+
+  <!-- Phase 2: victory or defeat result -->
+  <div id="go-p2">
+    <canvas id="go-fireworks"></canvas>
+
+    <!-- skull shown for losers -->
+    <div id="go-skull">
+      <svg width="120" height="130" viewBox="0 0 120 130" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="60" cy="54" rx="47" ry="44" fill="white"/>
+        <ellipse cx="38" cy="52" rx="14" ry="15" fill="#000"/>
+        <ellipse cx="82" cy="52" rx="14" ry="15" fill="#000"/>
+        <path d="M60 70 L53 83 L67 83 Z" fill="#000"/>
+        <rect x="22" y="90" width="76" height="22" rx="6" fill="white"/>
+        <rect x="42" y="90" width="4" height="22" fill="#000"/>
+        <rect x="58" y="90" width="4" height="22" fill="#000"/>
+        <rect x="74" y="90" width="4" height="22" fill="#000"/>
+        <path d="M24 65 L33 73" stroke="rgba(180,180,180,0.5)" stroke-width="2" stroke-linecap="round"/>
+        <path d="M96 65 L87 73" stroke="rgba(180,180,180,0.5)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div id="go-result-msg"></div>
+    <button id="go-proceed-btn" onclick="goToStats()">PROCEED</button>
+  </div>
+
+  <!-- Phase 3: stats -->
+  <div id="go-p3">
+    <h2>Match Stats</h2>
+    <div class="go-stat-row"><span class="go-stat-label">Your kills</span><span class="go-stat-value" id="stat-kills">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Your deaths</span><span class="go-stat-value" id="stat-deaths">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Inflicted damage</span><span class="go-stat-value" id="stat-damage">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Victory points gained</span><span class="go-stat-value" id="stat-vp">&#8212;</span></div>
+    <div class="go-stat-sub"><span class="go-stat-label">from captures</span><span class="go-stat-value" id="stat-vp-captures">&#8212;</span></div>
+    <div class="go-stat-sub"><span class="go-stat-label">from kills</span><span class="go-stat-value" id="stat-vp-kills">&#8212;</span></div>
+    <div class="go-stat-row"><span class="go-stat-label">Your nemesis</span><span class="go-stat-value go-nemesis" id="stat-nemesis">&#8212;</span></div>
+    <div class="go-btn-row">
+      <button class="go-btn-primary" onclick="continueToSite()">CONTINUE</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// Platform detection
+// ════════════════════════════════════════════════════════
+// true on ALL iOS browsers (Safari, Chrome/iOS, Firefox/iOS) — they share WebKit
+// and none support MJPEG in <img>. maxTouchPoints check catches iPadOS 13+.
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Firefox's <img> can no-op a same-URL reassignment to /api/robot-stream (e.g.
+// the same robot reused on a match restart), leaving a dead MJPEG connection
+// frozen on screen — route it through the WS frame decoder instead, same as iOS.
+const IS_FIREFOX = /Firefox/.test(navigator.userAgent);
+
+// ════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════
+// Keep in sync with GameHub.MaxNameLength — short names keep the lobby and
+// display readable and stop long ones being cut off in the robot rows.
+const MAX_NAME_LEN = 12;
+
+// Random id for this browser, kept in localStorage so every tab on the phone shares
+// it. Sent on the hub URL; Unity uses it to let this phone rejoin under its own name
+// (new tab after rescanning the QR code, refresh, reconnect) instead of rejecting the
+// name as already taken. Private browsing without storage just gets one per page.
+const DEVICE_ID = (() => {
+  const fresh = () => (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+  try {
+    let id = localStorage.getItem('tg_device_id');
+    if (!id) { id = fresh(); localStorage.setItem('tg_device_id', id); }
+    return id;
+  } catch (_) { return fresh(); }
+})();
+
+// Automatic joins (lobby opening, SignalR reconnect, mid-game rejoin poll) only run
+// on the tab that's actually on screen. At Battles Through History a player's old
+// tab, still connected in the background, auto-joined with their saved name the
+// moment a new lobby opened — so the tab they were looking at got "name already
+// taken". A hidden tab that misses a rejoin catches up when it's shown again.
+function pageVisible() { return document.visibilityState === 'visible'; }
+let _rejoinWhenVisible = false;
+
+let myName      = '';
+let myAlliance  = -1; // 0=Desert Squad, 1=Jungle Squad
+let myRobotId   = '';
+let myTankColor = ''; // colour name assigned to this player's tank (e.g. "RED")
+let myRole      = ''; // 'solo' | 'driver' | 'gunner' — set at game start
+let partnerName = ''; // the other crew member's name (two-player mode)
+let twoPlayerMode = false; // server-level two-player mode enabled flag
+let robotList   = [];
+let _playerList = [];
+let connection  = null;
+let isDead      = false;      // true during 5-s explosion — all controls blocked
+let isDeadWalk  = false;      // true after explosion — can drive, cannot fire/capture
+let _deadTimer  = null;       // interval driving the countdown
+let gamePaused  = false;      // true between GamePaused and GameResumed — freezes timer label
+let _rejoinAttempted = false; // prevents poll from re-triggering auto-rejoin
+
+let maxHp       = 100;
+let currentHp   = 100;
+
+// Joystick
+let joystickActive = false;
+let joyOriginX  = 0, joyOriginY = 0;
+let joyL = 0, joyR = 0;
+// Max thumb travel in CSS px = (track size - thumb size) / 2. The controls are
+// sized in vmin so their pixel size varies with viewport AND with Safari's page
+// zoom, so these are measured from the live elements rather than hardcoded —
+// see recomputeControlRadii(). Seeded with the 812x375 reference values so the
+// first frame is sane if a drag somehow beats the first measurement.
+let JOY_RADIUS    = 88.5;
+let TURRET_RADIUS = 144;
+const DRIVE_HZ   = 20;  // max sends per second
+let lastDriveSend = 0;
+
+// Joystick response curve — radial, so the stick direction is unchanged:
+//  - the inner JOY_DEADZONE of the throw does nothing (resting thumb / jitter);
+//  - from JOY_FULL outwards is full deflection: a thumb pushed to the edge wants full speed;
+//  - just outside the deadzone the deflection starts at JOY_MIN_OUT (slower
+//    than that is too slow to be useful), then rises as t^JOY_EXPO, so most of
+//    the throw goes to the low speeds the robot's drive pulse mode can make,
+//    and less to the top end.
+// Defaults below; the live values come from the server (JoystickSettings).
+let JOY_DEADZONE = 0.08;
+let JOY_FULL     = 1.0;
+let JOY_EXPO     = 2.0;
+let JOY_MIN_OUT  = 0.40;
+let JOY_AXIS_SNAP = 0.15;  // half-width of the axis cross (fraction of the throw)
+let TURN_SPEED    = 0.7;   // steering mix: tracks = forward ± turn × TURN_SPEED (touch, keyboard, gamepad)
+function joyCurve(r) {
+  if (r <= JOY_DEADZONE) return 0;
+  const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
+  return JOY_MIN_OUT + (1 - JOY_MIN_OUT) * Math.pow(t, JOY_EXPO);
+}
+
+// Turret
+let slowTurretSpeed = 0.2; // updated from server via TurretSettings / game_started
+
+// Fire cooldown
+let fireCooldownMs         = 3000; // updated from server via game_started.cooldownDuration
+let fireCooldownUntil      = 0;
+let fireCooldownTimer      = null;
+let fireCooldownPauseLeft  = 0;   // ms remaining when paused
+
+// ════════════════════════════════════════════════════════
+// WebSocket video decoder (iOS Safari/Chrome)
+// iOS Safari cannot stream-read multipart/x-mixed-replace fetch response bodies
+// (TypeError "Load failed").  Instead the server parses individual JPEG frames
+// and sends each as a binary WebSocket message — WebSocket binary has worked on
+// iOS since iOS 4.2 and is fully reliable.
+// ════════════════════════════════════════════════════════
+let _videoWs = null;
+
+// ── Screen Wake Lock ───────────────────────────────────────────────────────
+// Keeps the phone screen awake during play so the SignalR connection isn't
+// dropped by the device auto-locking mid-match. Feature-detected; no-op where
+// unsupported (older browsers). Re-acquired on visibilitychange because the OS
+// releases the lock whenever the tab is backgrounded.
+let _wakeLock = null;
+async function acquireWakeLock() {
+  if (_wakeLock || !('wakeLock' in navigator)) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+    dbg('wakeLock acquired');
+  } catch (e) { dbg('wakeLock failed: ' + (e && e.message)); _wakeLock = null; }
+}
+function releaseWakeLock() {
+  if (!_wakeLock) return;
+  try { _wakeLock.release(); } catch (_) {}
+  _wakeLock = null;
+  dbg('wakeLock released');
+}
+document.addEventListener('visibilitychange', () => {
+  // A SignalR reconnect that happened while this tab was hidden skipped its
+  // JoinLobby (see pageVisible) — do it now the player is looking at this tab.
+  if (pageVisible() && _rejoinWhenVisible && connection && myName
+      && connection.state === signalR.HubConnectionState.Connected) {
+    _rejoinWhenVisible = false;
+    dbg('visible again — completing deferred rejoin');
+    const conn = connection;
+    conn.invoke('JoinLobby', myName).then(joined => {
+      if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active'))
+        showScreen('screen-lobby');
+    }).catch(err => dbg('deferred rejoin failed: ' + err.message));
+  }
+  // Only re-acquire while actually playing (playing screen is active).
+  if (document.visibilityState === 'visible'
+      && document.getElementById('screen-playing').classList.contains('active')) {
+    acquireWakeLock();
+  } else if (document.visibilityState === 'hidden') {
+    dropControls();
+  }
+});
+// iOS Safari can skip visibilitychange on some navigations; pagehide is the backstop.
+window.addEventListener('pagehide', dropControls);
+
+// Zero and release all held controls. Called when the page is backgrounded
+// (lock screen, notification shade, app switch): a pointerup that fires while
+// hidden never reaches us, so without this the joystick resumes streaming its
+// stale value when the page returns — the tank drives itself with no finger
+// on the screen. releaseJoy/releaseTurretSlider are hoisted function
+// declarations, so referencing them from here is safe.
+function dropControls() {
+  try { releaseJoy(); releaseTurretSlider(); } catch (_) {}
+}
+
+// ── Join-button state helpers ──────────────────────────────────────────────
+// Tracks whether the lobby is currently open (Lobby phase). Updated by SignalR
+// events and the pre-join poll. Used to guard JoinRejected from re-enabling the
+// button when a game is already in progress.
+let _lobbyOpen = false;
+
+function setJoinReady() {
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'JOIN GAME';
+  btn.disabled = false;
+  btn.classList.remove('btn-waiting');
+}
+function setJoinWaiting() {
+  const btn = document.getElementById('join-btn');
+  btn.textContent = 'WAITING FOR SERVER';
+  btn.disabled = true;
+  btn.classList.add('btn-waiting');
+}
+function setJoinGameInProgress() {
+  const btn = document.getElementById('join-btn');
+  // A player with a saved name may be mid-game after a refresh — the button
+  // must stay tappable so they can rejoin manually if the auto-rejoin failed.
+  const savedName = document.getElementById('name-input').value.trim();
+  if (savedName) {
+    btn.textContent = 'REJOIN GAME';
+    btn.disabled = false;
+    btn.classList.remove('btn-waiting');
+  } else {
+    btn.textContent = 'GAME IN PROGRESS';
+    btn.disabled = true;
+    btn.classList.add('btn-waiting');
+  }
+}
+
+// ── Pre-join server-status poll ────────────────────────────────────────────
+// Polls /api/server-ready every 2 s while the join screen is showing and no
+// game connection is active.  Updates the join button grey/orange so players
+// know when Unity is reachable before they press anything.
+let _serverPollTimer = null;
+function startServerPoll() {
+  function poll() {
+    if (!document.getElementById('screen-join').classList.contains('active')) return;
+    if (connection) return; // game connection active — SignalR events handle state
+    fetch('/api/server-ready')
+      .then(r => r.json())
+      .then(d => {
+        _lobbyOpen = d.ready;
+        if (d.ready) {
+          setJoinReady();
+        } else if (d.phase === 'playing') {
+          // Auto-rejoin once if there's a saved name (page refresh mid-game).
+          const savedName = document.getElementById('name-input').value.trim();
+          if (savedName && !_rejoinAttempted && pageVisible()) {
+            _rejoinAttempted = true;
+            setStatus('Rejoining game…', false);
+            joinLobby();
+          } else {
+            setJoinGameInProgress();
+            if (savedName)
+              setStatus('Game in progress — tap to rejoin.', false);
+          }
+        } else {
+          setJoinWaiting();
+        }
+      })
+      .catch(() => {}); // ignore network errors — button stays as-is
+  }
+  poll(); // immediate check on call
+  clearInterval(_serverPollTimer);
+  _serverPollTimer = setInterval(poll, 2000);
+}
+
+function stopVideoWs() {
+  if (_videoWs) {
+    // Detach EVERY handler before closing, not just onclose. A socket closed
+    // while still connecting — or one whose connection has silently died,
+    // which is exactly what the stall watchdog replaces — fires 'error' later,
+    // sometimes seconds later. Its old onerror then put "No video stream" over
+    // the replacement stream, which had already shown its first frame and so
+    // never hid the placeholder again: black screen + "No video stream" while
+    // video was arriving fine underneath, until a refresh.
+    const ws = _videoWs;
+    _videoWs = null;
+    ws.onopen = ws.onerror = ws.onmessage = ws.onclose = null;
+    ws.close();
+  }
+}
+
+function startWsVideoDecoder(robotUrl) {
+  stopVideoWs();
+  const canvas = document.getElementById('stream-canvas');
+  const ctx    = canvas.getContext('2d');
+  const ph     = document.getElementById('stream-placeholder');
+  let gotFirstFrame = false;
+  let frameCount    = 0;
+
+  // Build ws:// URL pointing at the server's /api/video-ws endpoint
+  const wsUrl = location.origin.replace(/^http/, 'ws')
+              + '/api/video-ws?url=' + encodeURIComponent(robotUrl)
+              + '&who=' + encodeURIComponent(myName || 'phone');
+  dbg('WS video: ' + wsUrl);
+
+  const ws = new WebSocket(wsUrl);
+  _videoWs = ws;
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen  = () => dbg('WS video open');
+  ws.onerror = () => {
+    dbg('WS video error');
+    ph.textContent   = 'No video stream';
+    ph.style.display = 'flex';
+  };
+  ws.onclose = e => {
+    dbg('WS video closed code=' + e.code + ' frames=' + frameCount);
+    if (!gotFirstFrame) {
+      ph.textContent   = 'No video stream';
+      ph.style.display = 'flex';
+    }
+    // Unintentional close while still in-game (stopVideoWs nulls onclose first,
+    // so this never fires on deliberate teardown): the robot camera may just be
+    // restarting between games — keep retrying until we leave the playing screen.
+    _videoWs = null;
+    if (document.body.classList.contains('game-active')) {
+      ph.textContent   = 'Reconnecting camera…';
+      ph.style.display = 'flex';
+      setTimeout(() => {
+        if (!_videoWs && document.body.classList.contains('game-active'))
+          startWsVideoDecoder(robotUrl);
+      }, 1500);
+    }
+  };
+  // Decode one frame at a time and hold only the newest waiting frame. When the
+  // phone decodes slower than frames arrive, stale frames are skipped instead of
+  // queuing behind each other and pushing the picture further and further behind.
+  let decoding = false;
+  let pending  = null;
+  const drawNext = () => {
+    if (decoding || !pending) return;
+    const data = pending;
+    pending  = null;
+    decoding = true;
+    const decodeStart = performance.now();
+    decodeJpegFrame(data).then(img => {
+      // Socket replaced while this frame was decoding — drop it, so a stale
+      // decoder can't draw over (or un-hide placeholders for) the new stream.
+      if (_videoWs !== ws) { if (img.close) img.close(); return; }
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      // Assigning canvas width/height (even to the same value) clears and
+      // reallocates the canvas, so only do it when the frame size changes.
+      if (w && canvas.width  !== w) canvas.width  = w;
+      if (h && canvas.height !== h) canvas.height = h;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (img.close) img.close(); // ImageBitmap: free the decoded pixels now
+      frameCount++;
+      _vsDrawn++;
+      _vsDecodeMs += performance.now() - decodeStart;
+      _lastVideoFrameAt = performance.now(); // feeds the stall watchdog
+      onVideoFrameTick(); // step the fire-flash decay in lockstep with real decoded frames
+      // A drawn frame means video is live: clear any placeholder text on
+      // every frame, not just the first, so nothing can stay stuck over it.
+      if (ph.style.display !== 'none')     ph.style.display     = 'none';
+      if (canvas.style.display === 'none') canvas.style.display = '';
+      if (!gotFirstFrame) {
+        gotFirstFrame = true;
+        dbg('WS first frame! ' + w + 'x' + h);
+      } else if (frameCount === 10) {
+        dbg('WS stream OK, 10 frames received');
+      }
+    }).catch(() => { /* corrupt frame — skip it */ })
+      .finally(() => { decoding = false; drawNext(); });
+  };
+  ws.onmessage = e => { _vsRecv++; pending = e.data; drawNext(); };
+}
+
+// Decodes one JPEG (ArrayBuffer) off the main thread where the browser supports
+// createImageBitmap (iOS 15+, all current desktop/Android browsers); falls back
+// to an <img> + blob URL on older ones. Resolves with something drawImage accepts.
+function decodeJpegFrame(buf) {
+  const blob = new Blob([buf], { type: 'image/jpeg' });
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('jpeg decode')); };
+    img.src = url;
+  });
+}
+
+// ── Video stall watchdog ───────────────────────────────────────────────────
+// A feed can die without any error reaching the page: a Wi-Fi blip can leave
+// the stream on a half-open socket that never delivers another byte, and the
+// browser may then drop the last decoded frame, leaving the video black while
+// SignalR (controls, HUD) carries on. Refreshing fixed it because it opens a
+// fresh stream — this does the same automatically. Once a second it checks
+// when a new frame last arrived and restarts the feed if none has for
+// VIDEO_STALL_MS. WS decoder path: every decoded frame stamps
+// _lastVideoFrameAt. Native <img> path: an MJPEG <img> fires no per-frame
+// events, so a tiny copy of the current frame is compared with the previous
+// one — sensor noise makes consecutive live frames always differ slightly.
+const VIDEO_STALL_MS = 5000;
+let _videoUrl         = '';    // robot stream URL of the current game
+let _videoWanted      = false; // true from game start until the video is torn down
+let _lastVideoFrameAt = 0;     // performance.now() of the last new frame seen
+let _vSampleCtx       = null;
+let _vSamplePrev      = null;
+
+function sampleImgFrame() {
+  const img = document.getElementById('stream');
+  if (!img.naturalWidth) return; // no frame decoded yet
+  if (!_vSampleCtx) {
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 24;
+    _vSampleCtx = c.getContext('2d', { willReadFrequently: true });
+  }
+  let px;
+  try {
+    _vSampleCtx.drawImage(img, 0, 0, 32, 24);
+    px = _vSampleCtx.getImageData(0, 0, 32, 24).data;
+  } catch (_) { return; } // broken image — let the stall timer run out
+  const prev = _vSamplePrev;
+  _vSamplePrev = px;
+  if (!prev) { _lastVideoFrameAt = performance.now(); return; }
+  for (let i = 0; i < px.length; i++) {
+    if (px[i] !== prev[i]) { _lastVideoFrameAt = performance.now(); return; }
+  }
+}
+
+setInterval(() => {
+  // Not expecting frames (no game, paused = robot stream_off, page hidden):
+  // hold the baseline so the stall window starts fresh when we resume.
+  if (!_videoWanted || gamePaused || document.visibilityState !== 'visible') {
+    _lastVideoFrameAt = performance.now();
+    return;
+  }
+  if (!_videoWs) sampleImgFrame();
+  const stalledMs = performance.now() - _lastVideoFrameAt;
+  if (stalledMs > VIDEO_STALL_MS) {
+    dbg('video watchdog: no new frame for ' + Math.round(stalledMs / 1000) + 's — restarting feed');
+    startGameStream(_videoUrl);
+  }
+}, 1000);
+
+// ── Video stats report ─────────────────────────────────────────────────────
+// Every VS_REPORT_MS while in a game, measure for VS_SAMPLE_MS what this phone
+// actually puts on screen and send it to the server (GameHub.ReportVideoStats),
+// which logs it beside its own per-tank in/out frame rates in logs/video-*.log.
+// Together they show whether choppy video came from the tank, the Wi-Fi link to
+// this phone, or the phone itself being too slow to draw what it received.
+//  - WS/canvas path (iOS, Firefox): exact counts of received and drawn frames.
+//  - <img> path (Android Chrome): an MJPEG <img> fires no per-frame event, so
+//    for the sample window a tiny copy of it is compared on every animation
+//    frame and changes are counted (the stall watchdog's trick, sped up).
+// pageFps is the requestAnimationFrame rate: well under 60 means the phone's
+// main thread or GPU is struggling, independent of the video.
+const VS_REPORT_MS = 30000;
+const VS_SAMPLE_MS = 2000;
+let _vsRecv = 0, _vsDrawn = 0, _vsDecodeMs = 0; // WS path, running totals
+let _vsDevice = '';
+
+// Device description for the log. Chrome's user-agent string no longer names the
+// phone model ("Android 10; K"), but its client hints do.
+(async function vsLoadDevice() {
+  try {
+    const uad = navigator.userAgentData;
+    if (uad && uad.getHighEntropyValues) {
+      const h = await uad.getHighEntropyValues(['model', 'platformVersion']);
+      const real = (uad.brands || []).filter(x => !/Not.?A.?Brand/i.test(x.brand));
+      const b = real.find(x => !/Chromium/i.test(x.brand)) || real[0]; // "Google Chrome" over plain "Chromium"
+      _vsDevice = [h.model, (uad.platform || '') + ' ' + (h.platformVersion || ''),
+                   b ? b.brand + ' ' + b.version : ''].filter(x => x && x.trim()).join(', ');
+    }
+  } catch (_) {}
+  if (!_vsDevice) {
+    const ua = navigator.userAgent;
+    const os = ua.match(/\(([^)]*)\)/);  // "(iPhone; CPU iPhone OS 16_6 like Mac OS X)"
+    const br = ua.match(/(CriOS|FxiOS|EdgiOS|SamsungBrowser|Firefox|Chrome|Version)\/([\d.]+)/);
+    _vsDevice = (os ? os[1] : ua) + (br ? ', ' + br[1] + ' ' + br[2] : '');
+  }
+  _vsDevice = _vsDevice.slice(0, 120);
+})();
+
+function vsMeasure(done) {
+  const usingWs = !!_videoWs;
+  const img = document.getElementById('stream');
+  let ctx = null, prev = null, changes = 0, rafs = 0;
+  if (!usingWs) {
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 24; // same size as the stall watchdog: small enough to be cheap, big enough to see sensor noise
+    ctx = c.getContext('2d', { willReadFrequently: true });
+  }
+  const recv0 = _vsRecv, drawn0 = _vsDrawn, dec0 = _vsDecodeMs;
+  const t0 = performance.now();
+  const step = () => {
+    rafs++;
+    if (ctx && img.naturalWidth) {
+      try {
+        ctx.drawImage(img, 0, 0, 32, 24);
+        const px = ctx.getImageData(0, 0, 32, 24).data;
+        if (prev) {
+          for (let i = 0; i < px.length; i++) if (px[i] !== prev[i]) { changes++; break; }
+        }
+        prev = px;
+      } catch (_) {}
+    }
+    const elapsed = performance.now() - t0;
+    if (elapsed < VS_SAMPLE_MS) { requestAnimationFrame(step); return; }
+    const secs  = elapsed / 1000;
+    const drawn = _vsDrawn - drawn0;
+    done({
+      path:     usingWs ? 'ws' : 'img',
+      shownFps: (usingWs ? drawn : changes) / secs,
+      recvFps:  usingWs ? (_vsRecv - recv0) / secs : 0,
+      decodeMs: usingWs && drawn ? (_vsDecodeMs - dec0) / drawn : 0,
+      pageFps:  rafs / secs,
+    });
+  };
+  requestAnimationFrame(step);
+}
+
+setInterval(() => {
+  if (!_videoWanted || gamePaused || document.visibilityState !== 'visible' || !connection) return;
+  vsMeasure(m => {
+    dbg(`video stats: ${m.path} shown ${m.shownFps.toFixed(1)} fps` +
+        (m.path === 'ws' ? ` (recv ${m.recvFps.toFixed(1)}, ${m.decodeMs.toFixed(0)} ms)` : '') +
+        `, page ${m.pageFps.toFixed(0)} fps`);
+    if (!connection) return;
+    connection.send('ReportVideoStats', Object.assign(m, {
+      name:     myName,
+      device:   _vsDevice,
+      cores:    navigator.hardwareConcurrency || 0,
+      memoryGb: navigator.deviceMemory || 0,
+      screen:   `${screen.width}x${screen.height}@${(window.devicePixelRatio || 1).toFixed(1)}`,
+      lowFx:    _lowFx,
+    })).catch(() => {});
+  });
+}, VS_REPORT_MS);
+
+function stopGameStream() {
+  _videoWanted = false;
+  // Detach the retry handler BEFORE blanking: blanking an <img> fires 'error',
+  // and the old handler then restarted the stream 1.5 s later (game over keeps
+  // game-active on for ~2 s more, and Chrome reports a blank src as the page
+  // URL so the src check passed). The phone then kept downloading its last
+  // tank's video for as long as the page stayed open — including through every
+  // later match that tank played in, a full extra stream on the shared Wi-Fi.
+  const img = document.getElementById('stream');
+  img.onerror = null;
+  img.removeAttribute('src');
+  stopVideoWs();
+}
+
+function startGameStream(url) {
+  dbg('startGameStream url=' + url);
+  if (!url) { dbg('startGameStream: no url, aborting'); return; }
+  _videoUrl         = url;
+  _videoWanted      = true;
+  _lastVideoFrameAt = performance.now();
+  _vSamplePrev      = null;
+  // Route through the server-side fanout proxy so the robot only has one HTTP
+  // streaming client regardless of how many viewers (phone + display) are watching.
+  const proxyUrl = location.origin + '/api/robot-stream?url=' + encodeURIComponent(url)
+                 + '&who=' + encodeURIComponent(myName || 'phone');
+  dbg('proxyUrl=' + proxyUrl);
+  if (IS_IOS || IS_FIREFOX) {
+    dbg('WS video decoder path (iOS=' + IS_IOS + ' firefox=' + IS_FIREFOX + ')');
+    document.getElementById('stream').style.display = 'none';
+    // Show a placeholder until the first frame arrives
+    const ph = document.getElementById('stream-placeholder');
+    ph.textContent    = 'Connecting to camera…';
+    ph.style.display  = 'flex';
+    const canvas = document.getElementById('stream-canvas');
+    canvas.style.display = 'none';
+    startWsVideoDecoder(url);
+  } else {
+    dbg('img src path');
+    document.getElementById('stream-canvas').style.display = 'none';
+    const img = document.getElementById('stream');
+    img.style.display = '';
+    // Retry on load failure while in-game (e.g. camera still restarting at the
+    // start of a second game). Cache-buster forces a fresh proxy request —
+    // reassigning an identical src can be a no-op in some browsers.
+    img.onerror = () => {
+      dbg('img stream error — retrying in 1.5s');
+      setTimeout(() => {
+        // Only if this is still the stream we want: not stopped, not replaced.
+        if (_videoWanted && _videoUrl === url && document.body.classList.contains('game-active'))
+          img.src = proxyUrl + '&t=' + Date.now();
+      }, 1500);
+    };
+    img.src = proxyUrl + '&t=' + Date.now();
+    document.getElementById('stream-placeholder').style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// Screen management
+// ════════════════════════════════════════════════════════
+function showScreen(id) {
+  dbg('showScreen: ' + id);
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  const inGame = id === 'screen-playing';
+  document.body.classList.toggle('game-active', inGame);
+  if (!inGame) { try { screen.orientation.unlock(); } catch (_) {} }
+  // Controls are only measurable once the playing screen is visible, and
+  // game-active can rotate the layout, so measure after both have applied.
+  if (inGame) requestAnimationFrame(recomputeControlRadii);
+  positionDbgPanel(id);
+}
+
+let _fireToastTimer = null;
+function showFireToast(text) {
+  const el = document.getElementById('fire-toast');
+  el.textContent = text;
+  el.classList.add('visible');
+  if (_fireToastTimer) clearTimeout(_fireToastTimer);
+  _fireToastTimer = setTimeout(() => {
+    el.classList.remove('visible');
+    _fireToastTimer = null;
+  }, 2500);
+}
+
+function showReconnectOverlay(msg) {
+  document.getElementById('reconnect-msg').textContent = msg;
+  document.getElementById('reconnect-overlay').classList.add('visible');
+}
+function hideReconnectOverlay() {
+  document.getElementById('reconnect-overlay').classList.remove('visible');
+}
+
+function returnToJoin(message) {
+  // Stop old connection so Unity receives 'leave' before the next join.
+  if (connection) {
+    const old = connection;
+    connection = null;
+    old.stop().catch(() => {});
+  }
+  isDead           = false;
+  isDeadWalk       = false;
+  _rejoinAttempted = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+  joyL = joyR = turretSpeed = 0;
+  joystickActive = false;
+  turretActive   = false;
+  for (const k of Object.keys(_kbHeld)) delete _kbHeld[k];
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  clearInterval(fireCooldownTimer);
+  fireCooldownPauseLeft = 0;
+  stopGameStream();
+  releaseWakeLock();
+  const _sc = document.getElementById('stream-canvas');
+  _sc.style.display = 'none'; _sc.width = 0; _sc.height = 0;
+  hideCountdown();
+  document.getElementById('screen-dead').classList.remove('active', 'walkmode');
+  document.getElementById('game-paused-overlay').classList.remove('active');
+  gamePaused = false;
+  if (_fireToastTimer) { clearTimeout(_fireToastTimer); _fireToastTimer = null; }
+  document.getElementById('fire-toast').classList.remove('visible');
+  clearHitOverlay();
+  stopFireFx();
+  myAlliance  = -1;
+  myRobotId   = '';
+  myTankColor = '';
+  myRole      = '';
+  partnerName = '';
+  updateTankColorLabel();
+  // Restore HUD elements that onGameOver hides
+  document.getElementById('hp-bar-wrap').style.display     = '';
+  document.getElementById('timer-label').style.display     = '';
+  document.getElementById('robot-label').style.display     = '';
+  document.getElementById('controls').style.display        = '';
+  // Restore controls that may have been hidden by role gating
+  document.getElementById('joystick-base').style.display  = '';
+  document.getElementById('fire-btn').style.display       = '';
+  document.getElementById('turret-buttons').style.display = '';
+  document.getElementById('reticle').style.display        = '';
+  const roleEl    = document.getElementById('role-label');
+  const partnerEl = document.getElementById('partner-label');
+  if (roleEl)    { roleEl.style.display    = ''; roleEl.textContent    = ''; }
+  if (partnerEl) { partnerEl.style.display = ''; partnerEl.textContent = ''; }
+  // Reset game over overlay
+  resetGoOverlay();
+  _playerList = [];
+  robotList   = [];
+  // Joining, the queue, the lobby and the results live on the main page now.
+  dbg('returnToJoin: ' + (message || '') + ' → main page');
+  tgToMainPage();
+}
+
+// ════════════════════════════════════════════════════════
+// SignalR
+// ════════════════════════════════════════════════════════
+// ── Bridge to the Go server ───────────────────────────────────────────────
+// Device id shared with the main page, which creates it; ?device= overrides
+// it, to test several "phones" in one browser.
+const TG_DEVICE = new URLSearchParams(location.search).get('device') ||
+  (() => { try { return localStorage.getItem('tg_device'); } catch (_) { return null; } })();
+
+// One check below still names signalR.HubConnectionState; this keeps it working.
+const signalR = { HubConnectionState: { Connected: 'Connected' } };
+
+function tgToMainPage() {
+  location.replace('/' + location.search);
+}
+
+function tgToHostConsole() {
+  try { sessionStorage.setItem('tg_host_view', 'console'); } catch (_) {}
+  tgToMainPage();
+}
+
+// Stands in for the SignalR HubConnection: the same on/send/invoke/start/stop
+// and reconnect callbacks, over the Go server's /ws WebSocket.
+class TGHub {
+  constructor() {
+    this.handlers = {};
+    this.state = 'Disconnected';
+    this._ws = null;
+    this._stopped = false;
+    this._everOpen = false;
+    this._retryMs = 500;
+    this._onReconnecting = [];
+    this._onReconnected = [];
+    this._onClose = [];
+    setInterval(() => this._raw({ t: 'ping' }), 5000);
+  }
+  on(name, fn)       { this.handlers[name] = fn; }
+  onreconnecting(fn) { this._onReconnecting.push(fn); }
+  onreconnected(fn)  { this._onReconnected.push(fn); }
+  onclose(fn)        { this._onClose.push(fn); }
+  start()            { this._connect(); return Promise.resolve(); }
+  stop()             { this._stopped = true; if (this._ws) this._ws.close(); return Promise.resolve(); }
+  // Lobby calls (JoinLobby, PickRobot, ...) are the main page's job now.
+  invoke()           { return Promise.resolve(true); }
+  send(method, ...a) {
+    if (method === 'SendDrive')       this._raw({ t: 'drive', l: a[0], r: a[1] });
+    else if (method === 'SendTurret') this._raw({ t: 'turret', s: a[0] });
+    else if (method === 'Fire')       this._raw({ t: 'fire' });
+    // ReportVideoStats: the Go server logs its own video stats.
+    return Promise.resolve();
+  }
+  emit(name, ...args) {
+    const fn = this.handlers[name];
+    if (!fn) return;
+    try { fn(...args); } catch (e) { dbg('handler ' + name + ' threw: ' + e.message); }
+  }
+  _raw(obj) {
+    if (this._ws && this._ws.readyState === WebSocket.OPEN) this._ws.send(JSON.stringify(obj));
+  }
+  _connect() {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    this._ws = ws;
+    ws.onopen = () => {
+      this.state = 'Connected';
+      this._retryMs = 500;
+      ws.send(JSON.stringify({ t: 'hello', device: TG_DEVICE }));
+      if (this._everOpen) this._onReconnected.forEach(f => f());
+      this._everOpen = true;
+    };
+    ws.onmessage = e => {
+      let m;
+      try { m = JSON.parse(e.data); } catch (_) { return; }
+      tgOnMessage(this, m);
+    };
+    ws.onclose = () => {
+      if (this._stopped || this._ws !== ws) return;
+      this.state = 'Reconnecting';
+      this._onReconnecting.forEach(f => f());
+      setTimeout(() => { if (!this._stopped) this._connect(); }, this._retryMs);
+      this._retryMs = Math.min(this._retryMs * 2, 4000);
+    };
+  }
+}
+
+// Turns the server's state snapshots into the hub events this page handles:
+// countdown → CountdownStarted / CountdownTick, game on → GameStarted, then
+// StateUpdate with the timer every second, game over → GameOver.
+let tgState = null, tgStateAt = 0;
+let tgCountdownShown = false, tgLastCount = 0;
+let tgStarted = false, tgLastTimerSec = -1, tgOver = false;
+
+function tgRemainingMs() {
+  return tgState ? Math.max(0, tgState.remainingMs - (performance.now() - tgStateAt)) : 0;
+}
+
+function tgOnMessage(hub, m) {
+  if (m.t === 'kicked') { returnToJoin('The host removed you from the game.'); return; }
+  if (m.t === 'error')  { dbg('server: ' + m.msg); return; }
+  if (m.t === 'fired')  { hub.emit('FireEvent', { robotId: myRobotId, callsign: myRobotId }); return; }
+  if (m.t !== 'state') return;
+  tgState   = m;
+  tgStateAt = performance.now();
+  const me  = m.me;
+
+  myName     = me.name || '';
+  myRobotId  = me.tankName || me.tank || '';
+  myAlliance = me.team === 'Desert Squad' ? 0 : me.team === 'Jungle Squad' ? 1 : -1;
+  document.getElementById('tg-host-btn').style.display = me.isHost ? '' : 'none';
+
+  if (me.status === 'playing' && m.phase === 'countdown') {
+    if (!tgCountdownShown) {
+      tgCountdownShown = true;
+      tgLastCount = Math.max(1, Math.ceil(tgRemainingMs() / 1000));
+      hub.emit('CountdownStarted', tgLastCount);
+    }
+    return;
+  }
+  if (me.status === 'playing' && m.phase === 'playing') {
+    if (!tgStarted) {
+      tgStarted = true;
+      hub.emit('GameStarted', {
+        callsign:         me.tankName || me.tank,
+        videoUrl:         me.tank,            // stream id: /api/robot-stream?url=<id>
+        hp:               100,
+        maxHp:            100,
+        role:             'solo',
+        cooldownDuration: m.fireCooldownMs / 1000,
+      });
+    }
+    tgTick();
+    return;
+  }
+  if (me.status === 'finished' && tgStarted) {
+    if (!tgOver) {
+      tgOver = true;
+      // Until hits are scored there's no winner, which takes the page's
+      // "ended without a winner" path on to the main page's results.
+      hub.emit('GameOver', { winnerTeam: m.winnerTeam || '', reason: m.endReason });
+    }
+    return;
+  }
+  if (!tgOver) returnToJoin(); // not in a game (any more): back to the main page
+}
+
+function tgTick() {
+  if (!tgState || !connection) return;
+  const ms = tgRemainingMs();
+  if (tgState.phase === 'countdown' && tgCountdownShown) {
+    const n = Math.max(1, Math.ceil(ms / 1000));
+    if (n !== tgLastCount) { tgLastCount = n; connection.emit('CountdownTick', n, 0); }
+  } else if (tgState.phase === 'playing' && tgStarted && !tgOver) {
+    const s = Math.ceil(ms / 1000);
+    if (s !== tgLastTimerSec) { tgLastTimerSec = s; connection.emit('StateUpdate', { timer: s }); }
+  }
+}
+setInterval(tgTick, 200);
+
+function buildConnection() {
+  // The Go server's WebSocket, behind the same interface the SignalR hub had.
+  dbg('buildConnection: Go server bridge, device=' + TG_DEVICE);
+  const conn = new TGHub();
+
+  conn.on('LobbyUpdate',     players => { dbg('SignalR: LobbyUpdate ' + players.length + ' players'); onLobbyUpdate(players); });
+  conn.on('RobotListUpdate', data    => {
+    // data is { robots: [...], twoPlayerModeEnabled: bool } (or legacy array)
+    if (Array.isArray(data)) {
+      robotList = data;
+    } else {
+      robotList     = data.robots || [];
+      twoPlayerMode = !!data.twoPlayerModeEnabled;
+    }
+    dbg('SignalR: RobotListUpdate ' + robotList.length + ' robots, 2P=' + twoPlayerMode);
+    renderLobby();
+  });
+  conn.on('TwoPlayerMode', enabled => { twoPlayerMode = !!enabled; dbg('TwoPlayerMode=' + twoPlayerMode); renderLobby(); });
+  conn.on('DebugConsole',  enabled => { setDebugConsoleEnabled(enabled); });
+  conn.on('TankColor',       color   => { dbg('SignalR: TankColor ' + color); myTankColor = color || ''; updateTankColorLabel(); });
+  conn.on('GameStarted',     data    => { dbg('SignalR: GameStarted'); hideCountdown(); onGameStarted(data); });
+  conn.on('CountdownStarted', total  => { dbg('SignalR: CountdownStarted total=' + total); showCountdown(total); });
+  conn.on('CountdownTick',   (count, total) => { dbg('SignalR: CountdownTick ' + count); updateCountdown(count); });
+  conn.on('TurretSettings',  speed   => { slowTurretSpeed = speed; });
+  conn.on('JoystickSettings', s      => {
+    // Guard against a full-speed point at or inside the deadzone.
+    if (s.fullAt > s.deadzone) { JOY_DEADZONE = s.deadzone; JOY_FULL = s.fullAt; }
+    JOY_MIN_OUT = s.startSpeed;
+    JOY_EXPO    = s.curve;
+    if (typeof s.turnSpeed === 'number' && s.turnSpeed > 0) TURN_SPEED = Math.min(1, s.turnSpeed);
+    if (typeof s.axisSnap === 'number') {
+      JOY_AXIS_SNAP = Math.max(0, Math.min(0.5, s.axisSnap));
+      document.getElementById('joystick-base').style.setProperty('--axis-snap', JOY_AXIS_SNAP);
+    }
+    dbg('SignalR: JoystickSettings dz=' + s.deadzone + ' start=' + s.startSpeed + ' full=' + s.fullAt + ' curve=' + s.curve + ' axisSnap=' + s.axisSnap + ' turn=' + s.turnSpeed);
+  });
+  conn.on('StateUpdate',  data     => onStateUpdate(data));
+  conn.on('YouAreDead',   ()       => { dbg('SignalR: YouAreDead'); onYouAreDead(); });
+  conn.on('YouAreAlive',  ()       => { dbg('SignalR: YouAreAlive'); onYouAreAlive(); });
+  conn.on('GameOver',     data     => { dbg('SignalR: GameOver'); onGameOver(data); });
+  conn.on('ReturnToJoin', ()       => { dbg('SignalR: ReturnToJoin'); returnToJoin('Game ended by operator.'); });
+  conn.on('PlayerStats',  data     => {
+    dbg('SignalR: PlayerStats kills=' + data.kills + ' deaths=' + data.deaths);
+    _pendingStats = {
+      kills:          data.kills          ?? null,
+      deaths:         data.deaths         ?? null,
+      damage:         data.damage         ?? null,
+      victoryPoints:  data.victoryPoints  ?? null,
+      vpFromCaptures: data.vpFromCaptures ?? null,
+      vpFromKills:    data.vpFromKills    ?? null,
+      nemesis:        data.nemesis        || null,
+    };
+  });
+  conn.on('RfidTag',          text => showRfidToast(text));
+  conn.on('GamePaused',        ()   => { dbg('SignalR: GamePaused'); gamePaused = true; pauseFireCooldown(); document.getElementById('game-paused-overlay').classList.add('active'); });
+  conn.on('GameResumed',       ()   => { dbg('SignalR: GameResumed'); gamePaused = false; resumeFireCooldown(); document.getElementById('game-paused-overlay').classList.remove('active'); });
+  conn.on('FireResult',    text    => showFireToast(text));
+  // Note: myRobotId usually holds the robot's CALLSIGN (player_list's "robot"
+  // field sends callsign, falling back to robotId only when unset) — match both.
+  conn.on('FireEvent',    data    => {
+    if (!data || !myRobotId) return;
+    if (data.robotId === myRobotId || data.callsign === myRobotId) { dbg('FireEvent match — playing fx'); playFireFx(); }
+  });
+  conn.on('HitTaken',     data    => onHitTaken(data));
+  conn.on('ServerDisconnected', () => { dbg('SignalR: ServerDisconnected'); returnToJoin('Game server closed. Please rejoin.'); });
+  // This phone rejoined under the same name from another tab (or a newer connection
+  // in this one): close this connection and stop it auto-joining, so the two tabs
+  // can't keep taking the name off each other.
+  conn.on('JoinSuperseded', () => {
+    dbg('SignalR: JoinSuperseded');
+    if (connection !== conn) { conn.stop().catch(() => {}); return; }
+    _rejoinAttempted = true; // keeps the server poll from auto-rejoining this tab
+    returnToJoin('You joined from another tab or window — carry on there.');
+    _rejoinAttempted = true; // returnToJoin resets it
+  });
+  // Rejected join (name taken, or game in progress for kicked players).
+  // Only re-enable the button if the lobby is currently open; otherwise keep it grey.
+  conn.on('JoinRejected', reason => {
+    dbg('JoinRejected: ' + reason);
+    hideCountdown();
+    setStatus(reason, true);
+    if (_lobbyOpen) setJoinReady(); else setJoinGameInProgress();
+    showScreen('screen-join');
+  });
+  // Unity in a non-lobby, non-playing phase (MainMenu / Ended) — grey button.
+  conn.on('ServerNotReady', () => {
+    dbg('SignalR: ServerNotReady');
+    _lobbyOpen = false;
+    setJoinWaiting();
+    if (!document.getElementById('screen-playing').classList.contains('active'))
+      showScreen('screen-join');
+    setStatus('Waiting for game server…', false);
+  });
+  // Game is running — allow rejoin if name is saved; otherwise grey the button.
+  conn.on('GameInProgress', () => {
+    dbg('SignalR: GameInProgress');
+    _lobbyOpen = false;
+    setJoinGameInProgress();
+    if (!document.getElementById('screen-playing').classList.contains('active')) {
+      const savedName = document.getElementById('name-input').value.trim();
+      setStatus(savedName
+        ? 'Game in progress — tap to rejoin.'
+        : 'Game in progress. Please wait for the next game.', false);
+    }
+  });
+  // Unity (re-)connected — enable button; auto-rejoin if the phone was waiting.
+  conn.on('ServerConnected', () => {
+    dbg('SignalR: ServerConnected');
+    _lobbyOpen = true;
+    setJoinReady();
+    if (document.getElementById('screen-join').classList.contains('active') && myName && pageVisible()) {
+      setStatus('Game server ready — joining…', false);
+      conn.invoke('JoinLobby', myName).then(joined => {
+        if (joined && !document.getElementById('screen-playing').classList.contains('active'))
+          showScreen('screen-lobby');
+      }).catch(err => { dbg('ServerConnected auto-join failed: ' + err.message); });
+    }
+  });
+
+  conn.onreconnecting(err => { dbg('SignalR: reconnecting err=' + (err && err.message)); showReconnectOverlay('Trying to reconnect…'); });
+  conn.onreconnected(async () => {
+    dbg('SignalR: reconnected');
+    hideReconnectOverlay();
+    setStatus('', false);
+    if (!pageVisible()) { _rejoinWhenVisible = true; dbg('reconnected while hidden — rejoin deferred'); return; }
+    const joined = await conn.invoke('JoinLobby', myName).catch(console.error);
+    if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active'))
+      showScreen('screen-lobby');
+  });
+  conn.onclose(err => {
+    dbg('SignalR: closed err=' + (err && err.message));
+    hideReconnectOverlay();
+    if (connection === conn) returnToJoin('Server connection lost. Please rejoin.');
+  });
+
+  return conn;
+}
+
+// ════════════════════════════════════════════════════════
+// Join flow
+// ════════════════════════════════════════════════════════
+async function joinLobby() {
+  const input = document.getElementById('name-input');
+  // Cap before sending: the server enforces MAX_NAME_LEN too, and myName must
+  // match the name the server stores or role checks (iAmDriver/iAmGunner) fail.
+  const name  = input.value.trim().slice(0, MAX_NAME_LEN);
+  if (!name) { setStatus('Please enter a name.', true); input.focus(); return; }
+  if (input.value.trim().length > MAX_NAME_LEN) input.value = name;
+
+  dbg('joinLobby: name="' + name + '"');
+
+  // Tear down any previous connection before starting a new one.
+  if (connection) {
+    dbg('stopping old connection');
+    const old = connection;
+    connection = null;
+    old.stop().catch(() => {});
+  }
+
+  const btn = document.getElementById('join-btn');
+  btn.disabled = true;
+  setStatus('Connecting…', false);
+
+  try {
+    connection = buildConnection();
+    await connection.start();
+    dbg('connected! invoking JoinLobby');
+    myName = name;
+    const joined = await connection.invoke('JoinLobby', name);
+    dbg('JoinLobby returned joined=' + joined);
+    if (joined && _lobbyOpen && !document.getElementById('screen-playing').classList.contains('active')) {
+      dbg('→ screen-lobby');
+      showScreen('screen-lobby');
+    } else if (!joined) {
+      dbg('not joined — ServerNotReady will update button state');
+    } else {
+      dbg('already on screen-playing, skip lobby');
+    }
+  } catch (err) {
+    dbg('JOIN FAILED: ' + err.message);
+    setStatus('Could not connect: ' + err.message, true);
+    setJoinReady();
+    // Connection-level failure (not a server rejection) — let the server-status
+    // poll trigger another auto-rejoin, otherwise a single transient SignalR
+    // failure after a mid-game refresh leaves the player stranded.
+    _rejoinAttempted = false;
+  }
+}
+
+async function pickRobot(robotId) {
+  myRobotId = robotId || '';
+  renderLobby();
+  if (!connection) return;
+  try {
+    await connection.invoke('PickRobot', robotId || '');
+    dbg('pickRobot sent robotId=' + robotId);
+  } catch (err) {
+    dbg('pickRobot failed: ' + err.message);
+  }
+}
+
+async function setTwoPlayer(enabled) {
+  if (!connection) return;
+  try { await connection.invoke('SetTwoPlayer', !!enabled); }
+  catch (err) { dbg('setTwoPlayer failed: ' + err.message); }
+}
+
+async function joinAsGunner(robotId) {
+  if (!connection) return;
+  try { await connection.invoke('JoinAsGunner', robotId); }
+  catch (err) { dbg('joinAsGunner failed: ' + err.message); }
+}
+
+async function leaveGunner() {
+  if (!connection) return;
+  try { await connection.invoke('LeaveGunner'); }
+  catch (err) { dbg('leaveGunner failed: ' + err.message); }
+}
+
+async function swapRoles() {
+  if (!connection) return;
+  try { await connection.invoke('SwapRoles'); }
+  catch (err) { dbg('swapRoles failed: ' + err.message); }
+}
+
+function setStatus(msg, isError) {
+  const el = document.getElementById('join-status');
+  el.textContent = msg;
+  el.className   = 'status' + (isError ? ' error' : '');
+}
+
+// ════════════════════════════════════════════════════════
+// Lobby
+// ════════════════════════════════════════════════════════
+function onLobbyUpdate(players) {
+  _playerList = players || [];
+  for (const p of _playerList) {
+    const name = typeof p === 'string' ? p : (p.name ?? '');
+    if (name === myName) {
+      myAlliance = typeof p === 'string' ? -1 : (p.alliance ?? -1);
+      myRobotId  = typeof p === 'string' ? '' : (p.robot ?? '');
+      break;
+    }
+  }
+  renderLobby();
+}
+
+const TANK_COLOR_CSS = {
+  RED: '#ff4040', GREEN: '#00c800', BLUE: '#4488ff', YELLOW: '#ffc800',
+  CYAN: '#00dcff', PINK: '#ff00b4', ORANGE: '#ff4600', PURPLE: '#3200ff',
+  LIME: '#50ff00', WHITE: '#ffffff',
+};
+
+function updateTankColorLabel() {
+  const text = myTankColor ? `Your tank is glowing ${myTankColor}!` : '';
+  const color = TANK_COLOR_CSS[myTankColor] || '#fff';
+  for (const id of ['tank-color-label', 'countdown-color-label']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.textContent = text;
+    el.style.color = color;
+    el.style.textShadow = myTankColor ? `0 0 12px ${color}88` : 'none';
+  }
+}
+
+function renderLobby() {
+  // Toggle lobby header based on squad assignment
+  const inSquad = !!myRobotId;
+  document.getElementById('lobby-pick-squad-msg').style.display = inSquad ? 'none' : '';
+  document.getElementById('lobby-waiting-msg').style.display    = inSquad ? ''     : 'none';
+  updateTankColorLabel();
+
+  // Players without a robot yet
+  const unassigned = _playerList.filter(p => {
+    const robot = typeof p === 'string' ? '' : (p.robot ?? '');
+    return !robot;
+  });
+
+  const unEl = document.getElementById('lobby-unassigned');
+  if (unEl) {
+    if (unassigned.length) {
+      unEl.classList.add('inline-names');
+      const last = unassigned.length - 1;
+      unEl.innerHTML = unassigned.map((p, i) => {
+        const name   = typeof p === 'string' ? p : (p.name ?? '');
+        const isSelf = name === myName;
+        const sep    = i < last ? '<span class="un-sep">|</span>' : '';
+        return `<span class="un-item"><span class="${isSelf ? 'player-name-self' : ''}">`
+             + `${escHtml(name)}${isSelf ? ' (you)' : ''}</span>${sep}</span>`;
+      }).join('');
+    } else {
+      unEl.classList.remove('inline-names');
+      unEl.innerHTML = '<div class="empty-state">–</div>';
+    }
+  }
+
+  // Robots by squad
+  const desertRobots = robotList.filter(r => r.alliance === 0);
+  const jungleRobots = robotList.filter(r => r.alliance === 1);
+  const otherRobots  = robotList.filter(r => r.alliance !== 0 && r.alliance !== 1);
+
+  const otherSection = document.getElementById('lobby-other-section');
+  const otherEl      = document.getElementById('lobby-other');
+  if (otherSection && otherEl) {
+    if (otherRobots.length) {
+      otherEl.innerHTML        = otherRobots.map(makeRobotRow).join('');
+      otherSection.style.display = '';
+    } else {
+      otherSection.style.display = 'none';
+    }
+  }
+
+  function makeRobotRow(r) {
+    const name       = r.name || r.id || '?';
+    const assigned   = r.assignedPlayer || '';
+    const gunner     = r.gunnerPlayer   || '';
+    const twoPE      = !!r.twoPlayerEnabled;
+    const iAmDriver  = !!myName && assigned === myName;
+    const iAmGunner  = !!myName && gunner   === myName;
+
+    // Info text (driver / gunner labels)
+    let infoHtml = '';
+    if (assigned) infoHtml += `<span class="robot-player-assigned">Driver: ${escHtml(assigned)}${iAmDriver ? ' (you)' : ''}</span>`;
+    if (twoPE && gunner)    infoHtml += `<span class="robot-player-assigned">Gunner: ${escHtml(gunner)}${iAmGunner ? ' (you)' : ''}</span>`;
+    if (twoPE && !gunner && iAmDriver) infoHtml += `<span class="robot-player-assigned" style="color:var(--accent2)">Gunner slot open</span>`;
+
+    // Action buttons
+    let actHtml = '';
+    if (iAmDriver) {
+      actHtml += `<button class="role-btn mine" onclick="pickRobot('')">Leave</button>`;
+      if (twoPlayerMode) {
+        actHtml += `<label style="display:flex;align-items:center;gap:5px;font-size:0.75rem;margin-top:5px;cursor:pointer;color:var(--text)">
+          <input type="checkbox" ${twoPE ? 'checked' : ''} onchange="setTwoPlayer(this.checked)" style="cursor:pointer;accent-color:var(--accent)">2-player
+        </label>`;
+        if (twoPE && gunner) {
+          actHtml += `<button class="role-btn mine" style="margin-top:5px;font-size:0.72rem;padding:5px 10px" onclick="swapRoles()">Swap</button>`;
+        }
+      }
+    } else if (iAmGunner) {
+      actHtml += `<button class="role-btn mine" onclick="leaveGunner()">Leave</button>`;
+      actHtml += `<button class="role-btn mine" style="margin-top:5px;font-size:0.72rem;padding:5px 10px" onclick="swapRoles()">Swap</button>`;
+    } else if (twoPlayerMode && twoPE && !gunner && assigned) {
+      // can join as gunner — not already driver/gunner anywhere
+      const alreadyInTank = !!myRobotId || robotList.some(rb => rb.gunnerPlayer === myName);
+      if (!alreadyInTank) {
+        actHtml += `<button class="role-btn available" onclick="joinAsGunner('${escHtml(r.id)}')">Join Gunner</button>`;
+      } else {
+        actHtml += `<button class="role-btn taken" disabled>Taken</button>`;
+      }
+    } else if (!assigned) {
+      actHtml += `<button class="role-btn available" onclick="pickRobot('${escHtml(r.id)}')">Join</button>`;
+    } else {
+      actHtml += `<button class="role-btn taken" disabled>Taken</button>`;
+    }
+
+    return `<div class="robot-row">
+      <div class="robot-info">
+        <span class="robot-name">${escHtml(name)}</span>
+        ${infoHtml}
+      </div>
+      <div class="robot-actions" style="display:flex;flex-direction:column;align-items:flex-end">
+        ${actHtml}
+      </div>
+    </div>`;
+  }
+
+  const dEl = document.getElementById('lobby-desert');
+  if (dEl) dEl.innerHTML = desertRobots.length
+    ? desertRobots.map(makeRobotRow).join('')
+    : '<div class="empty-state">No robots</div>';
+
+  const jEl = document.getElementById('lobby-jungle');
+  if (jEl) jEl.innerHTML = jungleRobots.length
+    ? jungleRobots.map(makeRobotRow).join('')
+    : '<div class="empty-state">No robots</div>';
+}
+
+// ════════════════════════════════════════════════════════
+// Game events
+// ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// Fullscreen + orientation
+// ════════════════════════════════════════════════════════
+function enterFullscreenLandscape() {
+  const el = document.documentElement;
+  dbg('enterFullscreen: requestFS=' + !!el.requestFullscreen + ' webkitFS=' + !!el.webkitRequestFullscreen);
+  try {
+    if (el.requestFullscreen)            el.requestFullscreen().catch(e => dbg('requestFS rejected: ' + e));
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    dbg('fullscreen call OK');
+  } catch (e) { dbg('fullscreen threw: ' + e.message); }
+  try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    enterFullscreenLandscape();
+  }
+}
+
+// iOS reserves the real Fullscreen API for iPad — on iPhone, requestFullscreen()
+// silently rejects (see enterFullscreenLandscape's dbg log), so the button would
+// just be dead weight. iPad/Mac/desktop Safari aren't caught by this UA check
+// (Apple doesn't spoof the iPhone UA the way it does iPad's desktop-Safari one).
+function isIPhone() {
+  return /iPhone|iPod/.test(navigator.userAgent);
+}
+
+// Hide the fullscreen button+label once fullscreen is actually active (e.g. after
+// the auto-enter on game start, or iPad where requestFullscreen works) — no point
+// offering a button for a state we're already in.
+function updateFullscreenBtnVisibility() {
+  const el = document.getElementById('fullscreen-control');
+  if (!el) return;
+  if (isIPhone()) { el.style.display = 'none'; return; }
+  const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  el.style.display = inFullscreen ? 'none' : 'flex';
+}
+document.addEventListener('fullscreenchange', updateFullscreenBtnVisibility);
+document.addEventListener('webkitfullscreenchange', updateFullscreenBtnVisibility);
+updateFullscreenBtnVisibility();
+
+// ════════════════════════════════════════════════════════
+// Countdown overlay
+// ════════════════════════════════════════════════════════
+function showCountdown(total) {
+  // (The bridge only starts the countdown for players in this game.)
+  document.body.classList.add('game-active');
+  try { screen.orientation.lock('landscape').catch(() => {}); } catch (_) {}
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = total;
+  numEl.style.animation = 'none';
+  numEl.offsetHeight; // trigger reflow to restart animation
+  numEl.style.animation = '';
+  document.getElementById('countdown-overlay').classList.add('active');
+}
+
+function updateCountdown(count) {
+  const numEl = document.getElementById('countdown-number');
+  numEl.textContent = count;
+  numEl.style.animation = 'none';
+  numEl.offsetHeight;
+  numEl.style.animation = '';
+}
+
+function hideCountdown() {
+  document.getElementById('countdown-overlay').classList.remove('active');
+}
+
+function onGameStarted(data) {
+  dbg('onGameStarted: callsign=' + data.callsign + ' videoUrl=' + data.videoUrl + ' role=' + data.role);
+  resetFireCooldown();
+  maxHp           = data.maxHp           || 100;
+  currentHp       = data.hp              || maxHp;
+  if (data.slowTurretSpeed)   slowTurretSpeed = data.slowTurretSpeed;
+  if (data.cooldownDuration)  fireCooldownMs  = data.cooldownDuration * 1000;
+  isDead     = false;
+  isDeadWalk = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+  document.getElementById('screen-dead').classList.remove('active', 'walkmode');
+
+  // Role gating
+  myRole      = data.role        || 'solo';
+  partnerName = data.partnerName || '';
+  const isGunner = myRole === 'gunner';
+  const isDriver = myRole === 'driver';
+  document.getElementById('joystick-base').style.display  = isGunner ? 'none' : '';
+  document.getElementById('fire-btn').style.display       = isDriver ? 'none' : '';
+  document.getElementById('turret-buttons').style.display = isDriver ? 'none' : '';
+  // Driver only loses the reticle when there's an actual gunner aiming for them —
+  // a driver with no partner (e.g. gunner hasn't joined) still needs it themselves.
+  document.getElementById('reticle').style.display        = (isDriver && partnerName) ? 'none' : '';
+
+  const roleEl    = document.getElementById('role-label');
+  const partnerEl = document.getElementById('partner-label');
+  if (roleEl)    roleEl.textContent    = isGunner ? 'GUNNER' : isDriver ? 'DRIVER' : '';
+  if (partnerEl) partnerEl.textContent = partnerName
+    ? (isGunner ? 'Driver: ' : 'Gunner: ') + partnerName : '';
+
+  enterFullscreenLandscape();
+
+  document.getElementById('robot-label').textContent     = data.callsign || '';
+
+  startGameStream(data.videoUrl);
+
+  updateHpBar();
+  showScreen('screen-playing');
+  acquireWakeLock();
+  dbg('onGameStarted done → screen-playing shown role=' + myRole);
+  startGameLoop();
+}
+
+function onStateUpdate(data) {
+  if (data.hp !== undefined) {
+    currentHp = data.hp;
+    maxHp     = data.maxHp || maxHp;
+    updateHpBar();
+    // Fallback respawn detection: full HP while in dead walk = respawn happened
+    if (isDeadWalk && currentHp >= maxHp) onYouAreAlive();
+  }
+  if (data.timer !== undefined && !gamePaused) {
+    updateTimer(data.timer);
+  }
+  if (data.cooldownDuration) fireCooldownMs = data.cooldownDuration * 1000;
+}
+
+function onYouAreDead() {
+  isDead     = true;
+  isDeadWalk = false;
+  triggerShake('destroy');
+  // Release held controls so the joystick value from the moment of death can't
+  // resume when dead-walk re-enables driving 5s from now.
+  dropControls();
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+
+  const overlay   = document.getElementById('screen-dead');
+  const titleEl   = document.getElementById('dead-title');
+  const countEl   = document.getElementById('dead-countdown');
+  const subtitleEl = document.getElementById('dead-subtitle');
+
+  haptic([150, 80, 250, 80, 400]); // big escalating death rumble
+  overlay.classList.remove('walkmode');
+  overlay.classList.add('active');
+  titleEl.textContent    = 'YOU ARE DEAD';
+  subtitleEl.textContent = '';
+
+  let secs = 5;
+  countEl.textContent = secs;
+
+  _deadTimer = setInterval(() => {
+    secs--;
+    if (secs > 0) {
+      countEl.textContent = secs;
+    } else {
+      clearInterval(_deadTimer);
+      _deadTimer = null;
+
+      // Explosion over — transition to dead-walk: can drive, cannot fire
+      isDead     = false;
+      isDeadWalk = true;
+
+      overlay.classList.add('walkmode');        // pointer-events:none → touches reach controls
+      titleEl.textContent    = 'RETURN TO BASE';
+      subtitleEl.textContent = 'TO RESPAWN';
+      countEl.textContent    = '';
+    }
+  }, 1000);
+}
+
+function onYouAreAlive() {
+  isDead     = false;
+  isDeadWalk = false;
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+
+  const overlay = document.getElementById('screen-dead');
+  overlay.classList.remove('active', 'walkmode');
+  document.getElementById('dead-countdown').textContent = '';
+  document.getElementById('dead-subtitle').textContent  = '';
+}
+
+// ── Squad fireworks colour palettes ─────────────────────────────────────────
+const SQUAD_FW_COLORS = {
+  0: ['#FF8C00','#FFD700','#FFC300','#FF6000','#FFAA00','#FFE566'], // desert: orange/gold/yellow
+  1: ['#00D400','#50FF00','#FFFFFF','#ADFF2F','#00FF88','#CCFF33'], // jungle: green/lime/white
+};
+
+let _goFireworksRaf = null;
+let _goParticles    = [];
+let _pendingStats   = null;
+
+function onGameOver(data) {
+  // Operator manually ended the game — no winner, no cinematic, straight to join screen.
+  if (data.reason === 'manual' || !data.winnerTeam) {
+    dbg('onGameOver: manual end — returning to join');
+    returnToJoin('Game ended by operator.');
+    return;
+  }
+
+  // Only run the cinematic sequence for players actively in game.
+  // Everyone else (join/lobby screen) just gets returned to the join screen.
+  if (!document.getElementById('screen-playing').classList.contains('active')) {
+    dbg('onGameOver: not in game — returning to join');
+    returnToJoin('Game over! Waiting for the next game.');
+    return;
+  }
+
+  const winnerTeam     = data.winnerTeam || '';
+  const winnerAlliance = winnerTeam === 'Desert Squad' ? 0
+                       : winnerTeam === 'Jungle Squad'  ? 1 : -1;
+  const playerWon      = myAlliance >= 0 && myAlliance === winnerAlliance;
+  const fwColors       = SQUAD_FW_COLORS[winnerAlliance] || SQUAD_FW_COLORS[0];
+
+  dbg('onGameOver: winner=' + winnerTeam + ' myAlliance=' + myAlliance + ' won=' + playerWon);
+
+  // Save stats data for phase 3
+  _pendingStats = {
+    kills:          data.kills          ?? null,
+    deaths:         data.deaths         ?? null,
+    damage:         data.damage         ?? null,
+    victoryPoints:  data.victoryPoints  ?? null,
+    vpFromCaptures: data.vpFromCaptures ?? null,
+    vpFromKills:    data.vpFromKills    ?? null,
+    nemesis:        data.nemesis        ?? null,
+  };
+
+  // Stop game loop + fire cooldown
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  if (_deadTimer) { clearInterval(_deadTimer); _deadTimer = null; }
+  clearInterval(fireCooldownTimer);
+  fireCooldownPauseLeft = 0;
+  hideCountdown();
+
+  // Hide gameplay HUD + controls (keep video visible for phase 1)
+  document.getElementById('hp-bar-wrap').style.display        = 'none';
+  document.getElementById('timer-label').style.display        = 'none';
+  document.getElementById('robot-label').style.display        = 'none';
+  const roleEl    = document.getElementById('role-label');
+  const partnerEl = document.getElementById('partner-label');
+  if (roleEl)    roleEl.style.display    = 'none';
+  if (partnerEl) partnerEl.style.display = 'none';
+  document.getElementById('controls').style.display      = 'none';
+  document.getElementById('fire-toast').classList.remove('visible');
+  document.getElementById('game-paused-overlay').classList.remove('active');
+  document.getElementById('screen-dead').classList.remove('active', 'walkmode');
+  clearHitOverlay();
+
+  // Grab overlay elements
+  const overlay    = document.getElementById('go-overlay');
+  const p1         = document.getElementById('go-p1');
+  const blackout   = document.getElementById('go-blackout');
+  const p2         = document.getElementById('go-p2');
+  const p3         = document.getElementById('go-p3');
+  const resultMsg  = document.getElementById('go-result-msg');
+  const skull      = document.getElementById('go-skull');
+  const proceedBtn = document.getElementById('go-proceed-btn');
+  const fwCanvas   = document.getElementById('go-fireworks');
+
+  // Reset all phases
+  p1.classList.remove('visible');
+  p2.classList.remove('visible');
+  p3.classList.remove('visible');
+  resultMsg.classList.remove('visible');
+  skull.classList.remove('visible');
+  proceedBtn.classList.remove('visible');
+  blackout.classList.remove('fading');
+  blackout.style.transition = 'none';
+  blackout.offsetHeight; // flush
+  blackout.style.transition = '';
+  fwCanvas.style.display = 'none';
+  stopGoFireworks();
+
+  overlay.classList.add('active');
+
+  // Phase 1: fade in GAME OVER text (screen-playing stays active — video visible)
+  requestAnimationFrame(() => p1.classList.add('visible'));
+
+  // After 2 s: start black fade (video continues playing behind it, GAME OVER stays visible)
+  setTimeout(() => {
+    blackout.classList.add('fading');
+
+    // After 2 s (fade complete): stop video, hold GAME OVER on black for 2 more seconds
+    setTimeout(() => {
+      stopGameStream();
+      // The controls loop (gamepad polling + drive sends, every animation frame)
+      // has nothing to do on the results screen; onGameStarted restarts it.
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      // p1 stays visible — GAME OVER text on pure black background
+
+      setTimeout(() => {
+        p1.classList.remove('visible');
+        // Unlock orientation for result / stats screens
+        document.body.classList.remove('game-active');
+        try { screen.orientation.unlock(); } catch (_) {}
+
+        // Configure result
+        if (playerWon) {
+          resultMsg.textContent = 'You are victorious!';
+          resultMsg.style.color = winnerAlliance === 0 ? '#FFD700' : '#50FF00';
+          skull.style.display   = 'none';
+          fwCanvas.style.display = '';
+          startGoFireworks(fwColors, fwCanvas);
+        } else {
+          resultMsg.textContent = 'You are defeated!';
+          resultMsg.style.color = '#fff';
+          skull.style.display   = '';
+        }
+
+        p2.classList.add('visible');
+        requestAnimationFrame(() => {
+          resultMsg.classList.add('visible');
+          if (!playerWon) skull.classList.add('visible');
+        });
+
+        // Proceed button fades in after 2 s (via CSS transition-delay)
+        proceedBtn.classList.add('visible');
+
+      }, 2000); // 2 s hold on black with GAME OVER text
+
+    }, 2000); // 2 s blackout transition
+  }, 2000); // 2 s GAME OVER on video
+}
+
+function goToStats() {
+  const p2 = document.getElementById('go-p2');
+  const p3 = document.getElementById('go-p3');
+  stopGoFireworks();
+  p2.classList.remove('visible');
+  setTimeout(() => {
+    const fmtNum  = v => (v !== null && v !== undefined) ? String(v) : '0';
+    const fmtName = v => (v !== null && v !== undefined) ? String(v) : '—';
+    document.getElementById('stat-kills').textContent        = fmtNum(_pendingStats?.kills);
+    document.getElementById('stat-deaths').textContent       = fmtNum(_pendingStats?.deaths);
+    document.getElementById('stat-damage').textContent       = fmtNum(_pendingStats?.damage);
+    document.getElementById('stat-vp').textContent           = fmtNum(_pendingStats?.victoryPoints);
+    document.getElementById('stat-vp-captures').textContent  = fmtNum(_pendingStats?.vpFromCaptures);
+    document.getElementById('stat-vp-kills').textContent     = fmtNum(_pendingStats?.vpFromKills);
+    document.getElementById('stat-nemesis').textContent      = fmtName(_pendingStats?.nemesis);
+    p3.classList.add('visible');
+  }, 700);
+}
+
+function visitThundergeddon() {
+  window.location.href = 'https://www.thundergeddon.com/';
+}
+
+function resetGoOverlay() {
+  stopGoFireworks();
+  const overlay = document.getElementById('go-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('active');
+  ['go-p1','go-p2','go-p3','go-result-msg','go-skull','go-proceed-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('visible');
+  });
+  const blackout = document.getElementById('go-blackout');
+  if (blackout) {
+    blackout.style.transition = 'none';
+    blackout.classList.remove('fading');
+    blackout.offsetHeight;
+    blackout.style.transition = '';
+  }
+  _pendingStats = null;
+}
+
+function continueToSite() {
+  // On to the main page's results, with Play Again.
+  tgToMainPage();
+}
+
+// ── Fireworks engine ─────────────────────────────────────────────────────────
+// Rockets travel at full speed. Sparks drift at 1/4 speed so they hang
+// in the air longer and glitter dramatically before cutting out.
+const FW_SPARK_SCALE = 0.25; // physics time-scale for sparks
+const FW_GRAVITY_SPARK = 180; // px/s² downward for sparks (at 1x scale)
+
+function startGoFireworks(colors, canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  _goParticles  = [];
+
+  let lastT      = 0;
+  let nextRocket = 0;
+
+  function launchRocket() {
+    // Pick the explosion apex first so it's always visible, then derive the launch point.
+    const apexX = canvas.width  * (0.12 + Math.random() * 0.76);
+    const apexY = canvas.height * (0.04 + Math.random() * 0.24);
+    const T     = 1.4 + Math.random() * 1.0;   // 1.4–2.4 s travel time (half speed)
+    const h     = canvas.height - apexY;
+    const vy0   = -2 * h / T;
+    const grav  = 2 * h / (T * T);
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    // ±30° off vertical: vx = ±|vy0|×tan(30°)
+    const vx      = (Math.random() * 2 - 1) * Math.abs(vy0) * 0.5774;
+    // Launch x is derived from apex so the explosion stays on-screen
+    const launchX = Math.max(0, Math.min(canvas.width, apexX - vx * T));
+    _goParticles.push({
+      type:'rocket', x:launchX, y:canvas.height,
+      vx, vy:vy0, grav,
+      trail:[], color,
+    });
+  }
+
+  function explodeRocket(rx, ry) {
+    // Single-frame additive flash at the explosion point
+    _goParticles.push({ type:'flash', x:rx, y:ry });
+
+    const count = 27 + Math.floor(Math.random() * 16); // +25% vs previous
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed   = 180 + Math.random() * 570; // 50% faster than before
+      // At 0.25x physics, sparks live ~4× longer in real time; keep real duration ~1-1.7 s
+      const maxLife = 0.24 + Math.random() * 0.20;
+      const size    = 2.2 + Math.random() * 3.8;
+      const color   = colors[Math.floor(Math.random() * colors.length)];
+      _goParticles.push({
+        type:'spark', x:rx, y:ry,
+        vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
+        life:maxLife, maxLife, color, size,
+        freq:  10 + Math.random() * 22,   // glitter flicker Hz (real time)
+        phase: Math.random() * Math.PI * 2,
+        age:   0,
+      });
+    }
+  }
+
+  function frame(t) {
+    const dt = Math.min((t - lastT) / 1000, 0.05);
+    lastT = t;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (t >= nextRocket) {
+      launchRocket();
+      nextRocket = t + 533 + Math.random() * 667; // 25% fewer rockets
+    }
+
+    const alive = [];
+
+    for (const p of _goParticles) {
+      if (p.type === 'rocket') {
+        // Rockets run at full speed
+        p.trail.push({x:p.x, y:p.y});
+        if (p.trail.length > 10) p.trail.shift();
+        p.vy += p.grav * dt;
+        p.x  += p.vx  * dt;
+        p.y  += p.vy  * dt;
+
+        if (p.vy >= 0) {
+          explodeRocket(p.x, p.y);
+          // don't push — rocket consumed
+        } else {
+          for (let i = 0; i < p.trail.length; i++) {
+            ctx.globalAlpha = (i / p.trail.length) * 0.8;
+            ctx.fillStyle   = p.color;
+            ctx.beginPath();
+            ctx.arc(p.trail[i].x, p.trail[i].y, 1.6, 0, Math.PI*2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          ctx.fillStyle   = '#fff';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2.8, 0, Math.PI*2);
+          ctx.fill();
+          alive.push(p);
+        }
+
+      } else if (p.type === 'flash') {
+        // Single-frame additive flash at the explosion origin — not pushed to alive
+        const flashR = Math.min(canvas.width, canvas.height) * 0.25;
+        const flashG = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, flashR);
+        flashG.addColorStop(0, 'rgba(255,255,255,0.75)');
+        flashG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1;
+        ctx.fillStyle   = flashG;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, flashR, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+
+      } else {
+        // Sparks at 1/4-speed physics, full-speed glitter
+        const sdt = dt * FW_SPARK_SCALE;
+        p.age  += dt;        // age in real time so glitter frequency is correct
+        const drag = 1 - 0.08 * sdt * 60;
+        p.vx *= drag;
+        p.vy *= drag;          // symmetric drag keeps explosion circular
+        p.vy += FW_GRAVITY_SPARK * sdt;
+        p.x    += p.vx * sdt;
+        p.y    += p.vy * sdt;
+        p.life -= sdt;
+
+        if (p.life > 0) {
+          const frac    = p.life / p.maxLife;
+          // Fast flicker in real time
+          const flicker = 0.5 + 0.5 * Math.sin(p.age * p.freq * Math.PI * 2 + p.phase);
+          // Glitter-out: hold bright for most of life, quick fade only in last 20%
+          const endFade = frac < 0.20 ? (frac / 0.20) : 1.0;
+          const alpha   = flicker * endFade;
+
+          // All spark layers use additive blending so overlapping sparks get brighter
+          ctx.globalCompositeOperation = 'lighter';
+
+          // Outer glow — radial gradient halo
+          ctx.globalAlpha = alpha * 0.6;
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
+          glowGrad.addColorStop(0, p.color);
+          glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI*2);
+          ctx.fill();
+
+          // Main body — radial gradient disk
+          ctx.globalAlpha = alpha;
+          const bodyGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+          bodyGrad.addColorStop(0, p.color);
+          bodyGrad.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = bodyGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+          ctx.fill();
+
+          // White core — visible when flicker is bright
+          if (flicker > 0.45) {
+            const coreFrac = (flicker - 0.45) / 0.55;
+            ctx.globalAlpha = alpha * coreFrac;
+            ctx.fillStyle   = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI*2);
+            ctx.fill();
+          }
+
+          // Cross sparkle at peak brightness
+          if (flicker > 0.80) {
+            const peakFrac = (flicker - 0.80) / 0.20;
+            const len = p.size * 3.5 * Math.max(0.3, frac);
+            ctx.globalAlpha = alpha * peakFrac * 0.95;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth   = 0.9;
+            ctx.beginPath();
+            ctx.moveTo(p.x - len, p.y); ctx.lineTo(p.x + len, p.y);
+            ctx.moveTo(p.x, p.y - len); ctx.lineTo(p.x, p.y + len);
+            ctx.stroke();
+          }
+
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1;
+          alive.push(p);
+        }
+      }
+    }
+
+    _goParticles    = alive;
+    _goFireworksRaf = requestAnimationFrame(frame);
+  }
+
+  _goFireworksRaf = requestAnimationFrame(t0 => { lastT = t0; _goFireworksRaf = requestAnimationFrame(frame); });
+}
+
+function stopGoFireworks() {
+  if (_goFireworksRaf) { cancelAnimationFrame(_goFireworksRaf); _goFireworksRaf = null; }
+  _goParticles = [];
+}
+
+// ── RFID toast ───────────────────────────────────────────────────────────────
+let _rfidToastTimer = null;
+function showRfidToast(text) {
+  const toast = document.getElementById('rfid-toast');
+  toast.textContent = text;
+  toast.classList.add('visible');
+  if (_rfidToastTimer) clearTimeout(_rfidToastTimer);
+  _rfidToastTimer = setTimeout(() => {
+    toast.classList.remove('visible');
+    _rfidToastTimer = null;
+  }, 3000);
+}
+
+// ════════════════════════════════════════════════════════
+// Hit direction overlay
+// ════════════════════════════════════════════════════════
+let _hitLabelTimer = null;
+
+function onHitTaken(data) {
+  showHitEffect((data.dir || '').toUpperCase(), data.shooter || '');
+}
+
+function dirToHitEffect(dir) {
+  if (dir === 'S' || dir === 'SE' || dir === 'SW') return 'hit-rear';
+  if (dir === 'E')                                  return 'hit-right';
+  if (dir === 'W')                                  return 'hit-left';
+  return 'hit-front'; // N, NE, NW (and unknown)
+}
+
+function showHitEffect(dir, shooter) {
+  haptic([60, 40, 60]); // small double-tap rumble
+  triggerShake('hit');
+  const effectEl = document.getElementById(dirToHitEffect(dir));
+  effectEl.classList.remove('flash');
+  void effectEl.offsetWidth; // force reflow to restart animation
+  effectEl.classList.add('flash');
+  // Drop it from the page again once faded (see .hit-effect CSS). A restart
+  // mid-flash cancels the old animation, so only the newest one's end fires.
+  effectEl.addEventListener('animationend', () => effectEl.classList.remove('flash'), { once: true });
+
+  const label = document.getElementById('hit-by-label');
+  label.textContent = shooter ? 'Hit by ' + escHtml(shooter) : 'HIT';
+  label.classList.remove('visible');
+  void label.offsetWidth;
+  label.classList.add('visible');
+  if (_hitLabelTimer) clearTimeout(_hitLabelTimer);
+  _hitLabelTimer = setTimeout(() => {
+    label.classList.remove('visible');
+    _hitLabelTimer = null;
+  }, 1500);
+}
+
+function clearHitOverlay() {
+  document.querySelectorAll('.hit-effect').forEach(el => el.classList.remove('flash'));
+  const label = document.getElementById('hit-by-label');
+  label.classList.remove('visible');
+  if (_hitLabelTimer) { clearTimeout(_hitLabelTimer); _hitLabelTimer = null; }
+}
+
+// ════════════════════════════════════════════════════════
+// HP bar
+// ════════════════════════════════════════════════════════
+function updateHpBar() {
+  const pct  = Math.max(0, Math.min(100, (currentHp / maxHp) * 100));
+  const fill = document.getElementById('hp-bar-fill');
+  const text = document.getElementById('hp-text');
+  fill.style.width = pct + '%';
+  const critical = pct < 15;
+  fill.classList.toggle('hp-critical', critical);
+  fill.style.background = critical ? '' : (pct > 40 ? 'var(--hp-fill)' : 'var(--hp-low)');
+  text.textContent = currentHp + ' / ' + maxHp;
+}
+
+function updateTimer(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  document.getElementById('timer-label').textContent =
+    m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+// ════════════════════════════════════════════════════════
+// Game loop (rAF — drive sends)
+// ════════════════════════════════════════════════════════
+let rafId = null;
+
+function startGameLoop() {
+  if (rafId) cancelAnimationFrame(rafId);
+  gameLoop();
+}
+
+function gameLoop(ts) {
+  rafId = requestAnimationFrame(gameLoop);
+  if (isDead) return;
+
+  const now = performance.now();
+  _gpPoll(now); // poll gamepad for all roles (turret/fire work for gunners too)
+
+  if (myRole === 'gunner') return; // gunners never send drive
+
+  maybeSendDrive(now);
+}
+
+const roundF = v => Math.round(v * 1000) / 1000;
+
+// Drive sends are change-driven with a steady refresh:
+//  - a change the tank can actually act on goes out straight away (rate-capped
+//    at DRIVE_FAST_HZ), so pushing the stick isn't held back until the next
+//    20 Hz tick — that wait used to add up to 50 ms to every stick movement;
+//  - otherwise the current value is re-sent at DRIVE_HZ, which the robot's
+//    500 ms drive watchdog relies on while the stick is held still.
+// Changes smaller than 1/DRIVE_LEVELS don't count, so thumb wobble doesn't spam
+// sends.  Finer than the robot's 8 PWM levels because below its drive min speed
+// the robot pulses, and there every small step changes the speed.
+const DRIVE_FAST_HZ = 30; // with gamepad turret (20 Hz) + fire, stays under GameHub.MaxMsgsPerSecond (60)
+const DRIVE_LEVELS  = 32;
+let lastDriveLevelL = 0, lastDriveLevelR = 0;
+
+function maybeSendDrive(now) {
+  if (!joystickActive) {
+    // Stops are sent directly by the release paths; start the next push from 0
+    // so it counts as a change and goes out immediately.
+    lastDriveLevelL = lastDriveLevelR = 0;
+    return;
+  }
+  if (!connection) return;
+  const lvlL = Math.round(joyL * DRIVE_LEVELS);
+  const lvlR = Math.round(joyR * DRIVE_LEVELS);
+  const since   = now - lastDriveSend;
+  const changed = lvlL !== lastDriveLevelL || lvlR !== lastDriveLevelR;
+  if (since >= 1000 / DRIVE_HZ || (changed && since >= 1000 / DRIVE_FAST_HZ)) {
+    lastDriveSend   = now;
+    lastDriveLevelL = lvlL;
+    lastDriveLevelR = lvlR;
+    connection.send('SendDrive', roundF(joyL), roundF(joyR)).catch(() => {});
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// Joystick
+// ════════════════════════════════════════════════════════
+const joyBase  = document.getElementById('joystick-base');
+const joyThumb = document.getElementById('joystick-thumb');
+
+joyBase.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  joyBase.setPointerCapture(e.pointerId);
+  recomputeControlRadii(); // cheap, and self-corrects if a zoom/resize event was missed
+  const rect  = joyBase.getBoundingClientRect();
+  joyOriginX  = rect.left + rect.width  / 2;
+  joyOriginY  = rect.top  + rect.height / 2;
+  _joyPointerHeld = true;
+  joystickActive  = true;
+  updateJoy(e.clientX, e.clientY);
+});
+
+joyBase.addEventListener('pointermove', e => {
+  if (!joystickActive) return;
+  updateJoy(e.clientX, e.clientY);
+});
+
+joyBase.addEventListener('pointerup',     releaseJoy);
+joyBase.addEventListener('pointercancel', releaseJoy);
+
+function releaseJoy(e) {
+  _joyPointerHeld = false;
+  joystickActive  = false;
+  joyL = joyR = 0;
+  joyThumb.style.transform = 'translate(-50%, -50%)';
+  if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
+}
+
+// Axis snap: inside JOY_AXIS_SNAP of the vertical axis the stick points dead
+// ahead/behind (both tracks equal - drive straight); inside it of the
+// horizontal axis it points dead sideways (tracks opposite - spin on the spot).
+// Outside an arm the off-axis part ramps up from zero, so leaving the cross
+// doesn't jerk the steering.  x, y are normalised (-1..1, y up); only the
+// direction of the result matters.
+function axisSnap(x, y) {
+  const w = JOY_AXIS_SNAP;
+  if (w <= 0) return [x, y];
+  const ax = Math.abs(x), ay = Math.abs(y);
+  let sx = ax <= w ? 0 : Math.sign(x) * (ax - w) / (1 - w);
+  let sy = ay <= w ? 0 : Math.sign(y) * (ay - w) / (1 - w);
+  // Near the centre the thumb can be inside both arms: keep the dominant axis.
+  if (sx === 0 && sy === 0) {
+    if (ax >= ay) sx = Math.sign(x); else sy = Math.sign(y);
+  }
+  return [sx, sy];
+}
+
+function updateJoy(cx, cy) {
+  let dx = cx - joyOriginX;
+  let dy = cy - joyOriginY;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  if (dist > JOY_RADIUS) {
+    dx = dx / dist * JOY_RADIUS;
+    dy = dy / dist * JOY_RADIUS;
+  }
+
+  // When the body is CSS-rotated 90° CW (portrait phone showing landscape content),
+  // pointer events arrive in portrait viewport coordinates but the joystick element
+  // lives in the rotated (landscape) coordinate space.
+  // Mapping: landscape-right = viewport-down (+dy), landscape-up = viewport-right (+dx).
+  let jdx, jdy;
+  if (document.body.classList.contains('game-active') && window.innerWidth < window.innerHeight) {
+    jdx =  dy;  // landscape right  = viewport down
+    jdy = -dx;  // landscape down   = −viewport right
+  } else {
+    jdx = dx;
+    jdy = dy;
+  }
+
+  joyThumb.style.transform = `translate(calc(-50% + ${jdx}px), calc(-50% + ${jdy}px))`;
+
+  // Speed comes from how far the thumb is pushed (response curve on the radius);
+  // direction from where it points, snapped onto the axes inside the cross.
+  const r     = Math.min(1, Math.sqrt(jdx*jdx + jdy*jdy) / JOY_RADIUS);
+  const speed = joyCurve(r);
+  const [ux, uy] = axisSnap(jdx / JOY_RADIUS, -jdy / JOY_RADIUS);
+  const m  = Math.sqrt(ux*ux + uy*uy);
+  const nx = m > 0 ? ux / m * speed : 0;
+  const ny = m > 0 ? uy / m * speed : 0;
+
+  const tx = nx * TURN_SPEED;
+  joyL = clamp(ny + tx, -1, 1);
+  joyR = clamp(ny - tx, -1, 1);
+
+  // Send from the pointer event itself rather than waiting for the next rAF tick.
+  if (!isDead && myRole !== 'gunner') maybeSendDrive(performance.now());
+}
+
+// ════════════════════════════════════════════════════════
+// Turret slider — drag left/right, springs to centre on release.
+// Four zones per side (mirroring the old four-button layout): centre dead
+// zone (stop), slow zone, then fast zone past a wider threshold.
+// ════════════════════════════════════════════════════════
+const turretBase  = document.getElementById('turret-buttons');
+const turretThumb = document.getElementById('turret-thumb');
+
+// Measure both controls' travel radii from their rendered size. Must run whenever
+// the rendered size can change: viewport resize, orientation change, and when the
+// playing screen is first shown (the controls are display:none before that, so
+// they measure 0 — hence the >0 guards, which keep the last good value).
+function recomputeControlRadii() {
+  const prevJoy = JOY_RADIUS, prevTurret = TURRET_RADIUS;
+
+  const jb = joyBase.getBoundingClientRect().width;
+  const jt = joyThumb.getBoundingClientRect().width;
+  if (jb > 0 && jt > 0) JOY_RADIUS = (jb - jt) / 2;
+
+  const tb = turretBase.getBoundingClientRect().width;
+  const tt = turretThumb.getBoundingClientRect().width;
+  if (tb > 0 && tt > 0) TURRET_RADIUS = (tb - tt) / 2;
+
+  // Also runs on every pointerdown, so only log real changes — otherwise this
+  // would flood the debug panel with an identical line per drag.
+  if (Math.abs(JOY_RADIUS - prevJoy) > 0.5 || Math.abs(TURRET_RADIUS - prevTurret) > 0.5)
+    dbg('control radii: joy=' + JOY_RADIUS.toFixed(1) + ' turret=' + TURRET_RADIUS.toFixed(1));
+}
+window.addEventListener('resize', recomputeControlRadii);
+window.addEventListener('orientationchange', recomputeControlRadii);
+
+let turretActive  = false;
+let turretOriginX = 0, turretOriginY = 0;
+let turretSentSpeed = 0;
+
+function turretSpeedForOffset(jdx) {
+  const nx = jdx / TURRET_RADIUS; // -1..1, negative = thumb left, positive = thumb right
+  if (nx <= -0.6) return 1;
+  if (nx <= -0.15) return slowTurretSpeed;
+  if (nx < 0.15) return 0;
+  if (nx < 0.6) return -slowTurretSpeed;
+  return -1;
+}
+
+function updateTurretSlider(cx, cy) {
+  let dx = cx - turretOriginX;
+  let dy = cy - turretOriginY;
+
+  // Same rotated-viewport correction as the joystick (see updateJoy above):
+  // landscape-right = viewport-down when the body is CSS-rotated 90°.
+  let jdx;
+  if (document.body.classList.contains('game-active') && window.innerWidth < window.innerHeight) {
+    jdx = dy;
+  } else {
+    jdx = dx;
+  }
+  jdx = clamp(jdx, -TURRET_RADIUS, TURRET_RADIUS);
+
+  turretThumb.style.transform = `translate(calc(-50% + ${jdx}px), -50%)`;
+
+  const speed = turretSpeedForOffset(jdx);
+  turretThumb.classList.toggle('zone-fast', Math.abs(speed) === 1);
+  turretThumb.classList.toggle('zone-slow', speed !== 0 && Math.abs(speed) !== 1);
+
+  if (speed !== turretSentSpeed) {
+    turretSentSpeed = speed;
+    if (connection) connection.send('SendTurret', speed).catch(() => {});
+  }
+}
+
+function releaseTurretSlider() {
+  turretActive = false;
+  turretThumb.style.transform = 'translate(-50%, -50%)';
+  turretThumb.classList.remove('zone-fast', 'zone-slow');
+  if (turretSentSpeed !== 0) {
+    turretSentSpeed = 0;
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
+  }
+}
+
+turretBase.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  turretBase.setPointerCapture(e.pointerId);
+  recomputeControlRadii(); // cheap, and self-corrects if a zoom/resize event was missed
+  const rect    = turretBase.getBoundingClientRect();
+  turretOriginX = rect.left + rect.width  / 2;
+  turretOriginY = rect.top  + rect.height / 2;
+  turretActive  = true;
+  updateTurretSlider(e.clientX, e.clientY);
+});
+
+turretBase.addEventListener('pointermove', e => {
+  if (!turretActive) return;
+  updateTurretSlider(e.clientX, e.clientY);
+});
+
+turretBase.addEventListener('pointerup',     releaseTurretSlider);
+turretBase.addEventListener('pointercancel', releaseTurretSlider);
+
+// Suppress browser context menu everywhere (prevents Android long-press
+// "save image / open in new tab" popup on any element during gameplay).
+// Capture phase (true) intercepts before any element handler fires.
+document.addEventListener('contextmenu', e => e.preventDefault(), true);
+
+// ── iOS Safari zoom defence ──
+// iOS 10+ ignores user-scalable=no / maximum-scale in the viewport meta tag
+// (Apple re-enabled zoom for accessibility), so zoom has to be blocked in JS.
+//
+// Past bug: if the page did get zoomed mid-game, the pinch guard below
+// stopped the player pinching back OUT and the double-tap guard stopped them
+// double-tapping back out, so they were stuck until they found the aA menu.
+// Now every guard stands down while the page is already zoomed, so the normal
+// gestures undo it. The double-tap guard also covers every screen, not just
+// gameplay. (See also text-size-adjust and touch-action in the CSS.)
+const _isZoomed = () => !!window.visualViewport && window.visualViewport.scale > 1.02;
+
+// Pinch: gesturestart/change/end are WebKit-only multi-finger events;
+// 2-finger touchstart is a backup.
+const _blockGesture = e => { if (!_isZoomed()) e.preventDefault(); };
+document.addEventListener('gesturestart',  _blockGesture, { passive: false });
+document.addEventListener('gesturechange', _blockGesture, { passive: false });
+document.addEventListener('gestureend',    _blockGesture, { passive: false });
+document.addEventListener('touchstart', e => {
+  if (e.touches.length > 1 && !_isZoomed()) e.preventDefault();
+}, { passive: false });
+
+// Double-tap: cancel the second tap's touchend. That also cancels the
+// synthetic click, so for buttons/inputs replay it ourselves (only for a
+// genuine tap — not the end of a scroll). Gameplay controls use pointerdown,
+// which has already fired by touchend, so they are unaffected.
+const _TAP_TARGETS = 'button, a, label, input, select, textarea, [onclick]';
+let _lastTouchEnd = 0, _tapStartX = 0, _tapStartY = 0;
+document.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { _tapStartX = e.touches[0].clientX; _tapStartY = e.touches[0].clientY; }
+}, { passive: true });
+document.addEventListener('touchend', e => {
+  const now = Date.now();
+  const quick = now - _lastTouchEnd < 400;
+  _lastTouchEnd = now;
+  if (!quick || _isZoomed()) return;
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  if (e.touches.length || !t || Math.hypot(t.clientX - _tapStartX, t.clientY - _tapStartY) > 10) return;
+  const el = e.target.closest && e.target.closest(_TAP_TARGETS);
+  if (!el || el.disabled) return;
+  if (el.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, select')) el.focus();
+  else el.click();
+}, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+
+// Recovery if zoom still sneaks through: rewriting the viewport meta can make
+// iOS re-clamp to scale 1 (debounced so it doesn't fight a gesture). If that
+// doesn't take, show a hint pinned to the visible area telling the player how
+// to undo it — the gesture guards above are already standing down.
+const _vpMeta = document.querySelector('meta[name="viewport"]');
+const _vpBase = _vpMeta.getAttribute('content');
+const _zoomHint = document.createElement('div');
+_zoomHint.id = 'zoom-hint';
+_zoomHint.textContent = 'Zoomed in — pinch or double-tap to zoom back out';
+document.documentElement.appendChild(_zoomHint);
+let _zoomResetTimer = null;
+function forceZoomReset() {
+  if (!_isZoomed()) return;
+  dbg('zoom watchdog: scale=' + window.visualViewport.scale.toFixed(2) + ' — forcing reset');
+  _vpMeta.setAttribute('content', _vpBase + ', minimum-scale=1.0');
+  setTimeout(() => _vpMeta.setAttribute('content', _vpBase), 100);
+}
+function updateZoomHint() {
+  const vv = window.visualViewport;
+  if (!_isZoomed()) { _zoomHint.style.display = 'none'; return; }
+  _zoomHint.style.display = 'block';
+  _zoomHint.style.width = (vv.width * vv.scale) + 'px';
+  _zoomHint.style.transform =
+    `translate(${vv.offsetLeft}px, ${vv.offsetTop}px) scale(${1 / vv.scale})`;
+}
+if (window.visualViewport) {
+  const onViewportChange = () => {
+    updateZoomHint();
+    if (_isZoomed()) {
+      clearTimeout(_zoomResetTimer);
+      _zoomResetTimer = setTimeout(forceZoomReset, 300);
+    }
+  };
+  window.visualViewport.addEventListener('resize', onViewportChange);
+  window.visualViewport.addEventListener('scroll', onViewportChange);
+}
+
+// ════════════════════════════════════════════════════════
+// Fire effect overlay — two pieces, both on the FPV video, both overlay-blended
+// (see #fire-flash / #fire-beam CSS) and masked around the gun barrel:
+//   - #fire-flash: white radial flash, snaps to 100% instantly then decays
+//     exponentially over FIRE_FLASH_MS.
+//   - #fire-beam: glowing trapezoid from the barrel to the reticule. The
+//     trapezoid shape itself is static; a clip-path band sweeps from the
+//     barrel up to the reticule over BEAM_MS, shrinking in height as it goes,
+//     to sell a bolt travelling away from the camera (see updateFireBeamClip).
+// Both are triggered together by the server-broadcast FireEvent (not locally
+// on button press) so the driver's screen also sees it in two-player mode,
+// and so it can't desync from the shot the operator/robot actually fired.
+//
+// Both are stepped by actual decoded video frames rather than a smooth
+// rAF/CSS-transition ramp, so neither effect's apparent "frame rate" ever
+// exceeds the video's — steps between frames would just be redrawing the same
+// picture, which looks like the effect is running at a different rate than
+// the footage it's composited over.
+//   - WS/canvas decode path (iOS/Firefox): every arriving JPEG is a real,
+//     individually decoded frame — onVideoFrameTick() is called directly from
+//     the WebSocket decoder's img.onload once per frame.
+//   - Native <img> MJPEG path: the browser swaps multipart frames internally
+//     with no per-frame JS callback, so we approximate with a timer at the
+//     stream's known fps cap (MjpegServer.h _minFrameIntervalMs, 50ms/20fps
+//     default) — matching cadence, just not driven by the real decode event.
+// ════════════════════════════════════════════════════════
+const FIRE_FLASH_MS   = 500;
+const FIRE_FLASH_K    = 5;   // exp(-K) ≈ 0.7% residual at end of decay
+const BEAM_MS            = 130;
+const BEAM_EASE_K        = 0.6; // gentle ease-out: still moving at ~55% of its starting speed at
+                                 // the end (exp(-K)), not grinding to a halt like a stronger K would
+const BEAM_FADE_MS       = 33;  // trailing portion of BEAM_MS spent fading opacity to 0, so the
+                                 // shape doesn't just vanish mid-frame when the sweep finishes
+const BEAM_APEX_Y        = 50;  // % — matches #reticle's centred position
+const BEAM_BASE_Y        = 68;  // % — top of the muzzle. Was 65; brought back down ~1/3 of the way
+                                 // toward the previous (75) value per request. Still an estimate —
+                                 // retune against the real FPV video if it still looks off.
+const BEAM_APEX_HALF_W   = 0.75; // % — near-point tip at the reticule (half the previous width)
+const BEAM_BASE_HALF_W   = 7.5;  // % — wide base at the barrel (half the previous width)
+const BEAM_BAND_H_START  = 14;   // % — traveling band's height when it starts (close, so "tall") —
+                                  // doubled so the beam reads as a stretched bolt, not a short blob
+const BEAM_BAND_H_END    = 2;    // % — band's height once it reaches the reticule (far, so "short")
+const BEAM_FEATHER_FRAC  = 0.4;  // 40% of the band's current height, feathered at both edges (motion blur)
+const BEAM_GLOW_FALLOFF_FRAC = 0.10; // glow fades to ~0 by this fraction of the video's rendered width
+const BEAM_GLOW_MAX_PX   = 44;  // hard cap on the glow's outer blur radius. Uncapped this is
+                                 // widthPx*BEAM_GLOW_FALLOFF_FRAC ≈ 80–120px on a fullscreen phone,
+                                 // and a multi-layer Gaussian blur that big, re-rasterised every
+                                 // frame the beam sweeps, is what stutters weaker phones on fire.
+const BEAM_GLOW_MAX_PX_LOWFX = 20; // tighter cap once the adaptive low-FX path latches (see _lowFx)
+const MJPEG_FRAME_MS  = 50;  // MjpegServer.h default cap: 20 fps
+const BEAM_TICK_JANK_MS = 90; // a frame-tick gap longer than this while the beam is live counts as
+                               // a jank strike; two strikes in one shot latch _lowFx for the session
+let _fireFlashActive     = false;
+let _fireBeamActive      = false;
+let _fireStartTime       = 0;  // shared: flash + beam are always triggered together
+let _fireTimerId         = null; // native <img> MJPEG path only
+// Adaptive low-FX: cheaper beam glow for phones that visibly stutter on it.
+// Latches for the session on observed jank (see noteFireTickTiming), or up
+// front via a manual localStorage override. Not persisted on auto-detect so a
+// one-off GC pause on a good phone doesn't permanently degrade the effect.
+let _lowFx = false;
+try { _lowFx = localStorage.getItem('tg_lowfx') === '1'; } catch (e) {}
+let _lastFireTickAt   = 0;
+let _fireJankStrikes  = 0;
+
+// Static barrel→reticule trapezoid outline (X taper), computed once from the
+// BEAM_* constants — the apex/base positions never change, so this doesn't
+// need to be recomputed per tick like the mask (see updateFireBeamClip).
+const BEAM_CLIP_PATH = (() => {
+  const pts = [
+    [50 - BEAM_APEX_HALF_W, BEAM_APEX_Y],
+    [50 + BEAM_APEX_HALF_W, BEAM_APEX_Y],
+    [50 + BEAM_BASE_HALF_W, BEAM_BASE_Y],
+    [50 - BEAM_BASE_HALF_W, BEAM_BASE_Y],
+  ];
+  return `polygon(${pts.map(pt => `${pt[0]}% ${pt[1]}%`).join(',')})`;
+})();
+
+// Builds #fire-beam's glow filter so it reaches ~0 opacity by
+// BEAM_GLOW_FALLOFF_FRAC of the video's actual rendered width (in px, not a
+// fixed value — a phone's fullscreen video and a much narrower one need
+// visibly different blur radii to both read as "glow reaches ~10% of my
+// screen"), capped at BEAM_GLOW_MAX_PX.
+// This chain re-rasterises every video frame the beam sweeps (its child's mask
+// changes each tick), so it is deliberately short: two layers — an inner
+// full-white core and a wider translucent falloff. The old five-layer version
+// with an uncapped ~100px+ outer radius was the primary fire-stutter cause on
+// lower-power phones. _lowFx tightens it further to a single soft layer.
+function computeBeamGlowFilter(widthPx) {
+  const cap = _lowFx ? BEAM_GLOW_MAX_PX_LOWFX : BEAM_GLOW_MAX_PX;
+  const d = Math.min(widthPx * BEAM_GLOW_FALLOFF_FRAC, cap);
+  if (_lowFx) return `drop-shadow(0 0 ${d}px rgba(255,255,255,0.8))`;
+  return `drop-shadow(0 0 ${d * 0.35}px #fff)` +
+    `drop-shadow(0 0 ${d}px rgba(255,255,255,0.72))`;
+}
+
+// Sizes/positions #fire-flash and #fire-beam to the video's actual rendered
+// rect within #screen-playing, excluding the object-fit:contain letterbox
+// bars, so neither effect lightens the black bars around the picture. Also
+// rebuilds #fire-beam's glow filter (see computeBeamGlowFilter) since its
+// radii are relative to this same width.
+function updateFireEffectBounds() {
+  const container = document.getElementById('screen-playing');
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const usingWs = !!_videoWs;
+  const srcEl = usingWs ? document.getElementById('stream-canvas') : document.getElementById('stream');
+  const nw = usingWs ? srcEl.width : srcEl.naturalWidth;
+  const nh = usingWs ? srcEl.height : srcEl.naturalHeight;
+  let left = 0, top = 0, width = cw, height = ch;
+  if (nw && nh && cw && ch) {
+    const videoAspect = nw / nh, containerAspect = cw / ch;
+    if (videoAspect > containerAspect) {
+      width = cw; height = cw / videoAspect; left = 0; top = (ch - height) / 2;
+    } else {
+      height = ch; width = ch * videoAspect; top = 0; left = (cw - width) / 2;
+    }
+  }
+  for (const id of ['fire-flash', 'fire-beam']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.style.left   = left + 'px';
+    el.style.top    = top + 'px';
+    el.style.width  = width + 'px';
+    el.style.height = height + 'px';
+  }
+  const beamEl = document.getElementById('fire-beam');
+  if (beamEl) beamEl.style.filter = computeBeamGlowFilter(width);
+}
+window.addEventListener('resize', () => { if (document.body.classList.contains('game-active')) updateFireEffectBounds(); });
+
+function fireFlashOpacityAt(elapsedMs) {
+  return elapsedMs >= FIRE_FLASH_MS ? 0 : Math.exp(-FIRE_FLASH_K * elapsedMs / FIRE_FLASH_MS);
+}
+
+// Gentle ease-out: mostly-constant speed with only a slight slowdown near the
+// reticule (see BEAM_EASE_K) — a strong ease-out reads as the beam drifting
+// to a stop, which looks wrong for something meant to still be moving fast
+// when it arrives. Normalised so p(0)=0 and p(BEAM_MS)=1 exactly.
+function beamEaseProgress(elapsedMs) {
+  const t = Math.min(1, elapsedMs / BEAM_MS);
+  const norm = 1 - Math.exp(-BEAM_EASE_K);
+  return (1 - Math.exp(-BEAM_EASE_K * t)) / norm;
+}
+
+// Fades the beam out over the trailing BEAM_FADE_MS of its life instead of
+// cutting it at full opacity — an instant cut reads as a visible "pop" right
+// as the sweep finishes.
+function beamOpacityAt(elapsedMs) {
+  const fadeStart = BEAM_MS - BEAM_FADE_MS;
+  if (elapsedMs <= fadeStart) return 1;
+  if (elapsedMs >= BEAM_MS) return 0;
+  return 1 - (elapsedMs - fadeStart) / BEAM_FADE_MS;
+}
+
+// Updates #fire-beam-shape's mask-image to the current sweep position: a
+// travelling band, feathered at both edges, whose TRAILING (muzzle-side)
+// edge sweeps from the muzzle (BEAM_BASE_Y%) toward the reticule
+// (BEAM_APEX_Y%) as the LEADING edge trails behind it by the current band
+// height — so the band always sits within [apexY, baseY], never past the
+// muzzle. Band height shrinks toward the reticule (perspective), and the
+// feather width (BEAM_FEATHER_FRAC of the current band height) shrinks along
+// with it. Combined with the shape's static clip-path (the X taper), the
+// visible slice narrows in both X and Y as it recedes, reading as
+// perspective. #fire-beam's (the glow wrapper's) opacity is what actually
+// fades — see beamOpacityAt — so the glow fades together with the shape.
+// Position keeps advancing for the full BEAM_MS independently of that fade,
+// so the beam is still moving as it fades rather than freezing then
+// vanishing.
+function updateFireBeamClip(elapsedMs) {
+  const wrapperEl = document.getElementById('fire-beam');
+  const shapeEl   = document.getElementById('fire-beam-shape');
+  if (!wrapperEl || !shapeEl) return;
+  const p = beamEaseProgress(elapsedMs);
+  const trailY = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
+  const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
+  const leadY  = trailY - bandH;
+  const feather      = Math.min(BEAM_FEATHER_FRAC * bandH, bandH / 2);
+  const innerTop    = leadY + feather;
+  const innerBottom = trailY - feather;
+  const mask = `linear-gradient(to bottom,` +
+    `rgba(0,0,0,0) 0%, rgba(0,0,0,0) ${leadY}%,` +
+    `#000 ${innerTop}%, #000 ${innerBottom}%,` +
+    `rgba(0,0,0,0) ${trailY}%, rgba(0,0,0,0) 100%)`;
+  shapeEl.style.webkitMaskImage = mask;
+  shapeEl.style.maskImage = mask;
+  wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
+}
+
+// ════════════════════════════════════════════════════════
+// Camera shake — applied only to #video-shake (the video + fire-beam/
+// fire-flash/hit-overlay group — see the HTML comment above
+// #video-shake-scale), never the HUD/controls. Amplitudes are percentages
+// of #video-shake's own box (translate %, per CSS spec, is relative to the
+// element's own size), so the shake scales consistently across device
+// sizes like everything else in this file.
+// Uses independently-random per-frame offsets with an exponentially
+// decaying envelope (not a fixed keyframe animation) — the amplitude at
+// elapsed time t is ampMax * exp(-decayK * t / durationMs). Stepped on the
+// same real-or-emulated video frame ticks as the fire flash/beam (see
+// onVideoFrameTick) for the same reason: a shake that updates faster than
+// the video's own frame rate looks like it's happening independently of
+// the footage instead of within it.
+// Only one shake is active at a time — a higher-or-equal tier always takes
+// over a lower one; a lower tier arriving while a higher one is still
+// running is ignored (e.g. a fire-shake shouldn't cut a destroy-shake
+// short).
+// ════════════════════════════════════════════════════════
+const SHAKE_TIER_RANK = { fire: 1, hit: 2, destroy: 3 };
+const SHAKE_TIERS = {
+  fire:    { durationMs: 180, decayK: 5,   ampVpct: 0.6, ampHpct: 0,   ampRdeg: 0 }, // vertical only
+  hit:     { durationMs: 380, decayK: 4.5, ampVpct: 2.2, ampHpct: 0.9, ampRdeg: 0 }, // + a little horizontal
+  destroy: { durationMs: 900, decayK: 4,   ampVpct: 4.5, ampHpct: 3.2, ampRdeg: 3 }, // + rotation, a lot
+};
+let _shakeTier      = null; // 'fire' | 'hit' | 'destroy' | null
+let _shakeStartTime = 0;
+
+function triggerShake(tierName) {
+  const cfg = SHAKE_TIERS[tierName];
+  if (!cfg) return;
+  const now = performance.now();
+  const activeDone = !_shakeTier || (now - _shakeStartTime) >= SHAKE_TIERS[_shakeTier].durationMs;
+  if (activeDone || SHAKE_TIER_RANK[tierName] >= SHAKE_TIER_RANK[_shakeTier]) {
+    _shakeTier      = tierName;
+    _shakeStartTime = now;
+  }
+  ensureFireTicking(); // shake can be triggered (hit/destroy) with no flash/beam running
+}
+
+function updateShakeTransform() {
+  const el = document.getElementById('video-shake');
+  if (!el) return;
+  if (!_shakeTier) { el.style.transform = ''; return; }
+  const cfg = SHAKE_TIERS[_shakeTier];
+  const elapsed = performance.now() - _shakeStartTime;
+  if (elapsed >= cfg.durationMs) {
+    _shakeTier = null;
+    el.style.transform = '';
+    return;
+  }
+  const envelope = Math.exp(-cfg.decayK * elapsed / cfg.durationMs);
+  const rand = () => Math.random() * 2 - 1;
+  const dy  = cfg.ampVpct * envelope * rand();
+  const dx  = cfg.ampHpct * envelope * rand();
+  const rot = cfg.ampRdeg * envelope * rand();
+  el.style.transform = `translate(${dx}%, ${dy}%) rotate(${rot}deg)`;
+}
+
+// Watches the wall-clock gap between frame ticks while the beam is live. Two
+// gaps over BEAM_TICK_JANK_MS in a single shot means this phone can't keep up
+// with the full-fat glow, so latch _lowFx and rebuild the filter cheaper right
+// away (it takes effect for the remainder of this same shot). Session-only —
+// see _lowFx. Called only while _fireBeamActive.
+function noteFireTickTiming() {
+  const now = performance.now();
+  if (_lastFireTickAt && !_lowFx) {
+    const gap = now - _lastFireTickAt;
+    if (gap > BEAM_TICK_JANK_MS && ++_fireJankStrikes >= 2) {
+      _lowFx = true;
+      const beamEl = document.getElementById('fire-beam');
+      if (beamEl) beamEl.style.filter = computeBeamGlowFilter(beamEl.clientWidth || 0);
+    }
+  }
+  _lastFireTickAt = now;
+}
+
+// Called once per real (or emulated) video frame while any of fire-flash,
+// fire-beam, or camera shake is active.
+function onVideoFrameTick() {
+  if (_fireBeamActive) noteFireTickTiming();
+  if (_fireFlashActive) {
+    const el = document.getElementById('fire-flash');
+    const elapsed = performance.now() - _fireStartTime;
+    if (elapsed >= FIRE_FLASH_MS) {
+      el.style.opacity = '0';
+      el.style.display = 'none';
+      _fireFlashActive = false;
+    } else {
+      el.style.opacity = String(fireFlashOpacityAt(elapsed));
+    }
+  }
+  if (_fireBeamActive) {
+    const elapsed = performance.now() - _fireStartTime;
+    updateFireBeamClip(elapsed);
+    if (elapsed >= BEAM_MS) {
+      _fireBeamActive = false;
+      document.getElementById('fire-beam').style.display = 'none';
+    }
+  }
+  updateShakeTransform();
+  if (!_fireFlashActive && !_fireBeamActive && !_shakeTier && _fireTimerId) {
+    clearInterval(_fireTimerId);
+    _fireTimerId = null;
+  }
+}
+
+// Starts the native-<img>-MJPEG-path fallback timer (see onVideoFrameTick's
+// doc comment) if it isn't already running. Shared by playFireFx and
+// triggerShake since either can need ticking without the other being active.
+function ensureFireTicking() {
+  if (!_videoWs && !_fireTimerId) {
+    _fireTimerId = setInterval(onVideoFrameTick, MJPEG_FRAME_MS);
+  }
+  // WS/canvas path: onVideoFrameTick() is driven by real frame arrivals
+  // (see _videoWs.onmessage), nothing further to schedule here.
+}
+
+function playFireFx() {
+  const flashEl = document.getElementById('fire-flash');
+  const beamEl  = document.getElementById('fire-beam');
+  const beamShapeEl = document.getElementById('fire-beam-shape');
+  if (!flashEl || !beamEl || !beamShapeEl) return;
+  flashEl.style.display = beamEl.style.display = 'block'; // hidden while idle — see CSS
+  updateFireEffectBounds();
+  _fireStartTime   = performance.now();
+  _lastFireTickAt  = 0;  // don't count the pre-shot idle gap as jank
+  _fireJankStrikes = 0;
+  _fireFlashActive = true;
+  _fireBeamActive  = true;
+  flashEl.style.opacity = '1'; // first frame: flash to 100% straight away
+  beamShapeEl.style.clipPath = beamShapeEl.style.webkitClipPath = BEAM_CLIP_PATH;
+  updateFireBeamClip(0);
+  triggerShake('fire');
+  ensureFireTicking();
+}
+
+function stopFireFx() {
+  _fireFlashActive = false;
+  _fireBeamActive  = false;
+  _shakeTier       = null;
+  if (_fireTimerId) { clearInterval(_fireTimerId); _fireTimerId = null; }
+  const flashEl = document.getElementById('fire-flash');
+  const beamEl  = document.getElementById('fire-beam');
+  const videoShakeEl = document.getElementById('video-shake');
+  if (flashEl) { flashEl.style.opacity = '0'; flashEl.style.display = 'none'; }
+  if (beamEl)  { beamEl.style.opacity  = '0'; beamEl.style.display  = 'none'; }
+  if (videoShakeEl) videoShakeEl.style.transform = '';
+}
+
+// ════════════════════════════════════════════════════════
+// Fire button
+// ════════════════════════════════════════════════════════
+function onFire() {
+  if (isDead || isDeadWalk) return;
+  const now = Date.now();
+  if (now < fireCooldownUntil) return;
+
+  fireCooldownUntil = now + fireCooldownMs;
+  haptic([15, 10, 25, 10, 60]); // rising smooth pulse
+  if (connection) connection.send('Fire').catch(() => {});
+
+  startFireCooldownUI();
+}
+
+function pauseFireCooldown() {
+  const remaining = fireCooldownUntil - Date.now();
+  if (remaining > 0) {
+    fireCooldownPauseLeft = remaining;
+    clearInterval(fireCooldownTimer);
+    fireCooldownTimer = null;
+  }
+}
+
+function resumeFireCooldown() {
+  if (fireCooldownPauseLeft > 0) {
+    fireCooldownUntil = Date.now() + fireCooldownPauseLeft;
+    fireCooldownPauseLeft = 0;
+    startFireCooldownUI();
+  }
+}
+
+function resetFireCooldown() {
+  clearInterval(fireCooldownTimer);
+  fireCooldownTimer     = null;
+  fireCooldownUntil     = 0;
+  fireCooldownPauseLeft = 0;
+  const btn     = document.getElementById('fire-btn');
+  const wordEl  = document.getElementById('fire-word');
+  const countEl = document.getElementById('fire-countdown');
+  btn.classList.remove('cooldown');
+  wordEl.classList.remove('hidden');
+  countEl.classList.remove('active');
+  countEl.textContent = '';
+}
+
+function startFireCooldownUI() {
+  const btn      = document.getElementById('fire-btn');
+  const wordEl   = document.getElementById('fire-word');
+  const countEl  = document.getElementById('fire-countdown');
+
+  btn.classList.add('cooldown');
+  wordEl.classList.add('hidden');
+  countEl.classList.add('active');
+
+  clearInterval(fireCooldownTimer);
+  fireCooldownTimer = setInterval(() => {
+    const remaining = Math.max(0, fireCooldownUntil - Date.now());
+    countEl.textContent = (remaining / 1000).toFixed(1);
+
+    if (remaining <= 0) {
+      clearInterval(fireCooldownTimer);
+      btn.classList.remove('cooldown');
+      wordEl.classList.remove('hidden');
+      countEl.classList.remove('active');
+      countEl.textContent = '';
+    }
+  }, 100);
+}
+
+// ════════════════════════════════════════════════════════
+// Haptics (Android Chrome; silently ignored elsewhere)
+// ════════════════════════════════════════════════════════
+function haptic(pattern) {
+  try {
+    const ok = navigator.vibrate && navigator.vibrate(pattern);
+    dbg('haptic ' + JSON.stringify(pattern) + ' → ' + ok);
+  } catch (e) { dbg('haptic err: ' + e.message); }
+}
+
+// ════════════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════════════
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ════════════════════════════════════════════════════════
+// Keyboard controls (detected on first keydown during gameplay)
+// ════════════════════════════════════════════════════════
+let _kbMode = false;
+const _kbHeld = {};
+
+const _normKey = k => k.length === 1 ? k.toLowerCase() : k;
+
+function _kbGameActive() {
+  return document.getElementById('screen-playing').classList.contains('active');
+}
+
+function _updateKbDrive() {
+  if (myRole === 'gunner') return;
+  const fwd  = _kbHeld['w'] ? 1 : (_kbHeld['s'] ? -1 : 0);
+  const turn = _kbHeld['d'] ? 1 : (_kbHeld['a'] ? -1 : 0);
+  if (fwd === 0 && turn === 0) {
+    if (joystickActive) {
+      joystickActive = false;
+      joyL = joyR = 0;
+      if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
+    }
+  } else {
+    joystickActive = true;
+    joyL = clamp(fwd + turn * TURN_SPEED, -1, 1);
+    joyR = clamp(fwd - turn * TURN_SPEED, -1, 1);
+  }
+}
+
+function _updateKbTurret() {
+  if (!connection || myRole === 'driver') return;
+  const speed = _kbHeld[','] ? 1 : (_kbHeld['.'] ? -1 : 0);
+  connection.send('SendTurret', speed).catch(() => {});
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const k = _normKey(e.key);
+  if (_kbHeld[k]) return; // suppress auto-repeat
+  _kbHeld[k] = true;
+
+  if (!_kbGameActive()) return;
+
+  if (['w','a','s','d'].includes(k)) {
+    e.preventDefault();
+    if (!_kbMode) {
+      _kbMode = true;
+      dbg('keyboard mode detected');
+    }
+    if (!isDead) _updateKbDrive();
+    return;
+  }
+
+  if (k === ',') { e.preventDefault(); _updateKbTurret(); return; }
+  if (k === '.') { e.preventDefault(); _updateKbTurret(); return; }
+  if (k === ' ') { e.preventDefault(); onFire(); return; }
+});
+
+document.addEventListener('keyup', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const k = _normKey(e.key);
+  delete _kbHeld[k];
+
+  if (!_kbGameActive()) return;
+
+  if (['w','a','s','d'].includes(k)) { _updateKbDrive(); return; }
+  if (k === ',' || k === '.') { _updateKbTurret(); return; }
+});
+
+// Clear stuck keys when window loses focus
+window.addEventListener('blur', () => {
+  for (const k of Object.keys(_kbHeld)) delete _kbHeld[k];
+  if (_kbGameActive()) {
+    _updateKbDrive();
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
+  }
+});
+
+// ════════════════════════════════════════════════════════
+// Gamepad support
+// ════════════════════════════════════════════════════════
+const GP_DEADZONE     = 0.12;
+const GP_TURRET_HZ    = 20;
+
+let _gpFireWasPressed = false;
+let _gpTurretActive   = false;
+let _gpTurretSendLast = 0;
+let _joyPointerHeld   = false; // true while a pointer is held on the joystick element
+
+function _gpDeadzone(v) {
+  return Math.abs(v) < GP_DEADZONE ? 0 : v;
+}
+
+function _anyKbDriveHeld() {
+  return !!(_kbHeld['w'] || _kbHeld['a'] || _kbHeld['s'] || _kbHeld['d']);
+}
+
+function _gpPoll(now) {
+  if (!navigator.getGamepads) return;
+  const gamepads = navigator.getGamepads();
+  let gp = null;
+  for (const g of gamepads) { if (g && g.connected) { gp = g; break; } }
+  if (!gp) return;
+
+  // Left stick → drive (axes 0=X, 1=Y); skip for gunners
+  if (myRole !== 'gunner') {
+    const sx = _gpDeadzone(gp.axes[0] || 0);
+    const sy = _gpDeadzone(gp.axes[1] || 0);
+    if (sx !== 0 || sy !== 0) {
+      const fwd = -sy; // stick up = forward
+      const trn =  sx;
+      joyL = clamp(fwd + trn * TURN_SPEED, -1, 1);
+      joyR = clamp(fwd - trn * TURN_SPEED, -1, 1);
+      joystickActive = true;
+    } else if (!_anyKbDriveHeld() && !_joyPointerHeld && joystickActive) {
+      // Stick centred, no keyboard drive, no pointer held → stop
+      joystickActive = false;
+      joyL = joyR = 0;
+    }
+  }
+
+  // Right stick X → turret (axis 2); skip for drivers
+  if (myRole !== 'driver') {
+    const tx = _gpDeadzone(gp.axes[2] || 0);
+    if (tx !== 0 && now - _gpTurretSendLast >= 1000 / GP_TURRET_HZ) {
+      _gpTurretSendLast = now;
+      _gpTurretActive   = true;
+      if (connection) connection.send('SendTurret', roundF(-tx)).catch(() => {});
+    } else if (tx === 0 && _gpTurretActive) {
+      _gpTurretActive = false;
+      if (connection) connection.send('SendTurret', 0).catch(() => {});
+    }
+  }
+
+  // Fire: A (button 0) or X (button 2) — edge detect so one press = one shot
+  const fireNow = !!(gp.buttons[0]?.pressed || gp.buttons[2]?.pressed);
+  if (fireNow && !_gpFireWasPressed) onFire();
+  _gpFireWasPressed = fireNow;
+}
+
+window.addEventListener('gamepadconnected', e => {
+  dbg('gamepad connected: ' + e.gamepad.id);
+});
+
+window.addEventListener('gamepaddisconnected', e => {
+  dbg('gamepad disconnected: ' + e.gamepad.id);
+  _gpFireWasPressed = false;
+  _gpTurretActive   = false;
+  if (_kbGameActive()) {
+    if (!_anyKbDriveHeld() && joystickActive) {
+      joystickActive = false;
+      joyL = joyR = 0;
+      if (connection) connection.send('SendDrive', 0.0, 0.0).catch(() => {});
+    }
+    if (connection) connection.send('SendTurret', 0).catch(() => {});
+  }
+});
+
+// ── Submit on Enter ────────────────────────────────────
+document.getElementById('name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') joinLobby();
+});
+
+// ── Connect to the Go server on page load ───────────────────────────────
+// After the whole page has loaded: dbg() comes from the debug-panel script
+// further down.
+document.addEventListener('DOMContentLoaded', () => {
+  if (!TG_DEVICE) {
+    tgToMainPage(); // no device id yet: the main page makes one
+    return;
+  }
+  connection = buildConnection();
+  connection.start();
+});
+
+// ── Persist player name across sessions ────────────────
+(function () {
+  const input = document.getElementById('name-input');
+  try {
+    // Setting .value programmatically bypasses maxlength, so truncate here —
+    // a name saved before the 12-char cap would otherwise be sent over-length.
+    const saved = localStorage.getItem('tg_player_name');
+    if (saved) input.value = saved.slice(0, MAX_NAME_LEN);
+    input.addEventListener('input', () => {
+      try { localStorage.setItem('tg_player_name', input.value); } catch (_) {}
+    });
+  } catch (_) {}
+})();
+</script>
+<div id="version-tag" style="position:fixed;bottom:6px;right:8px;font-size:11px;color:rgba(255,255,255,0.35);pointer-events:none;z-index:99999;font-family:monospace">v41</div>
+
+<!-- ── DEBUG PANEL ──────────────────────────────────────────────────── -->
+<!--
+  During gameplay the panel moves to the top of the screen (below the HP bar)
+  so it does not block the joystick/fire/turret controls at the bottom.
+  showScreen() calls positionDbgPanel() to reposition it.
+-->
+<div id="dbg-panel" style="
+  position:fixed; bottom:0; left:0; right:0;
+  height:180px; z-index:100000;
+  background:rgba(0,0,0,0.88);
+  border-top:1px solid #444;
+  display:none; flex-direction:column;
+  font-family:monospace; font-size:11px; color:#0f0;
+">
+  <div style="display:flex;align-items:center;padding:2px 6px;background:#111;gap:6px;flex-shrink:0;">
+    <span style="color:#aaa;font-size:10px;flex:1">DEBUG LOG</span>
+    <button onclick="document.getElementById('dbg-log').innerHTML=''" style="font-size:10px;padding:1px 6px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer">Clear</button>
+    <button onclick="shareDbgLog()" style="font-size:10px;padding:1px 6px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer">Share</button>
+    <button onclick="toggleDbgPanel()" style="font-size:10px;padding:1px 6px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer">Hide</button>
+  </div>
+  <div id="dbg-log" style="flex:1;overflow-y:auto;padding:2px 6px;"></div>
+</div>
+<button id="dbg-show-btn" onclick="toggleDbgPanel()" style="
+  display:block; position:fixed; bottom:0; left:0;
+  font-size:10px; padding:2px 8px;
+  background:#111; color:#0f0; border:1px solid #444;
+  border-radius:0 4px 0 0; cursor:pointer; z-index:100000;
+">DBG</button>
+
+<script>
+// ── Debug panel ─────────────────────────────────────────────────────────────
+const _dbgLines = [];
+function dbg(msg) {
+  const ts  = new Date().toLocaleTimeString('en-GB', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const txt = ts + ' ' + msg;
+  _dbgLines.push(txt);
+  if (_dbgLines.length > 80) _dbgLines.shift();
+  const log = document.getElementById('dbg-log');
+  if (!log) return;
+  const line = document.createElement('div');
+  line.textContent = txt;
+  log.appendChild(line);
+  while (log.children.length > 80) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+// Share log via native iOS share sheet (works on HTTP; no HTTPS required).
+// Falls back to a full-screen selectable textarea on other platforms.
+function shareDbgLog() {
+  const text = _dbgLines.join('\n');
+  if (navigator.share) {
+    navigator.share({ title: 'TG debug log', text })
+      .then(() => dbg('shared'))
+      .catch(e => dbg('share cancelled: ' + e.message));
+    return;
+  }
+  // Non-iOS fallback: overlay with selectable text
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:200000;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;padding:12px;gap:8px;';
+  ov.innerHTML = '<div style="color:#0f0;font-family:monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center;"><span>SELECT ALL then COPY</span><button onclick="this.closest(\'div[style]\').remove()" style="background:#333;color:#ccc;border:1px solid #555;padding:2px 10px;border-radius:3px;cursor:pointer;font-size:11px;">Close</button></div><textarea readonly style="flex:1;background:#111;color:#0f0;font-family:monospace;font-size:10px;border:1px solid #444;padding:4px;resize:none;">' + text.replace(/</g,'&lt;') + '</textarea>';
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('textarea');
+  ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+  try { document.execCommand('copy'); dbg('execCommand copy OK'); } catch(e) {}
+}
+
+// Reposition the panel: bottom of screen on join/lobby, top during gameplay
+// so it never covers the joystick, fire button, or turret controls.
+function positionDbgPanel(screenId) {
+  const panel = document.getElementById('dbg-panel');
+  if (!panel || panel.style.display === 'none') return;
+  if (screenId === 'screen-playing') {
+    // Sit just below the HP bar (28px) — well above the bottom controls
+    panel.style.bottom  = 'auto';
+    panel.style.top     = '28px';
+    panel.style.height  = '120px';
+    panel.style.borderTop  = 'none';
+    panel.style.borderBottom = '1px solid #444';
+  } else {
+    panel.style.top     = 'auto';
+    panel.style.bottom  = '0';
+    panel.style.height  = '180px';
+    panel.style.borderTop    = '1px solid #444';
+    panel.style.borderBottom = 'none';
+  }
+}
+
+// The operator can switch the console off server-side (ServerSettingsPanel in
+// Unity) so it can't get in the way mid-match. Logging continues either way —
+// only the on-screen panel and its DBG button are hidden.
+var _dbgConsoleEnabled = true;
+function setDebugConsoleEnabled(enabled) {
+  _dbgConsoleEnabled = !!enabled;
+  const panel   = document.getElementById('dbg-panel');
+  const showBtn = document.getElementById('dbg-show-btn');
+  dbg('debug console ' + (_dbgConsoleEnabled ? 'enabled' : 'disabled'));
+  if (!panel || !showBtn) return;
+  if (!_dbgConsoleEnabled) {
+    panel.style.display   = 'none';
+    showBtn.style.display = 'none';
+  } else if (panel.style.display === 'none') {
+    // Re-enabled: bring back the DBG button, leave the panel closed.
+    showBtn.style.display = 'block';
+  }
+}
+
+function toggleDbgPanel() {
+  if (!_dbgConsoleEnabled) return;
+  const panel  = document.getElementById('dbg-panel');
+  const showBtn = document.getElementById('dbg-show-btn');
+  if (panel.style.display === 'none') {
+    panel.style.display   = 'flex';
+    showBtn.style.display = 'none';
+  } else {
+    panel.style.display   = 'none';
+    showBtn.style.display = 'block';
+  }
+}
+
+// ── Log startup info immediately ─────────────────────────────────────────────
+dbg('page load v22');
+dbg('UA: ' + navigator.userAgent.slice(0, 80));
+dbg('IS_IOS=' + IS_IOS + ' IS_FIREFOX=' + IS_FIREFOX);
+dbg('signalR type: ' + typeof signalR);
+if (typeof signalR !== 'undefined') dbg('signalR OK');
+else dbg('ERROR: signalR not loaded!');
+</script>
+</body>
+</html>

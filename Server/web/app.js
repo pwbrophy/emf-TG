@@ -99,14 +99,13 @@ function onMessage(m) {
 
 let localView = 'title';  // before joining or hosting: title | menu | host-login | join
 let hostWanted = true;    // the host sees the console (false after tapping Menu)
-let hostDriving = false;  // the host who also plays: showing their tank instead of the console
 
 function currentScreen() {
   if (!state) return localView;
   const me = state.me;
   const inGame = state.phase === 'countdown' || state.phase === 'playing';
   if (me.isHost && hostWanted) {
-    if (hostDriving && me.status === 'playing' && inGame) return 'play';
+    if (hostDriving() && me.status === 'playing' && inGame) return 'play';
     return 'host';
   }
   switch (me.status) {
@@ -122,8 +121,11 @@ let shownScreen = '';
 
 function render() {
   const screen = currentScreen();
+  if (screen === 'play') {
+    goPlay(); // the game runs on its own page
+    return;
+  }
   if (screen !== shownScreen) {
-    leaveScreen(shownScreen);
     document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + screen));
     shownScreen = screen;
     enterScreen(screen);
@@ -134,7 +136,6 @@ function render() {
     case 'host': renderHost(); break;
     case 'wait': renderWait(); break;
     case 'lobby': renderLobby(); break;
-    case 'play': renderPlay(); break;
     case 'results': renderResults(); break;
   }
 }
@@ -147,12 +148,7 @@ function enterScreen(screen) {
     $('host-password').value = '';
     setTimeout(() => $('host-password').focus(), 50);
   }
-  if (screen === 'play') startPlay();
   if (screen === 'results') fireworks();
-}
-
-function leaveScreen(screen) {
-  if (screen === 'play') stopPlay();
 }
 
 function go(view) {
@@ -306,6 +302,8 @@ function hostSkeleton() {
 function renderHost() {
   hostSkeleton();
   const ph = state.phase;
+  // Outside a game the host is back on the console; "Drive My Tank" is per game.
+  if (ph !== 'countdown' && ph !== 'playing') setHostView('console');
   $('host-title').textContent = { idle: 'Set up', lobby: 'Lobby', countdown: 'Starting', playing: 'Game on', ended: 'Game over' }[ph];
 
   let main = '';
@@ -447,6 +445,9 @@ document.addEventListener('submit', (e) => {
 });
 
 // ── Gameplay ─────────────────────────────────────────────────────────────────
+// The game itself runs on /play.html: the Unity-era player page, kept as it
+// was so the controls and look are identical. This page sends players there
+// when their game starts, and play.html sends them back afterwards.
 
 function remainingMs() {
   if (!state) return 0;
@@ -458,270 +459,23 @@ function fmtClock(ms) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
-let videoTank = '';
-let driveTimer = 0;
-let clockTimer = 0;
-let goUntil = 0;
-let lastPhase = '';
-
-function startPlay() {
-  recomputeRadii();
-  driveTimer = setInterval(driveTick, 50);
-  clockTimer = setInterval(clockTick, 200);
-}
-
-function stopPlay() {
-  clearInterval(driveTimer);
-  clearInterval(clockTimer);
-  setVideo('');
-  releaseJoy();
-  releaseTurret();
-}
-
-function renderPlay() {
-  const me = state.me;
-  $('hud-name').textContent = me.name + (me.tankName ? ' · ' + me.tankName : '');
-  $('btn-host-control').hidden = !me.isHost;
-  setVideo(me.tank);
-  if (lastPhase === 'countdown' && state.phase === 'playing') goUntil = performance.now() + 1000;
-  lastPhase = state.phase;
-  clockTick();
-}
-
-function clockTick() {
-  if (!state) return;
-  const ms = remainingMs();
-  const cd = $('countdown');
-  if (state.phase === 'countdown') {
-    cd.hidden = false;
-    setCountdown(String(Math.max(1, Math.ceil(ms / 1000))));
-    $('hud-timer').textContent = '';
-  } else if (performance.now() < goUntil) {
-    cd.hidden = false;
-    setCountdown('GO!');
-  } else {
-    cd.hidden = true;
-  }
-  if (state.phase === 'playing') {
-    $('hud-timer').textContent = fmtClock(ms);
-    $('hud-timer').classList.toggle('low', ms < 10000);
-  }
+// The host console's timer ticks between snapshots.
+setInterval(() => {
   const ht = $('host-timer');
-  if (ht) ht.textContent = fmtClock(ms);
+  if (shownScreen === 'host' && ht) ht.textContent = fmtClock(remainingMs());
+}, 250);
+
+// A host who also plays chooses between the console and driving; the choice
+// is kept for this tab because play.html is a separate page.
+function hostDriving() {
+  try { return sessionStorage.getItem('tg_host_view') === 'drive'; } catch { return false; }
+}
+function setHostView(v) {
+  try { sessionStorage.setItem('tg_host_view', v); } catch { /* not remembered */ }
 }
 
-function setCountdown(text) {
-  const el = $('countdown-num');
-  if (el.textContent !== text) {
-    // Re-adding the element restarts its "pop" animation for each number.
-    const fresh = el.cloneNode();
-    fresh.textContent = text;
-    el.replaceWith(fresh);
-  }
-}
-
-// The host console's timer ticks too.
-setInterval(() => { if (shownScreen === 'host') clockTick(); }, 250);
-
-// Video: the server relays the tank's camera (GET /api/stream/<tank>).
-function setVideo(tank) {
-  if (tank === videoTank) return;
-  videoTank = tank;
-  const img = $('video');
-  $('video-msg').hidden = !tank;
-  if (!tank) {
-    img.removeAttribute('src');
-    return;
-  }
-  $('video-msg').textContent = 'Connecting to your tank’s camera…';
-  img.src = `/api/stream/${encodeURIComponent(tank)}?who=${encodeURIComponent(state.me.name)}&r=${Date.now()}`;
-}
-
-$('video').addEventListener('load', () => { $('video-msg').hidden = true; });
-$('video').addEventListener('error', () => {
-  if (!videoTank) return;
-  $('video-msg').hidden = false;
-  $('video-msg').textContent = 'Camera reconnecting…';
-  const tank = videoTank;
-  setTimeout(() => { if (videoTank === tank) { videoTank = ''; setVideo(tank); } }, 1000);
-});
-
-// Drive: sent 20 times a second while playing, even at rest. The tanks stop
-// themselves if drive commands stop arriving, so a dropped phone can't leave
-// a tank driving off.
-let joyL = 0, joyR = 0;
-
-function driveTick() {
-  if (state && state.phase === 'playing' && state.me.status === 'playing') {
-    send({ t: 'drive', l: +joyL.toFixed(3), r: +joyR.toFixed(3) });
-  }
-}
-
-// Joystick response, carried over from the tuned Unity-era player page:
-//  - the inner deadzone does nothing (resting thumb, jitter);
-//  - just outside it the speed starts at JOY_MIN_OUT (slower is useless),
-//    rising as t^JOY_EXPO so most of the throw goes to low speeds;
-//  - near the axes the stick snaps to straight ahead / spin on the spot.
-const JOY_DEADZONE = 0.08, JOY_FULL = 1.0, JOY_EXPO = 2.0, JOY_MIN_OUT = 0.40;
-const JOY_AXIS_SNAP = 0.15, TURN_SPEED = 0.7, SLOW_TURRET = 0.2;
-let JOY_RADIUS = 80, TURRET_RADIUS = 120;
-
-function joyCurve(r) {
-  if (r <= JOY_DEADZONE) return 0;
-  const t = Math.min(1, (r - JOY_DEADZONE) / (JOY_FULL - JOY_DEADZONE));
-  return JOY_MIN_OUT + (1 - JOY_MIN_OUT) * Math.pow(t, JOY_EXPO);
-}
-
-function axisSnap(x, y) {
-  const w = JOY_AXIS_SNAP;
-  const ax = Math.abs(x), ay = Math.abs(y);
-  let sx = ax <= w ? 0 : Math.sign(x) * (ax - w) / (1 - w);
-  let sy = ay <= w ? 0 : Math.sign(y) * (ay - w) / (1 - w);
-  if (sx === 0 && sy === 0) {
-    if (ax >= ay) sx = Math.sign(x); else sy = Math.sign(y);
-  }
-  return [sx, sy];
-}
-
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-function recomputeRadii() {
-  const jb = $('joy-base').getBoundingClientRect().width, jt = $('joy-thumb').getBoundingClientRect().width;
-  if (jb > 0 && jt > 0) JOY_RADIUS = (jb - jt) / 2;
-  const tb = $('turret-base').getBoundingClientRect().width, tt = $('turret-thumb').getBoundingClientRect().width;
-  if (tb > 0 && tt > 0) TURRET_RADIUS = (tb - tt) / 2;
-}
-window.addEventListener('resize', recomputeRadii);
-
-let joyActive = false, joyX0 = 0, joyY0 = 0;
-
-$('joy-base').addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  $('joy-base').setPointerCapture(e.pointerId);
-  recomputeRadii();
-  const r = $('joy-base').getBoundingClientRect();
-  joyX0 = r.left + r.width / 2;
-  joyY0 = r.top + r.height / 2;
-  joyActive = true;
-  updateJoy(e.clientX, e.clientY);
-});
-$('joy-base').addEventListener('pointermove', (e) => { if (joyActive) updateJoy(e.clientX, e.clientY); });
-$('joy-base').addEventListener('pointerup', releaseJoy);
-$('joy-base').addEventListener('pointercancel', releaseJoy);
-
-function updateJoy(cx, cy) {
-  let dx = cx - joyX0, dy = cy - joyY0;
-  const dist = Math.hypot(dx, dy);
-  if (dist > JOY_RADIUS) { dx = dx / dist * JOY_RADIUS; dy = dy / dist * JOY_RADIUS; }
-  $('joy-thumb').style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-
-  const speed = joyCurve(Math.min(1, Math.hypot(dx, dy) / JOY_RADIUS));
-  const [ux, uy] = axisSnap(dx / JOY_RADIUS, -dy / JOY_RADIUS);
-  const m = Math.hypot(ux, uy);
-  const nx = m > 0 ? ux / m * speed : 0;
-  const ny = m > 0 ? uy / m * speed : 0;
-  joyL = clamp(ny + nx * TURN_SPEED, -1, 1);
-  joyR = clamp(ny - nx * TURN_SPEED, -1, 1);
-}
-
-function releaseJoy() {
-  joyActive = false;
-  joyL = joyR = 0;
-  $('joy-thumb').style.transform = 'translate(-50%, -50%)';
-  driveTick();
-}
-
-// Turret slider: centre stops, then a slow zone, then full speed.
-let turretActive = false, turretX0 = 0, turretSent = 0;
-
-$('turret-base').addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  $('turret-base').setPointerCapture(e.pointerId);
-  recomputeRadii();
-  const r = $('turret-base').getBoundingClientRect();
-  turretX0 = r.left + r.width / 2;
-  turretActive = true;
-  updateTurret(e.clientX);
-});
-$('turret-base').addEventListener('pointermove', (e) => { if (turretActive) updateTurret(e.clientX); });
-$('turret-base').addEventListener('pointerup', releaseTurret);
-$('turret-base').addEventListener('pointercancel', releaseTurret);
-
-function turretSpeed(dx) {
-  const nx = dx / TURRET_RADIUS;
-  if (nx <= -0.6) return 1;
-  if (nx <= -0.15) return SLOW_TURRET;
-  if (nx < 0.15) return 0;
-  if (nx < 0.6) return -SLOW_TURRET;
-  return -1;
-}
-
-function updateTurret(cx) {
-  const dx = clamp(cx - turretX0, -TURRET_RADIUS, TURRET_RADIUS);
-  const thumb = $('turret-thumb');
-  thumb.style.transform = `translate(calc(-50% + ${dx}px), -50%)`;
-  const s = turretSpeed(dx);
-  thumb.classList.toggle('zone-fast', Math.abs(s) === 1);
-  thumb.classList.toggle('zone-slow', s !== 0 && Math.abs(s) !== 1);
-  if (s !== turretSent) {
-    turretSent = s;
-    send({ t: 'turret', s });
-  }
-}
-
-function releaseTurret() {
-  turretActive = false;
-  const thumb = $('turret-thumb');
-  thumb.style.transform = 'translate(-50%, -50%)';
-  thumb.classList.remove('zone-fast', 'zone-slow');
-  if (turretSent !== 0) {
-    turretSent = 0;
-    send({ t: 'turret', s: 0 });
-  }
-}
-
-// Fire, with the reload time shown on the button.
-let reloadUntil = 0, reloadTimer = 0;
-
-$('fire-btn').addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  if (!state || state.phase !== 'playing' || performance.now() < reloadUntil) return;
-  send({ t: 'fire' });
-  if (store('tg_setting_vibrate') !== '0' && navigator.vibrate) navigator.vibrate(60);
-  reloadUntil = performance.now() + state.fireCooldownMs;
-  showReload();
-});
-
-function showReload() {
-  clearTimeout(reloadTimer);
-  const btn = $('fire-btn');
-  let cool = btn.querySelector('.cool');
-  const left = reloadUntil - performance.now();
-  if (left <= 0) {
-    if (cool) cool.remove();
-    return;
-  }
-  if (!cool) {
-    cool = document.createElement('span');
-    cool.className = 'cool';
-    btn.append(cool);
-  }
-  cool.textContent = Math.ceil(left / 1000);
-  reloadTimer = setTimeout(showReload, 100);
-}
-
-// Long-presses must not open the browser's image menu over the video.
-document.addEventListener('contextmenu', (e) => {
-  if (shownScreen === 'play') e.preventDefault();
-}, true);
-
-function goFullscreen() {
-  const el = document.documentElement;
-  const req = el.requestFullscreen || el.webkitRequestFullscreen;
-  if (!req) return;
-  Promise.resolve(req.call(el)).then(() => {
-    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
-  }).catch(() => {});
+function goPlay() {
+  location.replace('/play.html' + location.search);
 }
 
 // ── Buttons ──────────────────────────────────────────────────────────────────
@@ -740,15 +494,13 @@ document.addEventListener('click', (e) => {
         ? 'Someone is hosting. Signing in moves hosting to this phone.' : 'Enter the host password.';
       go('host-login');
       break;
-    case 'host-menu': hostWanted = false; hostDriving = false; go('menu'); break;
+    case 'host-menu': hostWanted = false; setHostView('console'); go('menu'); break;
     case 'leave':
       if (confirm('Leave the game?')) { send({ t: 'leave' }); localView = 'menu'; }
       break;
     case 'pick': send({ t: 'pick_tank', tank: el.dataset.tank }); break;
     case 'play-again': send({ t: 'play_again' }); break;
-    case 'fullscreen': goFullscreen(); break;
-    case 'host-control': hostDriving = false; render(); break;
-    case 'host-drive': hostDriving = true; render(); goFullscreen(); break;
+    case 'host-drive': setHostView('drive'); render(); break;
     case 'host-open': send({ t: 'host_open' }); break;
     case 'host-start': send({ t: 'host_start' }); break;
     case 'host-end': if (confirm('End the game now?')) send({ t: 'host_end' }); break;

@@ -234,6 +234,16 @@ func TestFullGameAndBackOfQueue(t *testing.T) {
 	if n := ft.count("flash_fire"); n != 1 {
 		t.Fatalf("shots sent: %d, want 1", n)
 	}
+	fired := 0
+	_, others := a.last()
+	for _, m := range others {
+		if m["t"] == "fired" {
+			fired++
+		}
+	}
+	if fired != 1 {
+		t.Fatalf("shooter told it fired %d times, want 1", fired)
+	}
 
 	g.phaseEndsAt = time.Now() // time's up
 	g.tick()

@@ -28,7 +28,8 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | `tanks.go` | Tank discovery, control WebSocket (`/esp32`), command queue, video pull |
 | `video.go`, `stats.go` | Video relay to viewers; frame-rate and CPU stats |
 | `settings.go` | Host settings, saved to `settings.json` |
-| `web/index.html`, `app.js`, `app.css` | The phone app (players and host) |
+| `web/index.html`, `app.js`, `app.css` | The phone app: menu, join, queue, lobby, results, host console |
+| `web/play.html` | The in-game screen: the Unity-era player page kept as it was (controls, HUD, effects, keyboard/gamepad), with `TGHub` standing in for its SignalR connection. Players are sent here when their game starts |
 | `web/streams.html` | Video test page |
 | `cmd/loadtest` | Fake tanks and viewers for load tests |
 

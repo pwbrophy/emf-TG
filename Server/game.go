@@ -491,6 +491,8 @@ func (g *game) fire(device string) {
 	p.lastFire = time.Now()
 	p.shots++
 	g.tanks.sendTo(p.tank, `{"cmd":"flash_fire"}`)
+	// The shooter's page plays its fire beam / muzzle flash on this.
+	g.sendTo(device, map[string]any{"t": "fired"})
 }
 
 // ── The game cycle ───────────────────────────────────────────────────────────

@@ -88,6 +88,8 @@ func main() {
 	mux.HandleFunc("GET /esp32", tanks.handleControl)
 	mux.HandleFunc("POST /api/ingest/{id}", rl.handleIngest)
 	mux.HandleFunc("GET /api/stream/{id}", rl.handleView)
+	mux.HandleFunc("GET /api/robot-stream", rl.handleViewByQuery) // addresses the in-game page uses
+	mux.HandleFunc("GET /api/video-ws", rl.handleVideoWS)
 	mux.Handle("/", noCacheHTML(http.FileServer(http.FS(web))))
 
 	srv := &http.Server{

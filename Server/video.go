@@ -14,12 +14,15 @@ package main
 // fake-tank load test uses. Pulling from the real tanks' :81/stream comes later.
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"thundergeddon/server/internal/mjpeg"
 )
@@ -180,11 +183,69 @@ func (rl *relay) handleIngest(w http.ResponseWriter, r *http.Request) {
 // handleView streams one tank's video to a viewer:
 // GET /api/stream/{id}?who=<name>&maxfps=<n>
 func (rl *relay) handleView(w http.ResponseWriter, r *http.Request) {
-	s := rl.get(r.PathValue("id"))
+	rl.serveMJPEG(w, r, r.PathValue("id"))
+}
+
+// handleViewByQuery is the same stream at the address the in-game page
+// (play.html, the Unity-era player page) uses: GET /api/robot-stream?url=<id>.
+func (rl *relay) handleViewByQuery(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("url")
+	if id == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+	rl.serveMJPEG(w, r, id)
+}
+
+func newViewer(r *http.Request) *viewer {
 	v := &viewer{who: viewerName(r.URL.Query().Get("who")), mailbox: make(chan mjpeg.Frame, 1)}
 	if fps, _ := strconv.Atoi(r.URL.Query().Get("maxfps")); fps > 0 {
 		v.maxFPS = float64(fps)
 	}
+	return v
+}
+
+// handleVideoWS sends each frame as one binary WebSocket message:
+// GET /api/video-ws?url=<id>. iPhones (and Firefox) can't show MJPEG in an
+// <img> reliably, so the in-game page draws these frames on a canvas.
+func (rl *relay) handleVideoWS(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("url")
+	if id == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	if err != nil {
+		return
+	}
+	defer c.CloseNow()
+	// Nothing is read from the page, but reading notices it closing.
+	ctx := c.CloseRead(r.Context())
+
+	s := rl.get(id)
+	v := newViewer(r)
+	s.addViewer(v)
+	defer s.removeViewer(v)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case f := <-v.mailbox:
+			wctx, cancel := context.WithTimeout(ctx, viewerWriteTimeout)
+			err := c.Write(wctx, websocket.MessageBinary, f.Data)
+			cancel()
+			if err != nil {
+				return
+			}
+			v.sent.Add(1)
+		}
+	}
+}
+
+func (rl *relay) serveMJPEG(w http.ResponseWriter, r *http.Request, id string) {
+	s := rl.get(id)
+	v := newViewer(r)
 
 	rc := http.NewResponseController(w)
 	w.Header().Set("Content-Type", mjpeg.ContentType)
