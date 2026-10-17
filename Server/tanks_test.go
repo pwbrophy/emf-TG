@@ -165,7 +165,7 @@ func TestDiscoveryReply(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go tm.runDiscovery(ctx, port)
+	go tm.runDiscovery(ctx, fmt.Sprintf("127.0.0.1:%d", port)) // not all networks: no firewall prompt
 	time.Sleep(100 * time.Millisecond)
 
 	tank, err := net.ListenPacket("udp4", "127.0.0.1:0")

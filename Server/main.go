@@ -79,7 +79,7 @@ func main() {
 		tanks.addFake(strconv.Itoa(i), fmt.Sprintf("%s-%02d", team, i))
 	}
 	if *discoveryPort > 0 {
-		go tanks.runDiscovery(ctx, *discoveryPort)
+		go tanks.runDiscovery(ctx, fmt.Sprintf(":%d", *discoveryPort))
 	}
 
 	mux := http.NewServeMux()

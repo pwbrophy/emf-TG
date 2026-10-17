@@ -104,14 +104,16 @@ func newTankManager(rl *relay, tokenFile string, httpPort int) *tankManager {
 
 // ── Discovery ────────────────────────────────────────────────────────────────
 
-func (tm *tankManager) runDiscovery(ctx context.Context, port int) {
-	pc, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", port))
+// runDiscovery answers tanks' broadcasts on addr (":30560" = every network;
+// tests use 127.0.0.1 so Windows Firewall doesn't ask about them).
+func (tm *tankManager) runDiscovery(ctx context.Context, addr string) {
+	pc, err := net.ListenPacket("udp4", addr)
 	if err != nil {
-		log.Printf("[Discovery] can't listen on UDP %d (is Unity running?): %v", port, err)
+		log.Printf("[Discovery] can't listen on UDP %s (is Unity running?): %v", addr, err)
 		return
 	}
 	go func() { <-ctx.Done(); pc.Close() }()
-	log.Printf("[Discovery] listening on UDP %d", port)
+	log.Printf("[Discovery] listening on UDP %s", addr)
 
 	replied := map[string]bool{}
 	buf := make([]byte, 512)
