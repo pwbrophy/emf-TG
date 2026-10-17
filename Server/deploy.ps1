@@ -56,12 +56,38 @@ finally {
     Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue
 }
 
+# The tanks' hello token is the same file Unity uses. It is gitignored, so in a
+# worktree it only exists in the main checkout: look there too.
+$tokenFile = $null
+$candidates = @("$PSScriptRoot\..\Unity\EMF_Server\ws_token.txt")
+try {
+    $commonDir = & git rev-parse --path-format=absolute --git-common-dir 2>$null
+    if ($LASTEXITCODE -eq 0 -and $commonDir) {
+        $candidates += Join-Path (Split-Path $commonDir) "Unity\EMF_Server\ws_token.txt"
+    }
+} catch { }
+foreach ($c in $candidates) {
+    if (Test-Path $c) { $tokenFile = (Resolve-Path $c).Path; break }
+}
+
+$files = @("build/thundergeddon-linux-arm64", "router/thundergeddon.init", "router/install.sh")
+if ($tokenFile) {
+    Write-Host "==> Tank token: $tokenFile"
+    # Copied under a relative path: scp would read "F:\..." as host "F".
+    Copy-Item $tokenFile build/ws_token.txt -Force
+    $files += "build/ws_token.txt"
+} else {
+    Write-Host "==> No Unity\EMF_Server\ws_token.txt found: the router will accept any tank (as Unity does without it)"
+}
+
 Write-Host "==> Uploading"
 & ssh @sshOpts $target "mkdir -p /tmp/tg-deploy"
 if ($LASTEXITCODE -ne 0) { Fail "couldn't create upload folder on the router" }
 # -O: the router's SSH server (dropbear) has no SFTP, so use classic scp.
-& scp -O @sshOpts build/thundergeddon-linux-arm64 router/thundergeddon.init router/install.sh "${target}:/tmp/tg-deploy/"
-if ($LASTEXITCODE -ne 0) { Fail "upload failed" }
+& scp -O @sshOpts @files "${target}:/tmp/tg-deploy/"
+$uploadExit = $LASTEXITCODE
+Remove-Item build/ws_token.txt -ErrorAction SilentlyContinue
+if ($uploadExit -ne 0) { Fail "upload failed" }
 
 Write-Host "==> Installing and restarting"
 & ssh @sshOpts $target 'tr -d ''\r'' < /tmp/tg-deploy/install.sh | sh'

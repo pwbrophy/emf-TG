@@ -17,8 +17,16 @@ mv -f $APP/thundergeddon.new $APP/thundergeddon
 tr -d '\r' < $D/thundergeddon.init > /etc/init.d/thundergeddon
 chmod +x /etc/init.d/thundergeddon
 
+# The tanks' shared hello token, if deploy.ps1 found one. Without it the
+# server accepts any tank. An existing token is kept if none was uploaded.
+mkdir -p /etc/thundergeddon
+if [ -f $D/ws_token.txt ]; then
+	tr -d '\r' < $D/ws_token.txt > /etc/thundergeddon/ws_token.txt
+	chmod 600 /etc/thundergeddon/ws_token.txt
+fi
+
 # Keep our files when GL firmware is upgraded with "keep settings".
-for f in $APP/ /etc/init.d/thundergeddon; do
+for f in $APP/ /etc/init.d/thundergeddon /etc/thundergeddon/; do
 	grep -qxF "$f" /etc/sysupgrade.conf || echo "$f" >> /etc/sysupgrade.conf
 done
 
@@ -29,13 +37,18 @@ rm -rf $D
 # stop, and restart then prints a misleading "Command failed: Not found".
 /etc/init.d/thundergeddon stop 2>/dev/null || true
 /etc/init.d/thundergeddon start
-sleep 2
 
-if wget -q -O - http://127.0.0.1:8088/api/info; then
-	echo
-	echo "Thundergeddon is running."
-else
-	echo "Thundergeddon did not answer on port 8088. Recent log:"
-	logread -e thundergeddon | tail -n 20
-	exit 1
-fi
+# Give it up to 10 s to answer (the old copy may take a moment to let go).
+i=0
+while [ $i -lt 10 ]; do
+	sleep 1
+	if wget -q -O - http://127.0.0.1:8088/api/info; then
+		echo
+		echo "Thundergeddon is running."
+		exit 0
+	fi
+	i=$((i + 1))
+done
+echo "Thundergeddon did not answer on port 8088. Recent log:"
+logread -e thundergeddon | tail -n 20
+exit 1

@@ -25,6 +25,7 @@ type viewerStats struct {
 
 type streamStats struct {
 	ID         string        `json:"id"`
+	Label      string        `json:"label"` // tank name, where known
 	Sources    int           `json:"sources"`
 	FPSIn      float64       `json:"fpsIn"`
 	KBPerFrame float64       `json:"kbPerFrame"`
@@ -64,6 +65,7 @@ func (ss *statsSampler) loop() {
 			bytes := s.bytesIn.Swap(0)
 			st := streamStats{
 				ID:      s.id,
+				Label:   s.getLabel(),
 				Sources: int(s.sources.Load()),
 				FPSIn:   float64(frames) / secs,
 				MbitIn:  float64(bytes) * 8 / secs / 1e6,
@@ -128,6 +130,8 @@ func logSummary(snap statsSnapshot) {
 	log.Printf("[VideoStats] %d streams, %.0f fps in, %.1f Mbit/s in, %d viewers%s",
 		len(snap.Streams), fps, mbit, viewers, cpu)
 }
+
+func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }
 
 // naturalLess orders "2" before "10".
 func naturalLess(a, b string) bool {

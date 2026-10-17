@@ -153,5 +153,3 @@ func readKBField(path, key string) float64 {
 	}
 	return 0
 }
-
-func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }

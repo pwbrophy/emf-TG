@@ -170,7 +170,7 @@
   <p class="hint">Tap a tank to start or stop watching it on this phone. The number on each tile is the frame rate this phone is getting.</p>
 
   <div class="grid" id="grid"></div>
-  <div class="empty" id="empty" hidden>No tanks are sending video. Start the load test on the PC.</div>
+  <div class="empty" id="empty" hidden>No tanks are sending video yet. Switch on a tank near the router, or start the load test on the PC.</div>
 
   <script>
     'use strict';
@@ -184,22 +184,22 @@
       t.el.classList.toggle('paused', !on);
       // Removing the src closes the connection, so a paused tile costs nothing.
       t.img.src = on ? '/api/stream/' + encodeURIComponent(t.id) + '?who=' + WHO + '&r=' + Date.now() : '';
-      if (!on) t.tag.textContent = 'Tank ' + t.id;
+      if (!on) t.tag.textContent = t.label;
     }
 
-    function addTile(id) {
+    function addTile(id, label) {
       const el = document.createElement('button');
       el.type = 'button';
       el.className = 'tile paused';
-      el.setAttribute('aria-label', 'Tank ' + id);
+      el.setAttribute('aria-label', label);
       const img = document.createElement('img');
       img.alt = '';
       const tag = document.createElement('span');
       tag.className = 'tag';
-      tag.textContent = 'Tank ' + id;
+      tag.textContent = label;
       el.append(img, tag);
       grid.append(el);
-      const t = { id, el, img, tag, watching: false };
+      const t = { id, label, el, img, tag, watching: false };
       el.addEventListener('click', () => setWatching(t, !t.watching));
       tiles.set(id, t);
       // Start watching the first tank automatically.
@@ -242,10 +242,12 @@
       }
 
       for (const s of live) {
-        const t = tiles.get(s.id) || addTile(s.id);
+        const label = /^\d+$/.test(s.label) ? 'Tank ' + s.label : s.label;
+        const t = tiles.get(s.id) || addTile(s.id, label);
+        t.label = label;
         if (t.watching) {
           const mine = s.viewers.find((v) => v.who === WHO);
-          t.tag.textContent = 'Tank ' + s.id + (mine ? ' · ' + mine.fps.toFixed(0) + ' fps' : '');
+          t.tag.textContent = label + (mine ? ' · ' + mine.fps.toFixed(0) + ' fps' : '');
         }
       }
       document.getElementById('empty').hidden = live.length > 0 || tiles.size > 0;

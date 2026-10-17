@@ -17,10 +17,12 @@ import (
 	"flag"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +38,8 @@ var startedAt = time.Now()
 
 func main() {
 	addr := flag.String("addr", ":8088", "address to listen on")
+	tokenFile := flag.String("token-file", "ws_token.txt", "file holding the tanks' shared hello token (same as Unity's ws_token.txt)")
+	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
@@ -45,12 +49,28 @@ func main() {
 		log.Fatal(err)
 	}
 
+	_, portStr, err := net.SplitHostPort(*addr)
+	if err != nil {
+		log.Fatalf("bad -addr %q: %v", *addr, err)
+	}
+	httpPort, _ := strconv.Atoi(portStr)
+
+	// procd (the router's service manager) stops services with SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	rl := newRelay()
 	stats := startStats(rl)
+	tanks := newTankManager(rl, *tokenFile, httpPort)
+	if *discoveryPort > 0 {
+		go tanks.runDiscovery(ctx, *discoveryPort)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/info", handleInfo)
 	mux.HandleFunc("GET /api/stats", stats.handle)
+	mux.HandleFunc("GET /api/tanks", tanks.handleList)
+	mux.HandleFunc("GET /esp32", tanks.handleControl)
 	mux.HandleFunc("POST /api/ingest/{id}", rl.handleIngest)
 	mux.HandleFunc("GET /api/stream/{id}", rl.handleView)
 	mux.Handle("/", noCacheHTML(http.FileServer(http.FS(web))))
@@ -59,11 +79,11 @@ func main() {
 		Addr:              *addr,
 		Handler:           logRequests(mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		// Requests share the shutdown signal, so long-lived video and tank
+		// connections end at once on stop instead of holding the server up
+		// until the service manager kills it.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
-
-	// procd (the router's service manager) stops services with SIGTERM.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Printf("Thundergeddon server %s (%s/%s) listening on %s", version, runtime.GOOS, runtime.GOARCH, *addr)
@@ -74,9 +94,11 @@ func main() {
 
 	<-ctx.Done()
 	log.Print("Shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
+	if srv.Shutdown(shutdownCtx) != nil {
+		_ = srv.Close()
+	}
 }
 
 // handleInfo reports what is running and where, so the settings screen can
@@ -109,6 +131,12 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
+		// Status polls arrive every couple of seconds; logging them would
+		// flood the router's small log buffer.
+		switch r.URL.Path {
+		case "/api/stats", "/api/info", "/api/tanks":
+			return
+		}
 		log.Printf("%s %s %s (%s)", r.RemoteAddr, r.Method, r.URL.Path, time.Since(start).Round(time.Microsecond))
 	})
 }

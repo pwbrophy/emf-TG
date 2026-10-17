@@ -40,6 +40,7 @@ type relay struct {
 type stream struct {
 	id       string
 	mu       sync.Mutex
+	label    string // display name (the tank's name); guarded by mu
 	viewers  map[*viewer]struct{}
 	sources  atomic.Int32
 	framesIn atomic.Int64
@@ -121,6 +122,21 @@ func (s *stream) publish(f mjpeg.Frame) {
 			}
 		}
 	}
+}
+
+func (s *stream) setLabel(l string) {
+	s.mu.Lock()
+	s.label = l
+	s.mu.Unlock()
+}
+
+func (s *stream) getLabel() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.label == "" {
+		return s.id
+	}
+	return s.label
 }
 
 func (s *stream) addViewer(v *viewer) {
