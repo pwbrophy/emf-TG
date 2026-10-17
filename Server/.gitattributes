@@ -1,0 +1,3 @@
+# Files that run on the router must keep Linux line endings.
+*.sh   text eol=lf
+*.init text eol=lf

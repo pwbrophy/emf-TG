@@ -104,6 +104,10 @@ The system has three components:
 | ESP32 firmware | `ESP32/` | C++ | Robot controller: motors, camera, IR, LEDs, comms |
 | Web player client | `Webserver/ThundergeddonWeb/` | ASP.NET Core + JS | Browser UI for players on phones; joystick, video, HUD |
 
+### New Go server (`Server/`) — in progress
+
+A replacement for Unity + ASP.NET, written in Go so it runs on the **GL-MT3000 router** (linux/arm64) as well as on a PC. Currently only a front-end shell (title screen → menu with dummy Host/Join buttons → settings cog). It runs alongside the Unity stack without touching it (own folder, port **8088**). Web pages in `Server/web/` are embedded in the binary — rebuild after editing them. `Server/run.ps1` runs it locally; `Server/deploy.ps1` builds, uploads over SSH (`scp -O`, no USB) and restarts it on the router (`/opt/thundergeddon`, procd service `/etc/init.d/thundergeddon`, logs via `logread -e thundergeddon`). See `Server/README.md`. Go is installed at `C:\Program Files\Go\bin` (add to PATH in shells opened before the install).
+
 ## Architecture
 
 The **laptop** runs both the Unity app (operator/admin) and the Webserver (player web page). It is the **authoritative server** for all game state.
