@@ -64,8 +64,11 @@ type tankManager struct {
 	tanks map[string]*tankSession // by robot id
 
 	// Told when tanks come and go. Set before the server starts.
-	onChange    func()          // the set of connected tanks changed
-	onConnected func(id string) // a tank (re)connected and is ready for commands
+	onChange    func()                       // the set of connected tanks changed
+	onConnected func(id string)              // a tank (re)connected and is ready for commands
+	onReport    func(id string, r tankReport) // IR replies and RFID reads
+
+	fake fakeWorld // pretend IR for -fake-tanks
 }
 
 type tankSession struct {
@@ -79,6 +82,8 @@ type tankSession struct {
 	// Commands queued for the tank. Sending never blocks the caller (the game
 	// holds its lock while sending); a writer goroutine drains this.
 	out chan []byte
+
+	fake func(msg []byte) // a fake tank's pretend reaction to commands
 }
 
 // tankInfo is what the game sees of a connected tank.
@@ -202,10 +207,12 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			FPS      *int `json:"fps"`
 			FSize    *int `json:"fsize"`
 			FQuality *int `json:"fquality"`
+			tankReport
 		}
 		if json.Unmarshal(data, &msg) != nil {
 			continue
 		}
+		msg.tankReport.Cmd = msg.Cmd
 
 		switch msg.Cmd {
 		case "hello":
@@ -230,8 +237,26 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			if sess != nil && msg.Heap > 0 {
 				sess.heap.Store(msg.Heap)
 			}
+		case "ir_emit_ack", "ir_window_result", "rfid":
+			if sess != nil && tm.onReport != nil {
+				tm.onReport(sess.id, msg.tankReport)
+			}
+		case "rfid_status":
+			if sess != nil {
+				log.Printf("[RFID] %s: reader ok=%d, recovered %d times", sess.label(), msg.RfidOK, msg.Recoveries)
+			}
 		}
 	}
+}
+
+// tankReport is what a tank tells the game: IR handshake replies and RFID
+// tag reads.
+type tankReport struct {
+	Cmd        string `json:"-"`
+	Mask       *int   `json:"mask"`       // ir_window_result: receivers that saw IR
+	UID        string `json:"uid"`        // rfid: the tag
+	RfidOK     int    `json:"ok"`         // rfid_status
+	Recoveries int    `json:"recoveries"` // rfid_status
 }
 
 // add registers a tank's session, replacing any older session of the same
@@ -268,7 +293,9 @@ func (tm *tankManager) add(id, name, ip string, c *websocket.Conn) *tankSession 
 // (-fake-tanks). Its commands are logged instead of sent; its video comes
 // from whatever is pushed to /api/ingest/<id> (e.g. cmd/loadtest).
 func (tm *tankManager) addFake(id, name string) {
-	tm.announce(tm.add(id, name, "fake", nil))
+	sess := tm.add(id, name, "fake", nil)
+	sess.fake = func(msg []byte) { tm.fakeCommand(id, msg) }
+	tm.announce(sess)
 }
 
 // announce turns a newly registered tank's camera on and tells the game.
@@ -343,6 +370,9 @@ func (s *tankSession) writeLoop(ctx context.Context) {
 			return
 		case msg := <-s.out:
 			if s.conn == nil {
+				if s.fake != nil {
+					s.fake(msg)
+				}
 				if !strings.Contains(string(msg), `"drive"`) && !strings.Contains(string(msg), `"turret"`) {
 					log.Printf("[Tanks] fake %s <- %s", s.label(), msg)
 				}

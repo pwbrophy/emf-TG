@@ -12,13 +12,14 @@ package main
 // Only one game runs at a time. The state lives in one value (not globals) so
 // that several games on one hub could be added later.
 //
-// Real-time rules only for now: drive, turret, fire with a cooldown (the tank
-// flashes; hit detection comes later), and a match timer.
+// Real-time rules only for now: drive, turret, fire with a cooldown, and a
+// match timer. Shots, hits, death and scoring are in ir.go and combat.go.
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -71,11 +72,16 @@ type player struct {
 }
 
 type result struct {
-	Name         string  `json:"name"`
-	Tank         string  `json:"tank"`
-	Team         string  `json:"team"`
-	Shots        int     `json:"shots"`
-	DriveSeconds float64 `json:"driveSeconds"`
+	Name          string  `json:"name"`
+	Tank          string  `json:"tank"`
+	Team          string  `json:"team"`
+	Kills         int     `json:"kills"`
+	Deaths        int     `json:"deaths"`
+	Damage        int     `json:"damage"`
+	VictoryPoints int     `json:"victoryPoints"`
+	Nemesis       string  `json:"nemesis"`
+	Shots         int     `json:"shots"`
+	DriveSeconds  float64 `json:"driveSeconds"`
 }
 
 type game struct {
@@ -87,18 +93,25 @@ type game struct {
 	phase       phase
 	hostDevice  string    // "" = nobody is hosting
 	phaseEndsAt time.Time // end of the countdown or of the match
-	endReason   string
+	endReason   string    // shown on the results screens
 	results     []result
 
-	players map[string]*player // by device
-	queue   []string           // devices, first in line first
-	tankNames map[string]string // id → name, remembered for tanks that went offline
+	players   map[string]*player // by device
+	queue     []string           // devices, first in line first
+	tankNames map[string]string  // id → name, remembered for tanks that went offline
+
+	// Combat (combat.go, ir.go). match is nil outside a game; after one it
+	// keeps the final score until the next game starts.
+	match    *match
+	matchGen int
+	ir       *irScheduler
+	rfidLog  []rfidScan
 
 	clients map[*client]struct{}
 }
 
 func newGame(tanks tankControl, settingsPath string) *game {
-	return &game{
+	g := &game{
 		tanks:        tanks,
 		settingsPath: settingsPath,
 		settings:     loadSettings(settingsPath),
@@ -106,6 +119,27 @@ func newGame(tanks tankControl, settingsPath string) *game {
 		players:      map[string]*player{},
 		tankNames:    map[string]string{},
 		clients:      map[*client]struct{}{},
+	}
+	g.ir = newIrScheduler(g)
+	return g
+}
+
+// tankMessage receives what tanks report (from tanks.go).
+func (g *game) tankMessage(id string, m tankReport) {
+	switch m.Cmd {
+	case "ir_emit_ack":
+		g.ir.reply(irReply{tank: id, ack: true, mask: -1})
+	case "ir_window_result":
+		mask := 0
+		if m.Mask != nil {
+			mask = *m.Mask
+		}
+		g.ir.reply(irReply{tank: id, mask: mask})
+	case "rfid":
+		g.mu.Lock()
+		g.rfidScanned(id, m.UID)
+		g.broadcast()
+		g.mu.Unlock()
 	}
 }
 
@@ -193,7 +227,7 @@ func (g *game) hostAction(c *client, m inMsg) {
 		g.start(c, m.Force)
 	case "host_end":
 		if g.phase == phaseCountdown || g.phase == phasePlaying {
-			g.endGame("The host ended the game")
+			g.endGame("manual")
 		}
 	case "host_lobby":
 		if g.phase == phaseEnded {
@@ -437,10 +471,14 @@ func (g *game) tanksChanged() {
 func (g *game) tankConnected(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.phase == phasePlaying {
-		if p := g.tankOwner(id); p != nil && p.status == stPlaying {
-			g.tanks.sendTo(id, `{"cmd":"motors_on"}`)
-			log.Printf("[Game] %s's tank reconnected mid-game", p.name)
+	if g.phase == phasePlaying && g.match != nil {
+		if c := g.match.fighters[id]; c != nil {
+			// Exploding tanks stay still; everyone else can drive.
+			if c.life != exploding {
+				g.tanks.sendTo(id, `{"cmd":"motors_on"}`)
+			}
+			g.sendSetHp(c)
+			log.Printf("[Game] %s's tank reconnected mid-game", c.name)
 		}
 	}
 }
@@ -458,10 +496,21 @@ func (g *game) controllable(device string) *player {
 	return p
 }
 
+// fighter is the player's tank in the current game, if any.
+func (g *game) fighter(p *player) *combatant {
+	if g.match == nil {
+		return nil
+	}
+	return g.match.fighters[p.tank]
+}
+
 func (g *game) drive(device string, l, r float64) {
 	p := g.controllable(device)
 	if p == nil {
 		return
+	}
+	if c := g.fighter(p); c != nil && c.life == exploding {
+		return // no driving while exploding
 	}
 	l, r = clampUnit(l), clampUnit(r)
 	g.tanks.sendTo(p.tank, fmt.Sprintf(`{"cmd":"drive","l":%.3f,"r":%.3f}`, l, r))
@@ -484,6 +533,10 @@ func (g *game) fire(device string) {
 	if p == nil {
 		return
 	}
+	c := g.fighter(p)
+	if c == nil || c.life != alive {
+		return // dead tanks can't fire
+	}
 	cooldown := time.Duration(g.settings.FireCooldownMs) * time.Millisecond
 	if time.Since(p.lastFire) < cooldown {
 		return
@@ -493,6 +546,9 @@ func (g *game) fire(device string) {
 	g.tanks.sendTo(p.tank, `{"cmd":"flash_fire"}`)
 	// The shooter's page plays its fire beam / muzzle flash on this.
 	g.sendTo(device, map[string]any{"t": "fired"})
+	if !g.ir.enqueue(shotRequest{shooter: p.tank, at: time.Now(), gen: g.match.gen}) {
+		g.sendTo(device, map[string]any{"t": "fire_result", "text": "Miss (lag)"})
+	}
 }
 
 // ── The game cycle ───────────────────────────────────────────────────────────
@@ -544,18 +600,37 @@ func (g *game) start(c *client, force bool) {
 		p.lastFire, p.lastDriveAt = time.Time{}, time.Time{}
 	}
 	g.results = nil
+	g.newMatch(ready)
 	log.Printf("[Game] starting with %d players", len(ready))
 	if g.settings.CountdownSeconds > 0 {
 		g.setPhase(phaseCountdown)
 		g.phaseEndsAt = time.Now().Add(time.Duration(g.settings.CountdownSeconds) * time.Second)
+		g.countdownTick()
 	} else {
 		g.beginPlay()
+	}
+}
+
+// countdownTick sends the tanks each number of the countdown (they beep and
+// count down on their LEDs).
+func (g *game) countdownTick() {
+	n := int(math.Ceil(time.Until(g.phaseEndsAt).Seconds()))
+	if n < 1 || g.match == nil || n == g.match.lastCountdownTick {
+		return
+	}
+	g.match.lastCountdownTick = n
+	msg := fmt.Sprintf(`{"cmd":"countdown_tick","count":%d,"total":%d}`, n, g.settings.CountdownSeconds)
+	for _, t := range g.tanks.list() {
+		g.tanks.sendTo(t.ID, msg)
 	}
 }
 
 func (g *game) beginPlay() {
 	g.setPhase(phasePlaying)
 	g.phaseEndsAt = time.Now().Add(time.Duration(g.settings.MatchSeconds) * time.Second)
+	for _, t := range g.tanks.list() {
+		g.tanks.sendTo(t.ID, `{"cmd":"game_start_fanfare"}`)
+	}
 	for _, p := range g.players {
 		if p.status == stPlaying && p.tank != "" {
 			g.tanks.sendTo(p.tank, `{"cmd":"motors_on"}`)
@@ -563,40 +638,63 @@ func (g *game) beginPlay() {
 	}
 }
 
-func (g *game) endGame(reason string) {
-	g.endReason = reason
-	g.results = nil
-	names := map[string]string{}
-	for _, t := range g.tanks.list() {
-		names[t.ID] = t.Name
+// endGame finishes the game. code is "time" (time ran out), "points" (a
+// team reached the winning score; match.winner is already set) or "manual"
+// (the host ended or closed it: no winner).
+func (g *game) endGame(code string) {
+	m := g.match
+	winner := -1
+	if m != nil {
+		m.endCode = code
+		if code == "time" {
+			m.winner = g.winnerOnTime()
+		}
+		winner = m.winner
+		for _, c := range m.fighters {
+			if !c.invulnUntil.IsZero() {
+				c.invulnUntil = time.Time{}
+				g.tanks.sendTo(c.tank, `{"cmd":"invuln_end"}`)
+			}
+		}
 	}
+	switch code {
+	case "time":
+		g.endReason = "Time's up"
+	case "points":
+		g.endReason = fmt.Sprintf("%s reached %d points", teamName(winner), g.settings.MaxTeamPoints)
+	default:
+		g.endReason = "The host ended the game"
+	}
+	if winner >= 0 {
+		g.endReason += " · " + teamName(winner) + " win!"
+	}
+
+	g.results = g.combatResults()
 	for _, p := range g.players {
 		if p.status != stPlaying {
 			continue
 		}
 		if p.tank != "" {
 			g.stopTank(p.tank)
+			g.tanks.sendTo(p.tank, `{"cmd":"reset_idle"}`)
 		}
-		tankName := names[p.tank]
-		if tankName == "" {
-			tankName = g.tankNames[p.tank]
+		for i := range g.results {
+			if g.results[i].Name == p.name {
+				g.results[i].Shots = p.shots
+				g.results[i].DriveSeconds = float64(int(p.driveTime.Seconds()*10)) / 10
+			}
 		}
-		g.results = append(g.results, result{
-			Name: p.name, Tank: tankName, Team: defaultTeam(tankName),
-			Shots: p.shots, DriveSeconds: float64(int(p.driveTime.Seconds()*10)) / 10,
-		})
 		p.status = stFinished
 	}
-	sort.Slice(g.results, func(i, j int) bool { return g.results[i].Name < g.results[j].Name })
 	g.setPhase(phaseEnded)
-	log.Printf("[Game] game over: %s", reason)
+	log.Printf("[Game] game over: %s", g.endReason)
 }
 
 // closeGame ends hosting: lobby players go back to the front of the queue
 // (in their lobby order) to wait for the next host.
 func (g *game) closeGame() {
 	if g.phase == phaseCountdown || g.phase == phasePlaying {
-		g.endGame("The host closed the game")
+		g.endGame("manual")
 	}
 	var back []string
 	for _, p := range g.sortedPlayers() {
@@ -621,11 +719,14 @@ func (g *game) setPhase(ph phase) {
 	}
 	g.phase = ph
 	if ph == phaseLobby {
-		// Tanks from the last game are free again.
+		// Tanks from the last game are free again, and back to their idle lights.
 		for _, p := range g.players {
 			if p.status == stFinished {
 				p.tank = ""
 			}
+		}
+		for _, t := range g.tanks.list() {
+			g.tanks.sendTo(t.ID, `{"cmd":"reset_idle"}`)
 		}
 	}
 }
@@ -642,9 +743,13 @@ func (g *game) tick() {
 	case g.phase == phaseCountdown && !now.Before(g.phaseEndsAt):
 		g.beginPlay()
 		changed = true
+	case g.phase == phaseCountdown:
+		g.countdownTick()
 	case g.phase == phasePlaying && !now.Before(g.phaseEndsAt):
-		g.endGame("Time's up")
+		g.endGame("time")
 		changed = true
+	case g.phase == phasePlaying:
+		changed = g.tickCombat(now)
 	}
 
 	for _, p := range g.players {
@@ -691,6 +796,8 @@ type playerView struct {
 	Tank   string `json:"tank"` // tank name
 	Online bool   `json:"online"`
 	Host   bool   `json:"host"`
+	Hp     int    `json:"hp,omitempty"`   // in a game
+	Life   string `json:"life,omitempty"` // in a game: alive, dead, returning
 }
 
 type meView struct {
@@ -701,6 +808,12 @@ type meView struct {
 	TankName string `json:"tankName"` // tank name
 	Team     string `json:"team"`
 	QueuePos int    `json:"queuePos"` // 1 = next in
+
+	// In a game:
+	Hp           int    `json:"hp"`
+	MaxHp        int    `json:"maxHp"`
+	Life         string `json:"life"` // "alive", "dead" (exploding), "returning" (to base)
+	Invulnerable bool   `json:"invulnerable"`
 }
 
 type snapshot struct {
@@ -712,12 +825,17 @@ type snapshot struct {
 	Capacity         int          `json:"capacity"`
 	FireCooldownMs   int          `json:"fireCooldownMs"`
 	EndReason        string       `json:"endReason,omitempty"`
+	EndCode          string       `json:"endCode,omitempty"`    // "time", "points", "manual"
+	WinnerTeam       string       `json:"winnerTeam,omitempty"` // "" = no winner
+	TeamPoints       [2]int       `json:"teamPoints"`           // Desert, Jungle
+	MaxTeamPoints    int          `json:"maxTeamPoints"`
 	Me               meView       `json:"me"`
 	Tanks            []tankView   `json:"tanks"`
 	Players          []playerView `json:"players"` // lobby and game
 	Queue            []playerView `json:"queue"`
 	Results          []result     `json:"results,omitempty"`
-	Settings         *Settings    `json:"settings,omitempty"` // host only
+	Settings         *Settings    `json:"settings,omitempty"`  // host only
+	RfidScans        []rfidScan   `json:"rfidScans,omitempty"` // host only: recent tag reads
 }
 
 func (g *game) snapshot(device string) snapshot {
@@ -741,6 +859,15 @@ func (g *game) snapshot(device string) snapshot {
 	if isHost {
 		st := g.settings
 		s.Settings = &st
+		s.RfidScans = g.rfidLog
+	}
+	s.MaxTeamPoints = g.settings.MaxTeamPoints
+	if g.match != nil {
+		s.TeamPoints = g.match.teamPoints
+		if g.phase == phaseEnded {
+			s.EndCode = g.match.endCode
+			s.WinnerTeam = teamName(g.match.winner)
+		}
 	}
 
 	// Tanks: every connected one, plus any chosen tank that is offline.
@@ -767,6 +894,9 @@ func (g *game) snapshot(device string) snapshot {
 		if isHost {
 			v.Device = p.device
 		}
+		if c := g.fighter(p); c != nil && p.status == stPlaying {
+			v.Hp, v.Life = c.hp, c.life.String()
+		}
 		return v
 	}
 	for _, p := range g.sortedPlayers() {
@@ -790,6 +920,12 @@ func (g *game) snapshot(device string) snapshot {
 			if d == device {
 				s.Me.QueuePos = i + 1
 			}
+		}
+		s.Me.MaxHp = g.settings.MaxHp
+		if c := g.fighter(p); c != nil && (p.status == stPlaying || p.status == stFinished) {
+			s.Me.Hp = c.hp
+			s.Me.Life = c.life.String()
+			s.Me.Invulnerable = c.invulnerable(time.Now())
 		}
 	}
 	if g.phase == phaseEnded || s.Me.Status == string(stFinished) {

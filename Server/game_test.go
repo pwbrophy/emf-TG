@@ -11,9 +11,10 @@ import (
 
 // fakeTanks records the commands the game sends to tanks.
 type fakeTanks struct {
-	mu   sync.Mutex
-	ts   []tankInfo
-	sent []string // "id cmd-json"
+	mu     sync.Mutex
+	ts     []tankInfo
+	sent   []string                // "id cmd-json"
+	onSend func(id, msg string) // optional: play the tank's part (called without locks)
 }
 
 func (f *fakeTanks) list() []tankInfo {
@@ -24,8 +25,12 @@ func (f *fakeTanks) list() []tankInfo {
 
 func (f *fakeTanks) sendTo(id, msg string) bool {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.sent = append(f.sent, id+" "+msg)
+	hook := f.onSend
+	f.mu.Unlock()
+	if hook != nil {
+		hook(id, msg)
+	}
 	return true
 }
 

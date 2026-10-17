@@ -68,7 +68,9 @@ func main() {
 	g := newGame(tanks, *settingsFile)
 	tanks.onChange = g.tanksChanged
 	tanks.onConnected = g.tankConnected
+	tanks.onReport = g.tankMessage
 	go g.runClock(ctx.Done())
+	go g.ir.run(ctx.Done())
 	for i := 1; i <= *fakeTanks; i++ {
 		team := "Desert"
 		if i%2 == 0 {
@@ -90,6 +92,9 @@ func main() {
 	mux.HandleFunc("GET /api/stream/{id}", rl.handleView)
 	mux.HandleFunc("GET /api/robot-stream", rl.handleViewByQuery) // addresses the in-game page uses
 	mux.HandleFunc("GET /api/video-ws", rl.handleVideoWS)
+	if *fakeTanks > 0 {
+		mux.HandleFunc("POST /api/dev/rfid", tanks.handleFakeRfid) // pretend tag scans
+	}
 	mux.Handle("/", noCacheHTML(http.FileServer(http.FS(web))))
 
 	srv := &http.Server{

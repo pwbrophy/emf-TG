@@ -24,6 +24,9 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | File | Role |
 |---|---|
 | `game.go` | The game: host, queue, lobby, tank choice, countdown, play, game over |
+| `ir.go` | The IR shot handshake (left barrel, ack, listen, right barrel, listen) |
+| `combat.go` | HP, directional damage, death, return to base, respawn, invulnerability, team points, winner, stats |
+| `fake.go` | Pretend IR for `-fake-tanks`, and `POST /api/dev/rfid` to pretend a tag scan |
 | `client.go` | Phone pages' WebSocket (`/ws`): requests in, state snapshots out |
 | `tanks.go` | Tank discovery, control WebSocket (`/esp32`), command queue, video pull |
 | `video.go`, `stats.go` | Video relay to viewers; frame-rate and CPU stats |
@@ -37,8 +40,16 @@ Host password default: `thundergeddon` (change it in the host's Game
 settings). Settings are saved on the router in
 `/etc/thundergeddon/settings.json`.
 
-Not built yet: hit detection and damage, capture points, pause, presets,
-tank tuning settings, 2-player tanks, the spectator display.
+Combat follows the Unity version: 25 damage a hit (rear ×3, side ×1.5), a
+5 s explosion on death, then "return to base" until the tank scans its own
+team's base tag, 25 team points a kill and 300 to win. Teams come from tank
+names (Desert-… / Jungle-…): a game needs tanks from both teams for shots to
+hit anything. Base tags default to the ones in the Unity scene; the host can
+change them in Game settings, and the host's "RFID scans" list shows each
+tag a tank reads.
+
+Not built yet: capture points, pause, presets, tank tuning settings,
+2-player tanks, the spectator display.
 
 ## Run on this PC
 

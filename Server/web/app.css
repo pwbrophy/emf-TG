@@ -476,6 +476,20 @@ input[type="text"], input[type="password"], input[type="number"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* Score bars */
+
+.bar {
+  height: 8px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: var(--surface2);
+  overflow: hidden;
+}
+
+.bar > div { height: 100%; transition: width 0.4s ease; }
+.bar-desert { background: var(--desert); }
+.bar-jungle { background: var(--jungle); }
+
 /* Results */
 
 .results { width: 100%; border-collapse: collapse; }

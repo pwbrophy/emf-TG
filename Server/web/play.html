@@ -2170,21 +2170,30 @@ class TGHub {
   }
 }
 
-// Turns the server's state snapshots into the hub events this page handles:
+// Turns the server's messages into the hub events this page handles:
 // countdown → CountdownStarted / CountdownTick, game on → GameStarted, then
-// StateUpdate with the timer every second, game over → GameOver.
+// StateUpdate (timer every second, HP when it changes), hits and deaths →
+// HitTaken / FireResult / YouAreDead / YouAreAlive / RfidTag, game over →
+// GameOver and PlayerStats.
 let tgState = null, tgStateAt = 0;
 let tgCountdownShown = false, tgLastCount = 0;
-let tgStarted = false, tgLastTimerSec = -1, tgOver = false;
+let tgStarted = false, tgLastTimerSec = -1, tgOver = false, tgLastHp = -1;
 
 function tgRemainingMs() {
   return tgState ? Math.max(0, tgState.remainingMs - (performance.now() - tgStateAt)) : 0;
 }
 
 function tgOnMessage(hub, m) {
-  if (m.t === 'kicked') { returnToJoin('The host removed you from the game.'); return; }
-  if (m.t === 'error')  { dbg('server: ' + m.msg); return; }
-  if (m.t === 'fired')  { hub.emit('FireEvent', { robotId: myRobotId, callsign: myRobotId }); return; }
+  switch (m.t) {
+    case 'kicked':       returnToJoin('The host removed you from the game.'); return;
+    case 'error':        dbg('server: ' + m.msg); return;
+    case 'fired':        hub.emit('FireEvent', { robotId: myRobotId, callsign: myRobotId }); return;
+    case 'fire_result':  hub.emit('FireResult', m.text); return;
+    case 'hit_taken':    hub.emit('HitTaken', { shooter: m.shooter, dir: m.dir }); return;
+    case 'you_are_dead': hub.emit('YouAreDead'); return;
+    case 'you_are_alive': hub.emit('YouAreAlive'); return;
+    case 'rfid':         hub.emit('RfidTag', m.text); return;
+  }
   if (m.t !== 'state') return;
   tgState   = m;
   tgStateAt = performance.now();
@@ -2206,14 +2215,20 @@ function tgOnMessage(hub, m) {
   if (me.status === 'playing' && m.phase === 'playing') {
     if (!tgStarted) {
       tgStarted = true;
+      tgLastHp  = me.hp;
       hub.emit('GameStarted', {
         callsign:         me.tankName || me.tank,
         videoUrl:         me.tank,            // stream id: /api/robot-stream?url=<id>
-        hp:               100,
-        maxHp:            100,
+        hp:               me.hp,
+        maxHp:            me.maxHp,
         role:             'solo',
         cooldownDuration: m.fireCooldownMs / 1000,
       });
+      // Page reopened while dead: show the death screen.
+      if (me.life === 'dead' || me.life === 'returning') hub.emit('YouAreDead');
+    } else if (me.hp !== tgLastHp) {
+      tgLastHp = me.hp;
+      hub.emit('StateUpdate', { hp: me.hp, maxHp: me.maxHp });
     }
     tgTick();
     return;
@@ -2221,9 +2236,15 @@ function tgOnMessage(hub, m) {
   if (me.status === 'finished' && tgStarted) {
     if (!tgOver) {
       tgOver = true;
-      // Until hits are scored there's no winner, which takes the page's
-      // "ended without a winner" path on to the main page's results.
-      hub.emit('GameOver', { winnerTeam: m.winnerTeam || '', reason: m.endReason });
+      // A game the host ended has no winner: the page goes straight on to
+      // the main page's results; otherwise the victory/defeat sequence plays.
+      const mine = (m.results || []).find(r => r.name === me.name) || {};
+      hub.emit('GameOver', { winnerTeam: m.winnerTeam || '', reason: m.endCode || 'manual' });
+      hub.emit('PlayerStats', {
+        kills: mine.kills, deaths: mine.deaths, damage: mine.damage,
+        victoryPoints: mine.victoryPoints, vpFromCaptures: 0, vpFromKills: mine.victoryPoints,
+        nemesis: mine.nemesis || '',
+      });
     }
     return;
   }

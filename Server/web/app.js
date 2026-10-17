@@ -255,9 +255,30 @@ function renderLobby() {
 function resultsTable() {
   const rows = (state.results || []).map((r) =>
     `<tr><td>${esc(r.name)}</td><td class="${teamClass(r.team)}">${esc(r.tank)}</td>
-     <td class="num">${r.shots}</td><td class="num">${r.driveSeconds.toFixed(0)}s</td></tr>`).join('');
-  return `<table class="results"><thead><tr><th>Player</th><th>Tank</th><th class="num">Shots</th><th class="num">Driving</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="4" class="empty">No results</td></tr>'}</tbody></table>`;
+     <td class="num">${r.kills}</td><td class="num">${r.deaths}</td>
+     <td class="num">${r.damage}</td><td class="num">${r.victoryPoints}</td></tr>`).join('');
+  return `<table class="results"><thead><tr><th>Player</th><th>Tank</th>
+    <th class="num">Kills</th><th class="num">Deaths</th><th class="num">Damage</th><th class="num">Points</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="6" class="empty">No results</td></tr>'}</tbody></table>`;
+}
+
+function scoreCard() {
+  const [d, j] = state.teamPoints;
+  const pct = (v) => Math.min(100, Math.round(v / state.maxTeamPoints * 100));
+  return `<div class="card"><h3>Score (${state.maxTeamPoints} to win)</h3>
+    <div class="srow" style="padding-top:0"><span class="team-desert">Desert Squad</span><span class="value">${d}</span></div>
+    <div class="bar"><div class="bar-desert" style="width:${pct(d)}%"></div></div>
+    <div class="srow"><span class="team-jungle">Jungle Squad</span><span class="value">${j}</span></div>
+    <div class="bar"><div class="bar-jungle" style="width:${pct(j)}%"></div></div></div>`;
+}
+
+function hostRfidCard() {
+  const scans = (state.rfidScans || []).slice().reverse();
+  const rows = scans.map((s) =>
+    `<div class="item"><div class="main"><div class="name">${esc(s.uid)}</div>
+      <div class="sub">${esc(s.at)} &middot; ${esc(s.tank)}${s.what ? ' &middot; ' + esc(s.what) : ''}</div></div></div>`).join('');
+  return `<details class="card"><summary><h3 style="display:inline">RFID scans</h3></summary>
+    <div class="list" style="margin-top:12px">${rows || '<p class="empty">No tags read yet. Drive a tank over a tag to see its number here.</p>'}</div></details>`;
 }
 
 function renderResults() {
@@ -318,7 +339,7 @@ function renderHost() {
       <button class="btn primary" type="button" data-action="host-start" ${ready ? '' : 'disabled'}>
         Start Game${ready ? ` (${ready} ${ready === 1 ? 'tank' : 'tanks'})` : ''}</button>
       ${ready ? '' : '<p class="empty" style="margin:10px 0 0">Waiting for players to choose tanks.</p>'}</div>
-      ${hostPlayersCard()} ${hostTanksCard()} ${hostQueueCard()}`;
+      ${hostPlayersCard()} ${hostTanksCard()} ${hostQueueCard()} ${hostRfidCard()}`;
   } else if (ph === 'countdown' || ph === 'playing') {
     const drive = state.me.status === 'playing'
       ? '<button class="btn primary" type="button" data-action="host-drive" style="margin-bottom:10px">Drive My Tank</button>' : '';
@@ -326,7 +347,7 @@ function renderHost() {
       <div class="timer-big" id="host-timer">${fmtClock(remainingMs())}</div></div>
       ${drive}
       <button class="btn danger" type="button" data-action="host-end" style="margin-bottom:14px">End Game</button>
-      ${hostPlayersCard()} ${hostQueueCard()}`;
+      ${scoreCard()} ${hostPlayersCard()} ${hostQueueCard()} ${hostRfidCard()}`;
   } else if (ph === 'ended') {
     main = `<div class="game-over">GAME OVER</div>
       <div class="big-status"><div class="detail">${esc(state.endReason || '')}</div></div>
@@ -347,9 +368,13 @@ function hostPlayersCard() {
            <button class="btn small secondary" type="button" data-action="host-queue" data-target="${esc(p.device)}">Queue</button>
            <button class="btn small danger" type="button" data-action="host-kick" data-target="${esc(p.device)}" data-name="${esc(p.name)}">Remove</button>
          </div>` : '';
+    let sub = p.tank ? esc(p.tank) : p.status === 'lobby' && state.phase !== 'lobby' ? 'Next game' : 'Choosing&hellip;';
+    if (p.status === 'playing' && p.life) {
+      sub += ' &middot; ' + (p.life === 'dead' ? 'Destroyed' : p.life === 'returning' ? 'Returning to base' : `${p.hp} HP`);
+    }
     return `<div class="item"><span class="dot ${p.online ? '' : 'off'}" title="${p.online ? 'Connected' : 'Disconnected'}"></span>
       <div class="main"><div class="name">${esc(p.name)}${p.host ? ' (you)' : ''}</div>
-      <div class="sub">${p.tank ? esc(p.tank) : p.status === 'lobby' && state.phase !== 'lobby' ? 'Next game' : 'Choosing&hellip;'}</div></div>
+      <div class="sub">${sub}</div></div>
       ${actions}</div>`;
   }).join('');
   return `<div class="card"><h3>Players (${state.players.filter((p) => !p.host).length} of ${state.capacity})</h3>
@@ -396,6 +421,16 @@ function hostSettingsCard(collapsed) {
     <label class="field">Reload time (seconds)<input type="number" name="fireCooldown" min="0.25" max="30" step="0.25" value="${s.fireCooldownMs / 1000}"></label>
     <label class="field">Game password (blank = none)<input type="text" name="clientPassword" maxlength="32" value="${esc(s.clientPassword)}"></label>
     <label class="field">Host password<input type="text" name="hostPassword" maxlength="32" value="${esc(s.hostPassword)}"></label>
+    <label class="field">Hit points<input type="number" name="maxHp" min="1" max="10000" value="${s.maxHp}"></label>
+    <label class="field">Damage per hit<input type="number" name="damagePerHit" min="0" max="10000" value="${s.damagePerHit}"></label>
+    <label class="field">Rear hit &times;<input type="number" name="rearMultiplier" min="0" max="20" step="0.1" value="${s.rearMultiplier}"></label>
+    <label class="field">Side hit &times;<input type="number" name="sideMultiplier" min="0" max="20" step="0.1" value="${s.sideMultiplier}"></label>
+    <label class="field">Points per kill<input type="number" name="teamPointsPerKill" min="0" value="${s.teamPointsPerKill}"></label>
+    <label class="field">Points to win<input type="number" name="maxTeamPoints" min="1" value="${s.maxTeamPoints}"></label>
+    <label class="field">Explosion (seconds)<input type="number" name="explosionSeconds" min="0" max="60" step="0.5" value="${s.explosionSeconds}"></label>
+    <label class="field">Invulnerable after respawn (s)<input type="number" name="invulnerableSeconds" min="0" max="60" step="0.5" value="${s.invulnerableSeconds}"></label>
+    <label class="field" style="grid-column:1/-1">Desert base RFID tags (comma-separated)<input type="text" name="desertBaseUids" value="${esc((s.desertBaseUids || []).join(', '))}"></label>
+    <label class="field" style="grid-column:1/-1">Jungle base RFID tags (comma-separated)<input type="text" name="jungleBaseUids" value="${esc((s.jungleBaseUids || []).join(', '))}"></label>
     <button class="btn secondary" type="submit" style="grid-column:1/-1">Save Settings</button>
   </form>`;
   return collapsed
@@ -406,16 +441,28 @@ function hostSettingsCard(collapsed) {
 function saveSettings(form) {
   const f = new FormData(form);
   const num = (k) => parseFloat(f.get(k)) || 0;
+  const uids = (k) => String(f.get(k) || '').split(/[\s,;]+/).filter(Boolean);
+  // Start from the current settings so ones not on this form are kept.
   send({
     t: 'host_settings',
-    settings: {
+    settings: Object.assign({}, state.settings, {
       matchSeconds: Math.round(num('matchMinutes') * 60),
       countdownSeconds: Math.round(num('countdownSeconds')),
       maxPlayers: Math.round(num('maxPlayers')),
       fireCooldownMs: Math.round(num('fireCooldown') * 1000),
       clientPassword: String(f.get('clientPassword') || '').trim(),
       hostPassword: String(f.get('hostPassword') || '').trim(),
-    },
+      maxHp: Math.round(num('maxHp')),
+      damagePerHit: Math.round(num('damagePerHit')),
+      rearMultiplier: num('rearMultiplier'),
+      sideMultiplier: num('sideMultiplier'),
+      teamPointsPerKill: Math.round(num('teamPointsPerKill')),
+      maxTeamPoints: Math.round(num('maxTeamPoints')),
+      explosionSeconds: num('explosionSeconds'),
+      invulnerableSeconds: num('invulnerableSeconds'),
+      desertBaseUids: uids('desertBaseUids'),
+      jungleBaseUids: uids('jungleBaseUids'),
+    }),
   });
   delete $('h-settings').dataset.dirty;
   toast('Settings saved');
