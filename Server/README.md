@@ -44,6 +44,16 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 Players' link: `http://<hub>:8088/join` goes straight to Name Entry (no
 title or menu), e.g. from a QR code at a festival.
 
+In the Client Lobby players choose an alliance and are given one of its free
+tanks (all tanks are the same). Each tank with a player glows a colour of
+its own (red, green, blue…) until the game starts, and the player's phone
+says which, as in the Unity version (`lobby.go`).
+
+Tank cameras only stream while their tank is in a game (countdown to game
+over, not while paused), as in the Unity version: less Wi-Fi traffic and
+heat. Server Config → Advanced → Video has "Keep cameras on between games"
+for the video test page and load tests.
+
 No host password for now: tapping Host Game makes that phone the host
 (taking over from another phone after a check). Players can be asked for a
 game password, set in Server Settings. Settings are saved on the router in

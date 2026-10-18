@@ -134,6 +134,71 @@ func TestTankHelloStartsVideo(t *testing.T) {
 	}
 }
 
+// With a game connected the camera starts off; switching it on pulls video,
+// switching it off stops the pull (and tells the tank).
+func TestCameraSwitching(t *testing.T) {
+	cam := fakeCamera(t)
+	defer cam.Close()
+	old := videoURL
+	videoURL = func(string) string { return cam.URL }
+	defer func() { videoURL = old }()
+
+	tm, rl, srv := newTestTankServer(t, "")
+	connected := make(chan string, 1)
+	tm.onConnected = func(id string) { connected <- id }
+	c := dialTank(t, srv)
+	sendJSON(t, c, map[string]any{"cmd": "hello", "id": "AABBCCDDEEFF", "name": "Desert-01", "ip": "127.0.0.1"})
+	<-connected
+	s := rl.get("AABBCCDDEEFF")
+
+	readCmd := func() string {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("no command: %v", err)
+		}
+		return string(msg)
+	}
+	waitSources := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for s.sources.Load() != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("video sources = %d, want %d", s.sources.Load(), want)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	if cmd := readCmd(); !strings.Contains(cmd, "stream_off") {
+		t.Fatalf("a newly connected tank's camera should start off, got %s", cmd)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if s.sources.Load() != 0 {
+		t.Fatal("video pulled while the camera is off")
+	}
+
+	tm.setStreaming("AABBCCDDEEFF", true)
+	if cmd := readCmd(); !strings.Contains(cmd, "stream_on") {
+		t.Fatalf("expected stream_on, got %s", cmd)
+	}
+	waitSources(1)
+
+	tm.setStreaming("AABBCCDDEEFF", false)
+	if cmd := readCmd(); !strings.Contains(cmd, "stream_off") {
+		t.Fatalf("expected stream_off, got %s", cmd)
+	}
+	waitSources(0)
+
+	tm.setStreaming("AABBCCDDEEFF", true) // and back on again
+	readCmd()
+	waitSources(1)
+
+	tm.setStreaming("AABBCCDDEEFF", false) // (so the fake camera can close quickly)
+	waitSources(0)
+}
+
 func TestTankWrongTokenRefused(t *testing.T) {
 	tm, _, srv := newTestTankServer(t, "secret")
 	c := dialTank(t, srv)

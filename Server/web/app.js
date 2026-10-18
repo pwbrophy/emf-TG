@@ -324,40 +324,44 @@ function renderWait() {
 
 // ── Client Lobby ─────────────────────────────────────────────────────────────
 
-// tankCards: the tanks to choose from. A free tank: tap to drive it. A
-// 2-player tank whose driver wants a gunner: tap to join as gunner.
-function tankCards() {
+// allianceCards: players choose a side and are given one of its free tanks
+// (all tanks are the same).
+function allianceCards() {
   const me = state.me;
-  const tanks = state.tanks.filter((t) => t.online || t.id === me.tank);
-  if (!tanks.length) return emptyNote('No tanks are switched on yet.');
-  return '<div class="tank-grid">' + tanks.map((t) => {
-    const mine = t.id === me.tank;
-    const crew = t.gunner ? `${esc(t.player)} + ${esc(t.gunner)}` : esc(t.player);
-    let action = 'pick', tank = t.id, cls = '', sub = 'Free', disabled = false;
-    if (!t.online) {
-      sub = 'Offline';
-    } else if (mine && me.role === 'gunner') {
-      action = 'leave-gunner'; cls = 'mine'; sub = `Gunner with ${esc(t.player)}: tap to leave`;
-    } else if (mine) {
-      tank = ''; cls = 'mine'; sub = t.gunner ? `${crew}: tap to give up` : 'Your tank: tap to give up';
-    } else if (t.player && state.twoPlayer && t.allowGunner && !t.gunner) {
-      action = 'join-gunner'; cls = 'join'; sub = `${crew} drives: tap to be gunner`;
-    } else if (t.player) {
-      cls = 'taken'; sub = crew; disabled = true;
-    }
-    return `<button type="button" class="tank-card ${cls}" data-action="${action}" data-tank="${esc(tank)}" ${disabled ? 'disabled' : ''}>
-      <span class="name">${esc(t.name)}</span>
-      <span class="sub" ${allianceStyle(t.allianceIndex)}>${esc(t.alliance || 'No alliance')}</span>
-      <span class="sub">${sub}</span></button>`;
-  }).join('') + '</div>';
+  const cards = state.alliances.map((a, i) => {
+    const tanks = state.tanks.filter((t) => t.online && t.allianceIndex === i);
+    const free = tanks.filter((t) => !t.player).length;
+    const players = state.players.filter((p) => p.alliance === a.name).length;
+    const mine = !!me.tank && me.role !== 'gunner' && me.allianceIndex === i;
+    const sub = mine ? 'Your alliance' : free ? `${free} free ${free === 1 ? 'tank' : 'tanks'}` : tanks.length ? 'All tanks taken' : 'No tanks';
+    return `<button type="button" class="alliance-pick ${mine ? 'mine' : ''}" style="--ac:${esc(a.color)}"
+        data-action="${mine ? '' : 'pick-alliance'}" data-alliance="${esc(a.id)}" ${!mine && !free ? 'disabled' : ''}>
+      <span class="name">${esc(a.name)}</span>
+      <span class="sub">${sub}</span>
+      <span class="sub">${players} ${players === 1 ? 'player' : 'players'}</span></button>`;
+  }).join('');
+  return `<div class="alliance-grid">${cards}</div>${gunnerCards()}`;
 }
 
-// myTankCard: your tank and crew, with the 2-player choices.
+// gunnerCards (2-player tanks): tanks whose driver wants a gunner.
+function gunnerCards() {
+  const me = state.me;
+  if (!state.twoPlayer) return '';
+  const tanks = state.tanks.filter((t) => t.online && t.player && t.allowGunner && !t.gunner && t.id !== me.tank);
+  if (!tanks.length) return '';
+  return `<h3 class="section-h">Be a gunner</h3><div class="tank-grid">${tanks.map((t) =>
+    `<button type="button" class="tank-card join" data-action="join-gunner" data-tank="${esc(t.id)}">
+      <span class="name">${esc(t.name)}</span>
+      <span class="sub" ${allianceStyle(t.allianceIndex)}>${esc(t.alliance || 'No alliance')}</span>
+      <span class="sub">${esc(t.player)} drives: tap to be gunner</span></button>`).join('')}</div>`;
+}
+
+// myTankCard: your tank, its lobby colour and crew, with the 2-player choices.
 function myTankCard() {
   const me = state.me;
   if (!me.tank) {
-    return `<div class="big-status"><div class="title">Choose your tank</div>
-      <div class="detail">${state.twoPlayer ? 'Tap a free tank to drive it, or a dashed one to be its gunner' : 'Each tank&rsquo;s alliance is shown on its card'}</div></div>`;
+    return `<div class="big-status"><div class="title">Choose your alliance</div>
+      <div class="detail">You&rsquo;ll be given one of its tanks${state.twoPlayer ? ', or join a tank as its gunner' : ''}</div></div>`;
   }
   const role = me.role === 'gunner' ? `Gunner &middot; ${esc(me.partner)} drives`
     : me.role === 'driver' ? `Driver &middot; ${esc(me.partner)} is your gunner` : 'You drive and shoot';
@@ -365,14 +369,20 @@ function myTankCard() {
   if (state.twoPlayer && me.role !== 'gunner') {
     crew += `<label class="chk"><input type="checkbox" data-action="allow-gunner" ${me.allowGunner ? 'checked' : ''}> Let a second player be my gunner</label>`;
   }
-  if (me.partner) {
-    crew += `<div class="btn-row" style="margin-top:6px"><button class="btn small secondary" type="button" data-action="swap-roles">Swap roles</button></div>`;
-  }
+  const btns = [];
+  if (me.partner) btns.push('<button class="btn small secondary" type="button" data-action="swap-roles">Swap roles</button>');
+  btns.push(me.role === 'gunner'
+    ? '<button class="btn small secondary" type="button" data-action="leave-gunner">Leave this tank</button>'
+    : '<button class="btn small secondary" type="button" data-action="give-up-tank">Give up tank</button>');
+  const glow = me.tankColor
+    ? `<div class="glow-line" style="color:${esc(me.tankColorCss)};text-shadow:0 0 12px ${esc(me.tankColorCss)}88">Your tank is glowing ${esc(me.tankColor)}!</div>` : '';
   return `<div class="card"><div class="timer-row"><div>
       <div style="font-size:1.3rem;font-weight:800">${esc(me.tankName)}</div>
       <div class="sub" style="font-weight:700" ${allianceStyle(me.allianceIndex)}>${esc(me.alliance || 'No alliance')}</div></div>
       <div class="end" style="text-align:right;color:var(--muted);font-size:.9rem">${role}</div></div>
-      ${crew ? `<div style="margin-top:8px">${crew}</div>` : ''}</div>`;
+      ${glow}
+      ${crew ? `<div style="margin-top:8px">${crew}</div>` : ''}
+      <div class="btn-row" style="margin-top:8px">${btns.join('')}</div></div>`;
 }
 
 function playerRows(players, extra) {
@@ -392,16 +402,16 @@ function playerRows(players, extra) {
 function renderLobby() {
   const me = state.me;
   const tabs = [
-    { id: 'tanks', label: 'Robots', count: state.tanks.filter((t) => t.online).length },
+    { id: 'tanks', label: 'Alliances' },
     { id: 'players', label: 'Players', count: state.players.length },
   ];
   const tab = currentTab('lobby', tabs);
   renderTabs($('lobby-tabs'), 'lobby', tabs, tab);
   $('lobby-info').textContent = me.name;
   setHTML($('lobby-body'), tab === 'tanks'
-    ? `${myTankCard()}${tankCards()}`
+    ? `${myTankCard()}${allianceCards()}`
     : playerRows(state.players));
-  $('lobby-mid').textContent = me.tank ? 'Waiting for the host to start' : 'Choose a tank';
+  $('lobby-mid').textContent = me.tank ? 'Waiting for the host to start' : 'Choose an alliance';
 }
 
 // ── Game Over / Stats ────────────────────────────────────────────────────────
@@ -641,7 +651,9 @@ function hostTankRow(t) {
           <button class="btn small secondary" type="button" data-action="host-damage" data-tank="${esc(t.id)}" data-dir="S">Damage R</button>
           <button class="btn small primary" type="button" data-action="host-heal" data-tank="${esc(t.id)}">${t.life === 'alive' ? 'Heal' : 'Resurrect'}</button>
         </div>
-        <p class="hint" style="margin-top:6px">IR sensor hit: ${esc(t.lastHit || 'none yet')}</p>`;
+        <div class="compass-row">${irCompass(t, 76)}
+          <p class="hint">Last hit: ${t.lastHitDir ? `${{ N: 'front', E: 'right side', S: 'rear', W: 'left side' }[t.lastHitDir]}, sensors ${esc(t.lastHit.replace(/^.*sensors /, '').replace(')', ''))}` : 'none yet'}<br>
+          Ring: the sensors that saw it. Middle: the side it counted as.</p></div>`;
     }
     tools += `<h4>Flip</h4>
       <div class="chk-grid">${chk('invThrottle', 'Drive forward/back')}${chk('invSteer', 'Drive left/right')}${chk('invTurret', 'Turret')}
@@ -666,9 +678,31 @@ function hostTankRow(t) {
   return `<details class="item" data-row="tank-${esc(t.id)}" ${openRows.has('tank-' + t.id) ? 'open' : ''}>
     <summary><span class="dot ${t.online ? '' : 'off'}"></span>
       <div class="main"><div class="name">${esc(t.name)}</div>
-      <div class="sub"><span ${allianceStyle(t.allianceIndex)}>${esc(t.alliance || 'No alliance')}</span> &middot; ${crew}</div></div>
-      <span class="end">${status}</span></summary>
+      <div class="sub"><span ${allianceStyle(t.allianceIndex)}>${esc(t.alliance || 'No alliance')}</span> &middot; ${crew}${
+        t.color ? ` &middot; <span style="color:${esc(t.colorCss)}">&#9679; ${esc(t.color)}</span>` : ''}</div></div>
+      <span class="end">${status}</span>${inGame && t.life ? irCompass(t, 30) : ''}</summary>
     <div class="tools">${tools}</div></details>`;
+}
+
+// irCompass draws a robot's last hit, like the Unity operator screen: the
+// outer ring is its 8 IR sensors (lit = saw the shot), the middle squares
+// the side the hit counted as. It flashes for a moment after a new hit.
+const compassFlash = {}; // tank id → { hits, until }
+function irCompass(t, size) {
+  const mask = t.lastHitMask || 0;
+  const hits = t.hits || 0;
+  const f = compassFlash[t.id] || { hits: 0, until: 0 };
+  if (hits > f.hits) compassFlash[t.id] = { hits, until: performance.now() + 1200 };
+  const fresh = performance.now() < (compassFlash[t.id] || f).until;
+  const dots = [...Array(8)].map((_, i) => {
+    const a = i * Math.PI / 4; // bit 0 = N (front), clockwise
+    return `<circle cx="${(50 + 38 * Math.sin(a)).toFixed(1)}" cy="${(50 - 38 * Math.cos(a)).toFixed(1)}" r="9" class="${mask & (1 << i) ? 'on' : ''}"/>`;
+  }).join('');
+  const sides = { N: [50, 30], E: [70, 50], S: [50, 70], W: [30, 50] };
+  const marks = Object.entries(sides).map(([d, [x, y]]) =>
+    `<rect x="${x - 7}" y="${y - 7}" width="14" height="14" rx="2" class="${d === t.lastHitDir ? 'on' : ''}"/>`).join('');
+  return `<svg class="compass ${fresh ? 'fresh' : ''}" viewBox="0 0 100 100" width="${size}" height="${size}" role="img"
+    aria-label="Last hit: ${esc(t.lastHitDir || 'none')}">${dots}${marks}</svg>`;
 }
 
 function allianceSelect(t) {
@@ -710,7 +744,7 @@ function hostPlayCard() {
   const me = state.me;
   const playing = !!me.status;
   const body = playing
-    ? (state.phase === 'lobby' ? `${myTankCard()}${tankCards()}` : `<p class="hint">Playing as <b>${esc(me.name)}</b>.</p>`)
+    ? (state.phase === 'lobby' ? `${myTankCard()}${allianceCards()}` : `<p class="hint">Playing as <b>${esc(me.name)}</b>.</p>`)
     : `<label class="field">Your player name<input type="text" id="host-play-name" maxlength="16" value="${esc(store('tg_player_name') || '')}"></label>`;
   return `<div class="card">
     <div class="srow" style="padding:0 0 8px;border:0"><span>Server as player</span>
@@ -865,7 +899,10 @@ function advancedSettings() {
         <div class="settings-grid">
         ${field('Frames per second', 'tuning.videoFps', 'int', 'min="1" max="30"')}
         ${field('Frame size (0 smallest)', 'tuning.videoFrameSize', 'int', 'min="0" max="13"')}
-        ${field('JPEG quality (4-63)', 'tuning.videoQuality', 'int', 'min="4" max="63"')}</div>`;
+        ${field('JPEG quality (4-63)', 'tuning.videoQuality', 'int', 'min="4" max="63"')}
+        <div class="wide">${check('Keep cameras on between games', 'camerasAlwaysOn')}</div></div>
+        <p class="hint" style="margin-top:8px">Normally a robot&rsquo;s camera is only on while it&rsquo;s in a game (less Wi-Fi traffic and heat).
+        Switch this on to use the video test page or a load test.</p>`;
       break;
     case 'shots':
       html = `<p class="hint">The IR shot handshake, in milliseconds. Only change these if hits go missing.</p>
@@ -996,12 +1033,17 @@ function fmtClock(ms) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 
-// The host's clocks tick between snapshots.
+// The host's clocks tick between snapshots, and turn red and flash for the
+// last 10 seconds of a game.
 setInterval(() => {
   if (shownScreen !== 'host') return;
+  const ms = remainingMs();
+  const urgent = state && state.phase === 'playing' && !state.paused && ms <= 10000;
   for (const id of ['host-timer', 'host-timer-big']) {
     const el = $(id);
-    if (el) el.textContent = fmtClock(remainingMs());
+    if (!el) continue;
+    el.textContent = fmtClock(ms);
+    el.classList.toggle('urgent', urgent);
   }
 }, 250);
 
@@ -1038,6 +1080,8 @@ document.addEventListener('click', (e) => {
       if (confirm('Leave the game?')) { send({ t: 'leave' }); localView = homeView(); }
       break;
     case 'pick': send({ t: 'pick_tank', tank }); break;
+    case 'pick-alliance': send({ t: 'pick_alliance', alliance: el.dataset.alliance }); break;
+    case 'give-up-tank': send({ t: 'pick_alliance', alliance: '' }); break;
     case 'join-gunner': send({ t: 'join_gunner', tank }); break;
     case 'leave-gunner': send({ t: 'leave_gunner' }); break;
     case 'allow-gunner': send({ t: 'allow_gunner', on: el.checked }); break;

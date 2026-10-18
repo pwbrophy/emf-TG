@@ -315,15 +315,19 @@ function connectAll() {
   for (let i = 0; i < COUNT; i++) setTimeout(() => connectPlayer(i), i * 150);
 }
 
-// Choose Tanks: each player in the Client Lobby without a tank takes the
-// first free one, one after another so they don't pick the same tank.
+// Choose Tanks: each player in the Client Lobby without a tank chooses an
+// alliance (taking turns between them) and is given one of its free tanks.
 function chooseTanks() {
   let i = 0;
   function next() {
     if (i >= COUNT) return;
+    const n = i;
     const doc = frameDoc(i++);
-    const card = doc && !doc.querySelector('.tank-card.mine') &&
-      doc.querySelector('#screen-lobby.active .tank-card[data-action="pick"]:not([disabled])');
+    let card = null;
+    if (doc && doc.querySelector('#screen-lobby.active') && !doc.querySelector('.alliance-pick.mine')) {
+      const cards = [...doc.querySelectorAll('.alliance-pick[data-action="pick-alliance"]:not([disabled])')];
+      card = cards.length ? cards[n % cards.length] : null;
+    }
     if (card) card.click();
     setTimeout(next, card ? 400 : 0);
   }

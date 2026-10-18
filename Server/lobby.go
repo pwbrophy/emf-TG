@@ -18,21 +18,22 @@ import (
 	"sort"
 )
 
-// The Unity version's ten colours: LED levels and the colour for screens.
+// The Unity version's ten colours: LED levels and the colour for screens
+// (the same as the in-game page's TANK_COLOR_CSS).
 var tankColors = []struct {
 	name    string
 	r, g, b int
 	css     string
 }{
-	{"RED", 255, 0, 0, "#ff3b3b"},
-	{"GREEN", 0, 200, 0, "#2fd52f"},
-	{"BLUE", 0, 0, 255, "#4d7dff"},
+	{"RED", 255, 0, 0, "#ff4040"},
+	{"GREEN", 0, 200, 0, "#00c800"},
+	{"BLUE", 0, 0, 255, "#4488ff"},
 	{"YELLOW", 255, 200, 0, "#ffc800"},
 	{"CYAN", 0, 220, 255, "#00dcff"},
-	{"PINK", 255, 0, 180, "#ff4fc8"},
-	{"ORANGE", 255, 70, 0, "#ff7a2e"},
-	{"PURPLE", 50, 0, 255, "#9a6bff"},
-	{"LIME", 80, 255, 0, "#8cff3a"},
+	{"PINK", 255, 0, 180, "#ff00b4"},
+	{"ORANGE", 255, 70, 0, "#ff4600"},
+	{"PURPLE", 50, 0, 255, "#3200ff"},
+	{"LIME", 80, 255, 0, "#50ff00"},
 	{"WHITE", 255, 255, 255, "#ffffff"},
 }
 

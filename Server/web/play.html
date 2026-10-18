@@ -2178,7 +2178,7 @@ class TGHub {
 let tgState = null, tgStateAt = 0;
 let tgCountdownShown = false, tgLastCount = 0;
 let tgStarted = false, tgLastTimerSec = -1, tgOver = false, tgLastHp = -1;
-let tgPaused = false, tgControls = '';
+let tgPaused = false, tgControls = '', tgTankColor = null;
 
 function tgRemainingMs() {
   if (!tgState) return 0;
@@ -2206,6 +2206,13 @@ function tgOnMessage(hub, m) {
   myRobotId  = me.tankName || me.tank || '';
   myAlliance = me.alliance ? me.allianceIndex : -1;
   document.getElementById('tg-host-btn').style.display = me.isHost ? '' : 'none';
+
+  // The colour this player's tank glows in the lobby and countdown ("Your
+  // tank is glowing RED!" on the countdown screen).
+  if ((me.tankColor || '') !== tgTankColor) {
+    tgTankColor = me.tankColor || '';
+    hub.emit('TankColor', tgTankColor);
+  }
 
   // The host's Advanced settings: joystick and turret feel, debug button.
   const c = m.controls;

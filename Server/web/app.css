@@ -911,3 +911,45 @@ input[type="color"] {
 }
 
 .form .bolt { margin: 0 auto 4px; }
+
+/* ── Client Lobby: choose an alliance ────────────────────── */
+
+.alliance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+
+.alliance-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 92px;
+  padding: 12px 14px;
+  border: 2px solid var(--ac);
+  border-left-width: 8px;
+  border-radius: 14px;
+  background: var(--surface2);
+  text-align: left;
+}
+
+.alliance-pick .name { color: var(--ac); font-size: 1.15rem; font-weight: 800; }
+.alliance-pick .sub { color: var(--muted); font-size: 0.85rem; }
+.alliance-pick.mine { background: color-mix(in srgb, var(--ac) 22%, var(--surface2)); }
+.alliance-pick.mine .sub:first-of-type { color: var(--text); font-weight: 700; }
+.alliance-pick:disabled { opacity: 0.4; }
+
+.section-h { margin: 14px 0 8px; color: var(--muted); font-size: 0.8rem; letter-spacing: 0.2em; text-transform: uppercase; }
+
+.glow-line { margin-top: 8px; font-size: 1.1rem; font-weight: 800; }
+
+/* ── Host: IR hit compass, urgent timer ──────────────────── */
+
+.compass { flex: none; }
+.compass circle, .compass rect { fill: var(--surface); stroke: var(--border); stroke-width: 2; }
+.compass circle.on { fill: #22d3ee; stroke: #22d3ee; }
+.compass rect.on { fill: #facc15; stroke: #facc15; }
+.compass.fresh { animation: compass-flash 0.4s ease-in-out 3; }
+@keyframes compass-flash { 50% { opacity: 0.25; } }
+.compass-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.compass-row .hint { margin: 0; }
+
+.urgent { color: var(--bad); animation: urgent-flash 0.5s infinite alternate; }
+@keyframes urgent-flash { to { opacity: 0.45; } }
