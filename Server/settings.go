@@ -51,7 +51,12 @@ type Settings struct {
 	RfidTags []RfidTag `json:"rfidTags"`
 
 	TwoPlayerTanks bool `json:"twoPlayerTanks"` // a second player can join a tank as gunner
-	DebugConsole   bool `json:"debugConsole"`   // the "DBG" log button on players' phones
+
+	// Tank cameras normally stream only while their tank is in a game. On =
+	// every camera streams all the time (for the video test page and load
+	// tests).
+	CamerasAlwaysOn bool `json:"camerasAlwaysOn"`
+	DebugConsole    bool `json:"debugConsole"` // the "DBG" log button on players' phones
 
 	Tuning Tuning `json:"tuning"` // Advanced: how tanks and controls behave
 }

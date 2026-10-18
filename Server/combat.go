@@ -147,6 +147,7 @@ type combatant struct {
 	invulnUntil time.Time // zero = not invulnerable
 
 	lastHitDir  string // for the host's "IR sensor hit display"
+	hits        int    // hits taken (the host's compass flashes on each new one)
 	lastHitMask byte
 }
 
@@ -334,6 +335,7 @@ func (g *game) applyHit(shooter, target *combatant, mask byte, dir string) (int,
 	dmg := g.damageFor(dir)
 	target.hp = max(0, target.hp-dmg)
 	target.lastHitDir, target.lastHitMask = dir, mask
+	target.hits++
 
 	shooterName := ""
 	if shooter != nil {

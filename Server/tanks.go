@@ -11,9 +11,11 @@ package main
 //     http://<tank-ip>:81/stream. We pull that one stream into the relay,
 //     which fans it out to every viewer. The tank's camera server can only
 //     serve one client at a time, so the relay must be that single client.
+//     The game switches each camera on only while it's needed (setStreaming),
+//     as the Unity version did: idle cameras just add Wi-Fi traffic and heat.
 //
-// For now only video is wired up: no driving, firing or game state. Motors
-// stay off (the firmware boots and reconnects with them disabled).
+// Motors stay off until the game turns them on (the firmware boots and
+// reconnects with them disabled).
 
 import (
 	"context"
@@ -86,6 +88,14 @@ type tankSession struct {
 	// Commands queued for the tank. Sending never blocks the caller (the game
 	// holds its lock while sending); a writer goroutine drains this.
 	out chan []byte
+
+	// Camera: wantVideo says whether it should be streaming; videoWake wakes
+	// the video puller when it's switched on; pullCancel stops the current
+	// pull when it's switched off.
+	wantVideo  atomic.Bool
+	videoWake  chan struct{}
+	pullMu     sync.Mutex
+	pullCancel context.CancelFunc
 
 	fake func(msg []byte) // a fake tank's pretend reaction to commands
 }
@@ -296,7 +306,7 @@ type tankReport struct {
 func (tm *tankManager) add(id, name, ip string, c *websocket.Conn) *tankSession {
 	ctx, stop := context.WithCancel(context.Background())
 	sess := &tankSession{id: id, name: name, ip: ip, conn: c, connectedAt: time.Now(), stop: stop,
-		out: make(chan []byte, 64)}
+		out: make(chan []byte, 64), videoWake: make(chan struct{}, 1)}
 	sess.lastSeen.Store(time.Now().UnixNano())
 
 	tm.mu.Lock()
@@ -330,9 +340,15 @@ func (tm *tankManager) addFake(id, name string) {
 	tm.announce(sess)
 }
 
-// announce turns a newly registered tank's camera on and tells the game.
+// announce tells the game about a newly registered tank (the game decides
+// whether its camera should be on). With no game listening, the camera is
+// simply switched on.
 func (tm *tankManager) announce(sess *tankSession) {
-	sess.send(`{"cmd":"stream_on"}`)
+	if tm.onConnected == nil {
+		sess.setStreaming(true)
+	} else {
+		sess.send(`{"cmd":"stream_off"}`) // a reconnecting tank may still be streaming
+	}
 	if tm.onChange != nil {
 		tm.onChange()
 	}
@@ -408,6 +424,36 @@ func (tm *tankManager) setFlags(id string, f tankFlags) {
 		b2i(f.InvThrottle), b2i(f.InvSteer), b2i(f.InvTurret)))
 }
 
+// setStreaming switches a tank's camera on or off.
+func (tm *tankManager) setStreaming(id string, on bool) {
+	tm.mu.Lock()
+	s := tm.tanks[id]
+	tm.mu.Unlock()
+	if s != nil {
+		s.setStreaming(on)
+	}
+}
+
+func (s *tankSession) setStreaming(on bool) {
+	if s.wantVideo.Swap(on) == on {
+		return
+	}
+	if on {
+		s.send(`{"cmd":"stream_on"}`)
+		select {
+		case s.videoWake <- struct{}{}:
+		default:
+		}
+		return
+	}
+	s.send(`{"cmd":"stream_off"}`)
+	s.pullMu.Lock()
+	if s.pullCancel != nil {
+		s.pullCancel()
+	}
+	s.pullMu.Unlock()
+}
+
 // sendTo queues a JSON command for a tank. False if the tank isn't connected.
 func (tm *tankManager) sendTo(id, msg string) bool {
 	tm.mu.Lock()
@@ -468,15 +514,32 @@ func (s *tankSession) writeLoop(ctx context.Context) {
 
 // ── Video pull ───────────────────────────────────────────────────────────────
 
-// pullVideo keeps one connection open to the tank's camera and feeds every
-// frame into the relay, reconnecting after a stall or error, until the
-// tank's control session ends.
+// pullVideo keeps one connection open to the tank's camera while it is
+// switched on, feeding every frame into the relay and reconnecting after a
+// stall or error, until the tank's control session ends.
 func (s *tankSession) pullVideo(ctx context.Context, out *stream) {
 	url := videoURL(s.ip)
 	for ctx.Err() == nil {
-		frames, err := s.pullOnce(ctx, url, out)
+		if !s.wantVideo.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.videoWake:
+			}
+			continue
+		}
+		pctx, pcancel := context.WithCancel(ctx)
+		s.pullMu.Lock()
+		s.pullCancel = pcancel
+		s.pullMu.Unlock()
+		frames, err := s.pullOnce(pctx, url, out)
+		pcancel()
 		if ctx.Err() != nil {
 			return
+		}
+		if !s.wantVideo.Load() {
+			log.Printf("[Video] %s: camera switched off after %d frames", s.label(), frames)
+			continue
 		}
 		log.Printf("[Video] %s: camera stream ended after %d frames (%v), reconnecting", s.label(), frames, quietErr(err))
 		select {

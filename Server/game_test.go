@@ -16,6 +16,7 @@ type fakeTanks struct {
 	ts     []tankInfo
 	sent   []string             // "id cmd-json"
 	onSend func(id, msg string) // optional: play the tank's part (called without locks)
+	camera map[string]bool      // camera on?
 }
 
 func (f *fakeTanks) list() []tankInfo {
@@ -59,6 +60,32 @@ func (f *fakeTanks) setFlags(id string, fl tankFlags) {
 
 func (f *fakeTanks) setVideo(id string, fps, size, q int) {
 	f.sendTo(id, fmt.Sprintf(`{"cmd":"set_video","fps":%d,"framesize":%d,"quality":%d}`, fps, size, q))
+}
+
+// setStreaming records camera switches as stream_on / stream_off, like the
+// real tank manager (only when the state changes).
+func (f *fakeTanks) setStreaming(id string, on bool) {
+	f.mu.Lock()
+	if f.camera == nil {
+		f.camera = map[string]bool{}
+	}
+	was, known := f.camera[id]
+	f.camera[id] = on
+	f.mu.Unlock()
+	if known && was == on || !known && !on {
+		return
+	}
+	if on {
+		f.sendTo(id, `{"cmd":"stream_on"}`)
+	} else {
+		f.sendTo(id, `{"cmd":"stream_off"}`)
+	}
+}
+
+func (f *fakeTanks) cameraOn(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.camera[id]
 }
 
 func (f *fakeTanks) count(substr string) int {

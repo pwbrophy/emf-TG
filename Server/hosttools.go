@@ -151,7 +151,16 @@ func (g *game) hostTool(c *client, m inMsg) {
 		if g.match != nil && (g.phase == phasePlaying || g.phase == phaseCountdown) && g.match.fighters[m.Tank] != nil {
 			return
 		}
-		g.tanks.sendTo(m.Tank, fmt.Sprintf(`{"cmd":"turret","speed":%.3f}`, clampUnit(m.S)))
+		// Outside a game the tank's motors are switched off: on while the
+		// button is held, off again when it's let go (as Unity did).
+		s := clampUnit(m.S)
+		if s != 0 {
+			g.tanks.sendTo(m.Tank, `{"cmd":"motors_on"}`)
+		}
+		g.tanks.sendTo(m.Tank, fmt.Sprintf(`{"cmd":"turret","speed":%.3f}`, s))
+		if s == 0 {
+			g.tanks.sendTo(m.Tank, `{"cmd":"motors_off"}`)
+		}
 	case "host_tank_resync":
 		g.sendTuning(m.Tank, false)
 

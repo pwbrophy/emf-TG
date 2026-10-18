@@ -63,6 +63,7 @@ type tankControl interface {
 	rename(id, name string)
 	setFlags(id string, f tankFlags)
 	setVideo(id string, fps, frameSize, quality int)
+	setStreaming(id string, on bool)
 }
 
 type player struct {
@@ -138,6 +139,12 @@ type game struct {
 	pingSent map[string]time.Time
 	pingMs   map[string]int
 
+	// Tank colours in the lobby (colors.go): tank id → its colour, and the
+	// colour each tank was last told to show (index+1, 0 = none).
+	tankColor  map[string]int
+	nextColor  int
+	colorShown map[string]int
+
 	clients     map[*client]struct{}
 	lastDisplay time.Time
 }
@@ -154,6 +161,8 @@ func newGame(tanks tankControl, settingsPath string) *game {
 		pingSent:     map[string]time.Time{},
 		pingMs:       map[string]int{},
 		rfidSeen:     map[string]rfidScan{},
+		tankColor:    map[string]int{},
+		colorShown:   map[string]int{},
 		clients:      map[*client]struct{}{},
 	}
 	g.ir = newIrScheduler(g)
@@ -248,6 +257,8 @@ func (g *game) handle(c *client, m inMsg) {
 		g.removePlayer(c.device)
 	case "pick_tank":
 		g.pickTank(c, m.Tank)
+	case "pick_alliance":
+		g.pickAlliance(c, m.Alliance)
 	case "allow_gunner":
 		g.allowGunner(c, m.On)
 	case "join_gunner":
@@ -347,6 +358,7 @@ func (g *game) saveNewSettings(s Settings) {
 	saveSettings(g.settingsPath, s)
 	log.Printf("[Game] host changed settings")
 	g.pushTuning(old.Tuning)
+	g.syncCameras() // "keep cameras on" may have changed
 }
 
 // ── Joining and leaving ──────────────────────────────────────────────────────
@@ -678,12 +690,16 @@ func (g *game) tanksChanged() {
 }
 
 // tankConnected is called when a tank (re)connects: it gets the host's
-// tuning, and a tank in the running game gets its motors back, so a tank
-// that rebooted mid-game can carry on.
+// tuning, its camera on or off and its lobby colour, and a tank in the
+// running game gets its motors back, so a tank that rebooted mid-game can
+// carry on.
 func (g *game) tankConnected(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.sendTuning(id, true)
+	g.tanks.setStreaming(id, g.cameraWanted(id))
+	delete(g.colorShown, id) // a rebooted tank has forgotten its colour
+	g.syncTankColors()
 	if g.phase == phasePlaying && g.match != nil {
 		if c := g.match.fighters[id]; c != nil {
 			// Exploding (and paused) tanks stay still; everyone else can drive.
@@ -855,8 +871,10 @@ func (g *game) beginPlay() {
 	g.setPhase(phasePlaying)
 	g.phaseEndsAt = time.Now().Add(time.Duration(g.settings.MatchSeconds) * time.Second)
 	for _, t := range g.tanks.list() {
-		g.tanks.sendTo(t.ID, `{"cmd":"game_start_fanfare"}`)
+		g.tanks.sendTo(t.ID, `{"cmd":"game_start_fanfare"}`) // also clears the lobby colours
 	}
+	// Colours are given out afresh in the next lobby.
+	g.tankColor, g.nextColor, g.colorShown = map[string]int{}, 0, map[string]int{}
 	for _, p := range g.players {
 		if p.status == stPlaying && p.tank != "" && p.role != roleGunner {
 			g.tanks.sendTo(p.tank, `{"cmd":"motors_on"}`)
@@ -960,10 +978,12 @@ func (g *game) setPhase(ph phase) {
 		for _, t := range g.tanks.list() {
 			g.tanks.sendTo(t.ID, `{"cmd":"reset_idle"}`)
 		}
+		g.colorShown = map[string]int{} // reset_idle may have cleared them: send again
 	}
 	if ph != phasePlaying {
 		g.beaconsForPhase()
 	}
+	g.syncCameras()
 }
 
 // setPaused pauses or resumes the running game. While paused the tanks'
@@ -978,6 +998,7 @@ func (g *game) setPaused(on bool) {
 		for _, c := range g.match.fighters {
 			g.stopTank(c.tank)
 		}
+		g.syncCameras()
 		g.displayEvent("Game paused")
 		log.Printf("[Game] paused")
 		return
@@ -996,6 +1017,7 @@ func (g *game) setPaused(on bool) {
 			c.invulnUntil = c.invulnUntil.Add(d)
 		}
 	}
+	g.syncCameras()
 	g.displayEvent("Game resumed")
 	log.Printf("[Game] resumed after %.0fs", d.Seconds())
 }
@@ -1076,6 +1098,8 @@ type tankView struct {
 	Gunner        string `json:"gunner"`        // 2-player: the gunner
 	AllowGunner   bool   `json:"allowGunner"`
 	Online        bool   `json:"online"`
+	Color         string `json:"color,omitempty"`    // lobby colour its lights show, e.g. "RED"
+	ColorCSS      string `json:"colorCss,omitempty"` // that colour for the screen
 
 	// In a game:
 	Hp   int    `json:"hp,omitempty"`
@@ -1087,6 +1111,9 @@ type tankView struct {
 	PingMs           int        `json:"pingMs,omitempty"`
 	AllianceOverride bool       `json:"allianceOverride,omitempty"` // the host chose its alliance
 	LastHit          string     `json:"lastHit,omitempty"`          // side and sensor mask of the last hit
+	LastHitDir       string     `json:"lastHitDir,omitempty"`       // N, E, S, W
+	LastHitMask      int        `json:"lastHitMask,omitempty"`      // the 8 sensors: bit 0 N … bit 7 NW
+	Hits             int        `json:"hits,omitempty"`             // hits taken this game (the compass flashes on a new one)
 	Invulnerable     bool       `json:"invulnerable,omitempty"`
 }
 
@@ -1116,6 +1143,8 @@ type meView struct {
 	Role          string `json:"role"`              // "driver", "gunner", or "" (alone on the tank)
 	Partner       string `json:"partner,omitempty"` // the other crew member
 	AllowGunner   bool   `json:"allowGunner"`
+	TankColor     string `json:"tankColor,omitempty"`    // lobby: "your tank is glowing RED"
+	TankColorCSS  string `json:"tankColorCss,omitempty"` // that colour for the screen
 
 	// In a game:
 	Hp           int    `json:"hp"`
@@ -1244,6 +1273,7 @@ func (g *game) snapshot(device string) snapshot {
 	viewTank := func(id, name string, online bool) tankView {
 		a := g.allianceOf(id)
 		tv := tankView{ID: id, Name: name, Alliance: g.allianceName(a), AllianceIndex: a, Online: online}
+		tv.Color, tv.ColorCSS = g.lobbyColor(id)
 		if p := g.tankOwner(id); p != nil {
 			tv.Player, tv.AllowGunner = p.name, p.allowGunner
 		}
@@ -1257,6 +1287,7 @@ func (g *game) snapshot(device string) snapshot {
 					tv.Invulnerable = c.invulnerable(time.Now())
 					if c.lastHitDir != "" {
 						tv.LastHit = fmt.Sprintf("%s (sensors %08b)", c.lastHitDir, c.lastHitMask)
+						tv.LastHitDir, tv.LastHitMask, tv.Hits = c.lastHitDir, int(c.lastHitMask), c.hits
 					}
 				}
 			}
@@ -1320,6 +1351,9 @@ func (g *game) snapshot(device string) snapshot {
 		s.Me.Tank = p.tank
 		s.Me.TankName = g.tankNames[p.tank]
 		s.Me.AllowGunner = p.allowGunner
+		if p.tank != "" {
+			s.Me.TankColor, s.Me.TankColorCSS = g.lobbyColor(p.tank)
+		}
 		if p.tank != "" {
 			s.Me.AllianceIndex = g.allianceOf(p.tank)
 			s.Me.Alliance = g.allianceName(s.Me.AllianceIndex)
@@ -1390,8 +1424,10 @@ func (g *game) sortedPlayers() []*player {
 }
 
 // broadcast sends every open page its snapshot (the display its update).
-// Caller holds g.mu.
+// Every change ends here, so it also brings the tanks' lobby colours up to
+// date. Caller holds g.mu.
 func (g *game) broadcast() {
+	g.syncTankColors()
 	cache := map[string][]byte{}
 	for c := range g.clients {
 		if c.display {
