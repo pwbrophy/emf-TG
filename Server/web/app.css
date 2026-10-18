@@ -119,6 +119,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 
 .content.center > * { width: 100%; }
+.content.center > .bolt { width: clamp(44px, 10vw, 80px); }
 
 .navbar {
   flex: none;
@@ -635,6 +636,7 @@ select {
 .results { width: 100%; border-collapse: collapse; }
 .results th, .results td { padding: 7px 6px; border-bottom: 1px solid var(--border); text-align: left; }
 .results th { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.results td:nth-child(2) { white-space: nowrap; }
 .results td.num, .results th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .game-over {

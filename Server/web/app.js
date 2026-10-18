@@ -629,13 +629,13 @@ function hostTankRow(t) {
     <div class="tools">${tools}</div></details>`;
 }
 
-function teamSelect(t) {
+function teamSelect(t, short) {
   const n = state.teamNames;
   const auto = t.teamOverride ? -1 : t.teamIndex;
   const disabled = state.phase === 'playing' || state.phase === 'countdown' ? 'disabled' : '';
   const opt = (v, label) => `<option value="${v}" ${(t.teamOverride ? t.teamIndex : -1) === v ? 'selected' : ''}>${esc(label)}</option>`;
   return `<select data-action="tank-team" data-tank="${esc(t.id)}" aria-label="Team" ${disabled}>
-    ${opt(-1, 'Team from its name' + (auto >= 0 && !t.teamOverride ? ` (${n[auto]})` : ''))}${opt(0, n[0])}${opt(1, n[1])}</select>`;
+    ${opt(-1, short ? 'Auto' : 'Team from its name' + (auto >= 0 && !t.teamOverride ? ` (${n[auto]})` : ''))}${opt(0, n[0])}${opt(1, n[1])}</select>`;
 }
 
 function hostTanksTab() {
@@ -662,14 +662,14 @@ function hostTeamsTab() {
     const tanks = state.tanks.filter((t) => t.teamIndex === i);
     const rows = tanks.map((t) => `<div class="item"><div class="main"><div class="name">${esc(t.name)}</div>
         <div class="sub">${t.player ? esc(t.player) + (t.gunner ? ' + ' + esc(t.gunner) : '') : 'free'}</div></div>
-        <div style="width:150px">${teamSelect(t)}</div></div>`).join('');
+        <div style="width:140px">${teamSelect(t, true)}</div></div>`).join('');
     return `<div class="card"><h3 class="${teamIdxClass(i)}">Team ${i + 1}</h3>
       <div class="inline-form" style="margin-bottom:8px"><input type="text" maxlength="24" value="${esc(n[i])}" data-set="teamNames.${i}" data-kind="text" aria-label="Team ${i + 1} name"></div>
       <div class="list">${rows || emptyNote('No tanks on this team.')}</div></div>`;
   };
   const none = state.tanks.filter((t) => t.teamIndex < 0);
   return `<div class="two-col">${col(0)}${col(1)}</div>
-    ${none.length ? `<div class="card"><h3>No team</h3><div class="list">${none.map((t) => `<div class="item"><div class="main"><div class="name">${esc(t.name)}</div></div><div style="width:150px">${teamSelect(t)}</div></div>`).join('')}</div>
+    ${none.length ? `<div class="card"><h3>No team</h3><div class="list">${none.map((t) => `<div class="item"><div class="main"><div class="name">${esc(t.name)}</div></div><div style="width:140px">${teamSelect(t, true)}</div></div>`).join('')}</div>
       <p class="hint" style="margin-top:6px">Tanks named Desert-&hellip; or Jungle-&hellip; join that team. These can't fight until they have one.</p></div>` : ''}`;
 }
 

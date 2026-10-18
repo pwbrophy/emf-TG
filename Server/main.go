@@ -43,6 +43,7 @@ func main() {
 	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
 	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
 	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")
+	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
@@ -50,6 +51,9 @@ func main() {
 	web, err := fs.Sub(webFiles, "web")
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *webDir != "" {
+		web = os.DirFS(*webDir)
 	}
 
 	_, portStr, err := net.SplitHostPort(*addr)

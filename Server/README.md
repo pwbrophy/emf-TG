@@ -25,13 +25,17 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 |---|---|
 | `game.go` | The game: host, queue, lobby, tank choice, countdown, play, game over |
 | `ir.go` | The IR shot handshake (left barrel, ack, listen, right barrel, listen) |
-| `combat.go` | HP, directional damage, death, return to base, respawn, invulnerability, team points, winner, stats |
+| `combat.go` | HP, directional damage, death, return to base, respawn, invulnerability, capture points, team points, winner, stats; crews (driver + gunner) |
+| `hosttools.go` | Host tools: pause, test hits, heal/revive, capture points by hand, each tank's flips/reversed controls/name/team, ping, turret test; Advanced tuning pushed to tanks; presets (`presets.json`) |
+| `beacons.go` | Capture-point LED beacons (`/beacon`): owner colours, capture and score ripples |
+| `display.go` | The spectator display's feed and the announcer lines (from Unity) |
 | `fake.go` | Pretend IR for `-fake-tanks`, and `POST /api/dev/rfid` to pretend a tag scan |
 | `client.go` | Phone pages' WebSocket (`/ws`): requests in, state snapshots out |
 | `tanks.go` | Tank discovery, control WebSocket (`/esp32`), command queue, video pull |
 | `video.go`, `stats.go` | Video relay to viewers; frame-rate and CPU stats |
 | `settings.go` | Host settings, saved to `settings.json` |
-| `web/index.html`, `app.js`, `app.css` | The phone app: menu, join, queue, lobby, results, host console |
+| `web/index.html`, `app.js`, `app.css` | The phone app: menu, join, queue, lobby, results, host console. Every screen: top bar, tabs, content, bottom bar with Back on the left and Next/Start on the right. Host settings save as soon as they change |
+| `web/display.html` | The spectator display for a big screen (the Unity-era page with its connection swapped for the Go server's) |
 | `web/play.html` | The in-game screen: the Unity-era player page kept as it was (controls, HUD, effects, keyboard/gamepad), with `TGHub` standing in for its SignalR connection. Players are sent here when their game starts |
 | `web/streams.html` | Video test page |
 | `cmd/loadtest` | Fake tanks and viewers for load tests |
@@ -48,8 +52,16 @@ hit anything. Base tags default to the ones in the Unity scene; the host can
 change them in Game settings, and the host's "RFID scans" list shows each
 tag a tank reads.
 
-Not built yet: capture points, pause, presets, tank tuning settings,
-2-player tanks, the spectator display.
+Capture points: driving over a point's tag (North / Centre / South) takes
+it; a team scores one point every 3 s per point held divided by the points
+it holds (Unity's rule). The LED beacons find the server by themselves and
+show each owner's colour.
+
+2-player tanks (host setting): a driver can let a second player join as
+gunner. The driver drives, the gunner turns the turret and fires; kills go
+to the gunner, deaths to both.
+
+Spectator display: open `/display.html` on a laptop or TV.
 
 ## Run on this PC
 
@@ -63,7 +75,8 @@ Without tanks: `go run . -addr 127.0.0.1:8090 -discovery-port 0 -fake-tanks 3`
 adds three pretend tanks, and `go run ./cmd/loadtest -server
 http://127.0.0.1:8090 -tanks 3 -phones 0 -display-fps 0 -hold 30m` gives
 them video. Add `?device=someone` to the page address to be a different
-"phone" in each browser tab.
+"phone" in each browser tab. `-web-dir web` serves the pages straight from
+the folder, so page edits show on reload without rebuilding.
 
 ## Put it on the router
 

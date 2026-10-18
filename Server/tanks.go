@@ -382,9 +382,8 @@ func (tm *tankManager) rename(id, name string) {
 	b, _ := json.Marshal(map[string]string{"cmd": "set_name", "name": name})
 	s.send(string(b))
 	tm.rl.get(id).setLabel(s.label())
-	if tm.onChange != nil {
-		tm.onChange()
-	}
+	// No onChange here: the game calls this while holding its lock, and
+	// sends everyone the new name itself.
 }
 
 // setFlags changes a tank's flips / reversed controls; the tank saves them.

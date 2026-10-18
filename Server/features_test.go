@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -351,5 +352,35 @@ func TestDisplayFeed(t *testing.T) {
 	if !strings.Contains(all, "Rear hit! Alice hits Bob from behind!") ||
 		!strings.Contains(all, "First blood — Alice eliminated Bob!") {
 		t.Fatalf("announcer: %s", all)
+	}
+}
+
+// Host tank tools with the real tank manager: none of them may call back
+// into the game while it holds its lock (renaming once froze the server).
+func TestHostToolsWithRealTankManager(t *testing.T) {
+	tm := newTankManager(newRelay(), filepath.Join(t.TempDir(), "none.txt"), 8088)
+	g := newGame(tm, filepath.Join(t.TempDir(), "settings.json"))
+	tm.onChange = g.tanksChanged
+	tm.onConnected = g.tankConnected
+	tm.onReport = g.tankMessage
+	tm.addFake("1", "Desert-01")
+	h := hostUp(t, g)
+
+	done := make(chan struct{})
+	go func() {
+		h.send(inMsg{T: "host_tank_rename", Tank: "1", Name: "Desert-07"})
+		h.send(inMsg{T: "host_tank_flags", Tank: "1", Flags: &tankFlags{VFlip: true}})
+		h.send(inMsg{T: "host_tank_ping", Tank: "1"})
+		h.send(inMsg{T: "host_tank_resync", Tank: "1"})
+		h.send(inMsg{T: "host_tank_identify", Tank: "1"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("host tank tools locked up the game")
+	}
+	if s := h.state(); s.Tanks[0].Name != "Desert-07" || !s.Tanks[0].Flags.VFlip {
+		t.Fatalf("tank after tools: %+v", s.Tanks[0])
 	}
 }
