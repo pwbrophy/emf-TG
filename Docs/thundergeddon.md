@@ -9,7 +9,7 @@
   * Custom ESP32 electronics, motor + turret control, and an IR “shooting / hit detection” system plus FPV camera streaming
   
   * Robots measure about 13cm long, 8cm wide and 8cm high
-  * Robots body is 3d printed PLA, created in OnShape
+  * Robots body is 3d printed in Sunlu PLA+, with the barrel in Sunlu Matte black, created in OnShape
   * Electronics designed in KiCad, manufactured by JLC PCB
   
   The prototype electronics are designed to be simple, rather than fully featured e.g. I have left out charging.
@@ -481,7 +481,7 @@ Two external 3mm through-hole 940nm IR leds will be soldered manually via ~10mm 
 
 **IR LED power tuning summary:**
 
-I have added through hole resistors to both LEDs ti tune the IR power.  Initially, self-triggering was caused by 940 nm IR leaking through the original black PLA turret/hull. Reprinting in **eSun ePLA Matte Black** resolved the leakage issue. With no added resistor, IR range was several metres and could reflect off walls behind a target, allowing indirect hits. Testing with an added **2 kΩ** series resistor reduced range to roughly **50 cm**, which was too short. An added **20 kΩ** resistor prevented hits entirely. Based on these tests, a mid-range reduction was chosen by adding **470 Ω** in series with each IR LED, which gave a good balance between usable range and reduced wall reflections.  This gives a range of about 180cm.  
+I have added through hole resistors to both LEDs ti tune the IR power.  Initially, self-triggering was caused by 940 nm IR leaking through the original barrel. Reprinting the barrel in **Sunlu Matte black** resolved the leakage issue (the rest of the body is Sunlu PLA+). With no added resistor, IR range was several metres and could reflect off walls behind a target, allowing indirect hits. Testing with an added **2 kΩ** series resistor reduced range to roughly **50 cm**, which was too short. An added **20 kΩ** resistor prevented hits entirely. Based on these tests, a mid-range reduction was chosen by adding **470 Ω** in series with each IR LED, which gave a good balance between usable range and reduced wall reflections.  This gives a range of about 180cm.  
 
 #### External RGB LED
 
