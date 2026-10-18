@@ -1,8 +1,10 @@
 package main
 
-// Capture-point beacons: the LED posts at North, Centre and South. They find
-// the server the same way tanks do (UDP discovery, kind "beacon"), connect to
-// /beacon and say hello with their point number (0 North, 1 Centre, 2 South).
+// Capture-point beacons: the LED posts. There are three, built as North,
+// Centre and South: each says hello with its number (0, 1, 2) after finding
+// the server the same way tanks do (UDP discovery, kind "beacon") and
+// connecting to /beacon. The host chooses which capture point each one shows
+// (CapturePoint.Beacon = number + 1).
 // The server only sends them lighting commands; the firmware is unchanged
 // from the Unity version:
 //
@@ -16,15 +18,41 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 )
 
-// Team colours on the beacon LEDs (as in Unity).
-var beaconColors = [2][3]int{{128, 55, 0}, {15, 80, 8}}
+var beaconNames = [3]string{"North", "Centre", "South"}
+
+// ledColor turns a screen colour ("#rrggbb") into beacon LED levels: gamma
+// corrected (LEDs look much brighter than screens at low levels) and capped
+// at 128 like the Unity version's colours.
+func ledColor(hex string) (r, g, b int) {
+	if len(hex) != 7 {
+		return 0, 0, 0
+	}
+	v, err := strconv.ParseUint(hex[1:], 16, 32)
+	if err != nil {
+		return 0, 0, 0
+	}
+	ch := [3]float64{float64(v >> 16 & 255), float64(v >> 8 & 255), float64(v & 255)}
+	var out [3]float64
+	top := 0.0
+	for i, c := range ch {
+		out[i] = math.Pow(c/255, 2.2)
+		top = max(top, out[i])
+	}
+	if top == 0 {
+		return 0, 0, 0
+	}
+	scale := func(x float64) int { return int(math.Round(x / top * 128)) }
+	return scale(out[0]), scale(out[1]), scale(out[2])
+}
 
 type beaconSession struct {
 	point int
@@ -98,7 +126,7 @@ func (bm *beaconManager) handle(w http.ResponseWriter, r *http.Request) {
 			delete(bm.points, sess.point)
 		}
 		bm.mu.Unlock()
-		log.Printf("[Beacons] %s point beacon disconnected", pointNames[sess.point])
+		log.Printf("[Beacons] %s point beacon disconnected", beaconNames[sess.point])
 	}()
 
 	for {
@@ -132,7 +160,7 @@ func (bm *beaconManager) handle(w http.ResponseWriter, r *http.Request) {
 		if old != nil {
 			old.stop()
 		}
-		log.Printf("[Beacons] %s point beacon connected (%s, %s)", pointNames[msg.Point], msg.ID, msg.IP)
+		log.Printf("[Beacons] %s point beacon connected (%s, %s)", beaconNames[msg.Point], msg.ID, msg.IP)
 		go func(s *beaconSession) {
 			for {
 				var m string
@@ -156,49 +184,71 @@ func (bm *beaconManager) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func colorCmd(cmd string, team int) string {
-	r, g, b := 0, 0, 0
-	if team == 0 || team == 1 {
-		r, g, b = beaconColors[team][0], beaconColors[team][1], beaconColors[team][2]
-	}
+func colorCmd(cmd string, r, g, b int) string {
 	return fmt.Sprintf(`{"cmd":"%s","r":%d,"g":%d,"b":%d}`, cmd, r, g, b)
 }
 
 // ── What the game tells the beacons (game.mu held) ──────────────────────────
 
-// beaconShowOwner lights a point in its owner's colour (unlit if nobody).
-func (g *game) beaconShowOwner(point, team int, animate bool) {
-	if animate && team >= 0 {
-		g.beacons.send(point, colorCmd("capture_ripple", team))
+// beaconOf is the beacon (0-2) showing a capture point, -1 if none.
+func (g *game) beaconOf(point int) int {
+	if point < 0 || point >= len(g.settings.CapturePoints) {
+		return -1
+	}
+	return g.settings.CapturePoints[point].Beacon - 1
+}
+
+// beaconShowOwner lights a point's beacon in its owner's colour (unlit if
+// nobody).
+func (g *game) beaconShowOwner(point, alliance int, animate bool) {
+	b := g.beaconOf(point)
+	if b < 0 {
 		return
 	}
-	g.beacons.send(point, colorCmd("set_color", team))
+	r, gr, bl := 0, 0, 0
+	if alliance >= 0 && alliance < len(g.settings.Alliances) {
+		r, gr, bl = ledColor(g.settings.Alliances[alliance].Color)
+	}
+	if animate && alliance >= 0 {
+		g.beacons.send(b, colorCmd("capture_ripple", r, gr, bl))
+		return
+	}
+	g.beacons.send(b, colorCmd("set_color", r, gr, bl))
 }
 
 func (g *game) beaconVpRipple(point int) {
-	g.beacons.send(point, `{"cmd":"vp_ripple"}`)
+	if b := g.beaconOf(point); b >= 0 {
+		g.beacons.send(b, `{"cmd":"vp_ripple"}`)
+	}
 }
 
 // beaconsForPhase sets every beacon for the game phase: owner colours (or
 // unlit) while playing, the white idle bounce otherwise.
 func (g *game) beaconsForPhase() {
-	for p := 0; p < 3; p++ {
-		g.beaconSync(p)
+	for b := 0; b < 3; b++ {
+		g.beaconSync(b)
 	}
 }
 
-func (g *game) beaconSync(point int) {
+// beaconSync sets one beacon (0-2) to what it should show now.
+func (g *game) beaconSync(beacon int) {
 	if g.phase == phasePlaying && g.match != nil {
-		g.beaconShowOwner(point, g.match.cpOwners[point], false)
+		for i, cp := range g.settings.CapturePoints {
+			if cp.Beacon-1 == beacon && i < len(g.match.cpOwners) {
+				g.beaconShowOwner(i, g.match.cpOwners[i], false)
+				return
+			}
+		}
+		g.beacons.send(beacon, colorCmd("set_color", 0, 0, 0)) // not used in this game
 		return
 	}
-	g.beacons.send(point, `{"cmd":"beacon_idle"}`)
+	g.beacons.send(beacon, `{"cmd":"beacon_idle"}`)
 }
 
 // beaconConnected is called when a beacon says hello.
-func (g *game) beaconConnected(point int) {
+func (g *game) beaconConnected(beacon int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.beaconSync(point)
+	g.beaconSync(beacon)
 	g.broadcast()
 }

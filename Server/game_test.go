@@ -178,20 +178,6 @@ func TestWrongPasswords(t *testing.T) {
 		t.Fatal("non-host opened the lobby")
 	}
 
-	h.send(inMsg{T: "host_login", Password: defaultHostPassword})
-	st := g.settings
-	st.ClientPassword = "tanks"
-	h.send(inMsg{T: "host_settings", Settings: &st})
-
-	a := phone(t, g, "a")
-	a.send(inMsg{T: "join", Name: "Alice", Password: "x"})
-	if !strings.Contains(a.lastError(), "Wrong game password") {
-		t.Fatal("wrong game password accepted")
-	}
-	a.send(inMsg{T: "join", Name: "Alice", Password: "tanks"})
-	if a.state().Me.Status == "" {
-		t.Fatal("right game password refused")
-	}
 }
 
 func TestPlayerCantUseHostActions(t *testing.T) {
@@ -224,7 +210,7 @@ func TestTankChoice(t *testing.T) {
 	}
 	b.send(inMsg{T: "pick_tank", Tank: "b"})
 	s := b.state()
-	if s.Me.Tank != "b" || s.Me.TankName != "Jungle-02" || s.Me.Team != "Jungle Squad" {
+	if s.Me.Tank != "b" || s.Me.TankName != "Jungle-02" || s.Me.Alliance != "Jungle Squad" {
 		t.Fatalf("Bob's tank: %+v", s.Me)
 	}
 }

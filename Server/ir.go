@@ -106,13 +106,13 @@ func (s *irScheduler) execute(r shotRequest) {
 		return
 	}
 	shooter := m.fighters[r.shooter]
-	if shooter == nil || shooter.team < 0 {
+	if shooter == nil || shooter.alliance < 0 {
 		g.mu.Unlock()
 		return
 	}
 	var enemies []string
 	for id, c := range m.fighters {
-		if c.team >= 0 && c.team != shooter.team {
+		if c.alliance >= 0 && c.alliance != shooter.alliance {
 			enemies = append(enemies, id)
 		}
 	}

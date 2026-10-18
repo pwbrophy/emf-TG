@@ -11,7 +11,7 @@ import (
 // Capture points: scanning a point's tag takes it; held points score one
 // team point every CaptureSeconds / (points held); the captor gets the VP.
 func TestCapturePointScoring(t *testing.T) {
-	g, ft, _, _, a, _ := combatGame(t, func(s *Settings) { s.CaptureSeconds = 3; s.TeamPointsPerKill = 25 })
+	g, ft, _, _, a, _ := combatGame(t, func(s *Settings) { s.CaptureSeconds = 3; s.PointsPerKill = 25 })
 	g.tankMessage("a", tankReport{Cmd: "rfid", UID: "110e8c5d"}) // North
 	if m := a.waitFor("rfid"); m["text"] != "You have captured North!" {
 		t.Fatalf("capture message %v", m["text"])
@@ -26,18 +26,18 @@ func TestCapturePointScoring(t *testing.T) {
 
 	g.mu.Lock()
 	g.tickCapturePoints(3 * time.Second) // one point held: 1 per 3 s
-	pts := g.match.teamPoints
+	pts := g.match.alliancePoints
 	g.mu.Unlock()
-	if pts != [2]int{1, 0} {
+	if pts[0] != 1 || pts[1] != 0 {
 		t.Fatalf("after 3 s holding one point: %v", pts)
 	}
 
 	g.tankMessage("a", tankReport{Cmd: "rfid", UID: "11E0A45D"}) // Centre
 	g.mu.Lock()
 	g.tickCapturePoints(3 * time.Second) // two points: 1 per 1.5 s
-	pts = g.match.teamPoints
+	pts = g.match.alliancePoints
 	g.mu.Unlock()
-	if pts != [2]int{3, 0} {
+	if pts[0] != 3 || pts[1] != 0 {
 		t.Fatalf("after 3 s holding two points: %v", pts)
 	}
 
@@ -248,8 +248,8 @@ func TestHostDamageAndHeal(t *testing.T) {
 		t.Fatalf("heal should resurrect: %v %d", c.life, c.hp)
 	}
 	// Test hits score nothing.
-	if s := h.state(); s.TeamPoints != [2]int{0, 0} {
-		t.Fatalf("test kill scored: %v", s.TeamPoints)
+	if s := h.state(); s.AlliancePoints[0] != 0 || s.AlliancePoints[1] != 0 {
+		t.Fatalf("test kill scored: %v", s.AlliancePoints)
 	}
 }
 
@@ -262,15 +262,15 @@ func TestHostTankTools(t *testing.T) {
 	}
 	h.send(inMsg{T: "host_tank_rename", Tank: "a", Name: "Jungle-07"})
 	s := h.state()
-	if s.Tanks[0].Name != "Jungle-07" || s.Tanks[0].Team != "Jungle Squad" || !s.Tanks[0].Flags.HFlip {
+	if s.Tanks[0].Name != "Jungle-07" || s.Tanks[0].Alliance != "Jungle Squad" || !s.Tanks[0].Flags.HFlip {
 		t.Fatalf("after rename: %+v", s.Tanks[0])
 	}
-	h.send(inMsg{T: "host_tank_team", Tank: "a", Team: 0})
-	if s := h.state(); s.Tanks[0].Team != "Desert Squad" || !s.Tanks[0].TeamOverride {
+	h.send(inMsg{T: "host_tank_alliance", Tank: "a", Alliance: "desert"})
+	if s := h.state(); s.Tanks[0].Alliance != "Desert Squad" || !s.Tanks[0].AllianceOverride {
 		t.Fatalf("team override: %+v", s.Tanks[0])
 	}
-	h.send(inMsg{T: "host_tank_team", Tank: "a", Team: -1})
-	if s := h.state(); s.Tanks[0].Team != "Jungle Squad" {
+	h.send(inMsg{T: "host_tank_alliance", Tank: "a", Alliance: ""})
+	if s := h.state(); s.Tanks[0].Alliance != "Jungle Squad" {
 		t.Fatalf("team back from name: %+v", s.Tanks[0])
 	}
 	h.send(inMsg{T: "host_tank_ping", Tank: "a"})

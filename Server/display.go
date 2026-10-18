@@ -65,19 +65,22 @@ type displayPoint struct {
 }
 
 type displayUpdate struct {
-	Cmd           string          `json:"cmd"`
-	Phase         string          `json:"phase"`
-	Paused        bool            `json:"paused"`
-	Timer         float64         `json:"timer"` // seconds left
-	MatchDuration int             `json:"matchDuration"`
-	PlayerCount   int             `json:"playerCount"`
-	MaxPlayers    int             `json:"maxPlayers"`
-	TeamPoints    [2]int          `json:"teamPoints"`
-	MaxTeamPoints int             `json:"maxTeamPoints"`
-	AllianceNames [2]string       `json:"allianceNames"`
-	Players       []displayPlayer `json:"players"`
-	Robots        []displayRobot  `json:"robots"`
-	CapturePoints []displayPoint  `json:"capturePoints"`
+	Cmd           string  `json:"cmd"`
+	Phase         string  `json:"phase"`
+	Paused        bool    `json:"paused"`
+	Timer         float64 `json:"timer"` // seconds left
+	MatchDuration int     `json:"matchDuration"`
+	PlayerCount   int     `json:"playerCount"`
+	MaxPlayers    int     `json:"maxPlayers"`
+	// The Unity-era page's names: teamPoints and maxTeamPoints are the
+	// alliances' points and the points to win.
+	TeamPoints     []int           `json:"teamPoints"`
+	MaxTeamPoints  int             `json:"maxTeamPoints"`
+	AllianceNames  []string        `json:"allianceNames"`
+	AllianceColors []string        `json:"allianceColors"`
+	Players        []displayPlayer `json:"players"`
+	Robots         []displayRobot  `json:"robots"`
+	CapturePoints  []displayPoint  `json:"capturePoints"`
 }
 
 func (g *game) displayState() displayUpdate {
@@ -91,13 +94,17 @@ func (g *game) displayState() displayUpdate {
 		Timer:         math.Round(g.remaining().Seconds()*10) / 10,
 		MatchDuration: g.settings.MatchSeconds,
 		MaxPlayers:    g.capacity(),
-		MaxTeamPoints: g.settings.MaxTeamPoints,
-		AllianceNames: g.settings.TeamNames,
+		MaxTeamPoints: g.settings.PointsToWin,
+		TeamPoints:    make([]int, len(g.settings.Alliances)),
 		Players:       []displayPlayer{},
 		Robots:        []displayRobot{},
 	}
 	if g.phase == phaseCountdown {
 		d.Timer = float64(g.settings.MatchSeconds)
+	}
+	for _, a := range g.settings.Alliances {
+		d.AllianceNames = append(d.AllianceNames, a.Name)
+		d.AllianceColors = append(d.AllianceColors, a.Color)
 	}
 	for _, p := range g.sortedPlayers() {
 		if p.status != stLobby && p.status != stPlaying {
@@ -106,13 +113,15 @@ func (g *game) displayState() displayUpdate {
 		d.PlayerCount++
 		dp := displayPlayer{Name: p.name, Alliance: -1}
 		if p.tank != "" {
-			dp.Alliance = g.teamOf(p.tank)
+			dp.Alliance = g.allianceOf(p.tank)
 			dp.Role, dp.Partner = g.crewOf(p)
 		}
 		d.Players = append(d.Players, dp)
 	}
 	if inMatch {
-		d.TeamPoints = g.match.teamPoints
+		if len(g.match.alliancePoints) == len(d.TeamPoints) {
+			d.TeamPoints = g.match.alliancePoints
+		}
 		var ids []string
 		for id := range g.match.fighters {
 			ids = append(ids, id)
@@ -123,7 +132,7 @@ func (g *game) displayState() displayUpdate {
 		sort.Slice(ids, sortByName)
 		for _, id := range ids {
 			c := g.match.fighters[id]
-			r := displayRobot{Callsign: c.tankName, Player: c.driver.name, Alliance: c.team,
+			r := displayRobot{Callsign: c.tankName, Player: c.driver.name, Alliance: c.alliance,
 				Hp: c.hp, MaxHp: g.settings.MaxHp, Dead: c.life == exploding, VideoURL: id}
 			if c.gunner != nil {
 				r.GunnerPlayer = c.gunner.name
@@ -131,12 +140,12 @@ func (g *game) displayState() displayUpdate {
 			d.Robots = append(d.Robots, r)
 		}
 	}
-	for i, n := range pointNames {
+	for i, cp := range g.settings.CapturePoints {
 		owner := -1
-		if inMatch {
+		if inMatch && i < len(g.match.cpOwners) {
 			owner = g.match.cpOwners[i]
 		}
-		d.CapturePoints = append(d.CapturePoints, displayPoint{Name: n, Owner: owner})
+		d.CapturePoints = append(d.CapturePoints, displayPoint{Name: cp.Name, Owner: owner})
 	}
 	return d
 }
@@ -196,58 +205,65 @@ func (g *game) announceKill(shooter, target *combatant) {
 		}
 	}
 	g.displayEvent(text)
-	team := -1
+	alliance := -1
 	if shooter != nil {
-		team = shooter.team
+		alliance = shooter.alliance
 	}
-	g.displaySend(map[string]any{"cmd": "kill_event", "teamIndex": team, "targetCallsign": target.tankName,
-		"points": g.settings.TeamPointsPerKill})
+	g.displaySend(map[string]any{"cmd": "kill_event", "teamIndex": alliance, "targetCallsign": target.tankName,
+		"points": g.settings.PointsPerKill})
 }
 
-func (g *game) announceCapture(point, team int, captor string) {
-	if team < 0 {
+func (g *game) announceCapture(point, alliance int, captor string) {
+	if alliance < 0 {
 		return
 	}
 	who := captor
 	if who == "" {
-		who = g.teamName(team)
+		who = g.allianceName(alliance)
 	}
-	g.displayEvent(who + " captured " + pointNames[point] + " Point!")
-	m := g.match
-	if m.cpOwners[0] == team && m.cpOwners[1] == team && m.cpOwners[2] == team {
-		g.displayEvent(g.teamName(team) + " has captured all the points!")
+	g.displayEvent(who + " captured " + g.pointName(point) + " Point!")
+	all := len(g.match.cpOwners) > 1
+	for _, owner := range g.match.cpOwners {
+		if owner != alliance {
+			all = false
+		}
+	}
+	if all {
+		g.displayEvent(g.allianceName(alliance) + " has captured all the points!")
 	}
 }
 
 // announcePoints: halfway and nearly-there milestones, and lead changes
-// (a team must get 3 points clear, and both must have scored).
+// (the leader must be 3 points clear of the next alliance, and everyone in
+// the running must have scored).
 func (g *game) announcePoints() {
 	m := g.match
-	target := g.settings.MaxTeamPoints
-	for t := 0; t < 2; t++ {
-		pts := m.teamPoints[t]
-		if !m.half[t] && pts >= target/2 {
-			m.half[t] = true
-			g.displayEvent(g.teamName(t) + " is halfway to a points victory!")
+	target := g.settings.PointsToWin
+	for a, pts := range m.alliancePoints {
+		if !m.half[a] && pts >= target/2 {
+			m.half[a] = true
+			g.displayEvent(g.allianceName(a) + " is halfway to a points victory!")
 		}
-		if !m.nearly[t] && pts >= target*9/10 {
-			m.nearly[t] = true
-			g.displayEvent(g.teamName(t) + " is nearly victorious!")
+		if !m.nearly[a] && pts >= target*9/10 {
+			m.nearly[a] = true
+			g.displayEvent(g.allianceName(a) + " is nearly victorious!")
 		}
 	}
-	tp0, tp1 := m.teamPoints[0], m.teamPoints[1]
-	if tp0 > 0 && tp1 > 0 {
-		leader := -1
+	first, second := -1, -1
+	for a, pts := range m.alliancePoints {
+		if pts <= 0 {
+			continue
+		}
 		switch {
-		case tp0-tp1 >= 3:
-			leader = 0
-		case tp1-tp0 >= 3:
-			leader = 1
+		case first < 0 || pts > m.alliancePoints[first]:
+			first, second = a, first
+		case second < 0 || pts > m.alliancePoints[second]:
+			second = a
 		}
-		if leader >= 0 && leader != m.leader {
-			m.leader = leader
-			g.displayEvent(g.teamName(leader) + " has taken the points lead!")
-		}
+	}
+	if first >= 0 && second >= 0 && m.alliancePoints[first]-m.alliancePoints[second] >= 3 && first != m.leader {
+		m.leader = first
+		g.displayEvent(g.allianceName(first) + " has taken the points lead!")
 	}
 }
 
@@ -266,7 +282,7 @@ func (g *game) announceGameOver(winner int) {
 		best = g.results[0].Name
 	}
 	if winner >= 0 {
-		text := "Game over! " + g.teamName(winner) + " are victorious!"
+		text := "Game over! " + g.allianceName(winner) + " are victorious!"
 		if best != "" {
 			text += " " + best + " was the best player!"
 		}
@@ -296,7 +312,7 @@ func (g *game) announceGameOver(winner int) {
 	most("mostCaptures", func(r result) float64 { return float64(r.Captures) }, asInt)
 	most("mostPoints", func(r result) float64 { return float64(r.VictoryPoints) }, asInt)
 	most("mostGround", func(r result) float64 { return r.DriveSeconds }, func(v float64) any { return formatSeconds(v) })
-	g.displaySend(map[string]any{"cmd": "game_over", "winnerTeam": g.teamName(winner),
+	g.displaySend(map[string]any{"cmd": "game_over", "winnerTeam": g.allianceName(winner),
 		"reason": g.match.endCode, "stats": stats})
 }
 

@@ -1,25 +1,28 @@
 package main
 
-// Combat: hit points, damage, death and respawn, capture points, team points
-// and the winner. A port of the Unity version's rules (GameService,
+// Combat: hit points, damage, death and respawn, capture points, alliance
+// points and the winner. A port of the Unity version's rules (GameService,
 // CapturePointService and the combat parts of PlayerWebSocketServer), so
 // games play exactly as they did:
 //
 //   - A hit does DamagePerHit, ×RearMultiplier from behind (S) or
 //     ×SideMultiplier from the side (E/W).
 //   - At 0 HP a tank explodes: motors off for ExplosionSeconds. Then it may
-//     drive but not fire ("return to base") until it scans its own team's
-//     base tag, which respawns it at full HP.
+//     drive but not fire ("return to base") until it scans its own
+//     alliance's base tag, which respawns it at full HP.
 //   - Scanning your own base while alive refills your HP.
 //   - After a respawn or refill a tank can't be hurt for InvulnerableSeconds.
-//   - Scanning a capture point's tag takes it for your team. Each team earns
-//     one team point every CaptureSeconds divided by the points it holds.
-//   - Each kill earns the killer's team TeamPointsPerKill; reaching
-//     MaxTeamPoints wins at once. When time runs out the team with more
+//   - Scanning a capture point's tag takes it for your alliance. Each
+//     alliance earns one point every CaptureSeconds divided by the points it
+//     holds.
+//   - Each kill earns the killer's alliance PointsPerKill; reaching
+//     PointsToWin wins at once. When time runs out the alliance with more
 //     points wins; on a tie, more tanks still in the fight, then more damage.
 //
-// A tank's crew is its driver and, on a 2-player tank, a gunner. The gunner
-// fires (and gets the kills); both share the tank's deaths.
+// "Alliance" is the realtime game's side (the planned turn-based mode can
+// have several teams in an alliance). A tank's crew is its driver and, on a
+// 2-player tank, a gunner. The gunner fires (and gets the kills); both share
+// the tank's deaths.
 //
 // Everything here runs with game.mu held.
 
@@ -50,29 +53,81 @@ func (l lifeState) String() string {
 	return "alive"
 }
 
-var pointNames = [3]string{"North", "Centre", "South"}
-
-// teamOf is a tank's team: the host's choice if set, otherwise its name
-// (Desert-… = 0, Jungle-… = 1). -1 = no team.
-func (g *game) teamOf(tankID string) int {
-	if t, ok := g.settings.TankTeams[tankID]; ok {
-		return t
+// allianceOf is a tank's alliance (an index into settings.Alliances): the
+// host's choice if set, otherwise the alliance its name starts with
+// ("Desert-01" → id "desert", or the first word of "Desert Squad"). -1 = none.
+func (g *game) allianceOf(tankID string) int {
+	if id, ok := g.settings.TankAlliances[tankID]; ok {
+		if i := g.allianceIndex(id); i >= 0 {
+			return i
+		}
 	}
-	n := strings.ToLower(g.tankNames[tankID])
-	switch {
-	case strings.HasPrefix(n, "desert"):
-		return 0
-	case strings.HasPrefix(n, "jungle"):
-		return 1
+	return g.defaultAlliance(g.tankNames[tankID])
+}
+
+func (g *game) defaultAlliance(tankName string) int {
+	n := strings.ToLower(tankName)
+	if n == "" {
+		return -1
+	}
+	for i, a := range g.settings.Alliances {
+		first, _, _ := strings.Cut(strings.ToLower(a.Name), " ")
+		if strings.HasPrefix(n, a.ID) || (first != "" && strings.HasPrefix(n, first)) {
+			return i
+		}
 	}
 	return -1
 }
 
-func (g *game) teamName(i int) string {
-	if i == 0 || i == 1 {
-		return g.settings.TeamNames[i]
+func (g *game) allianceIndex(id string) int {
+	for i, a := range g.settings.Alliances {
+		if a.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (g *game) allianceName(i int) string {
+	if i >= 0 && i < len(g.settings.Alliances) {
+		return g.settings.Alliances[i].Name
 	}
 	return ""
+}
+
+func (g *game) pointIndex(id string) int {
+	for i, p := range g.settings.CapturePoints {
+		if p.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (g *game) pointName(i int) string {
+	if i >= 0 && i < len(g.settings.CapturePoints) {
+		return g.settings.CapturePoints[i].Name
+	}
+	return ""
+}
+
+// tagUse is what an RFID tag is for: an alliance's base, a capture point
+// (indexes), or neither (-1, -1). known says whether the hub knows the tag.
+func (g *game) tagUse(uid string) (base, point int, known bool) {
+	for _, t := range g.settings.RfidTags {
+		if !strings.EqualFold(t.UID, uid) {
+			continue
+		}
+		kind, id, _ := strings.Cut(t.Use, ":")
+		switch kind {
+		case "base":
+			return g.allianceIndex(id), -1, true
+		case "point":
+			return -1, g.pointIndex(id), true
+		}
+		return -1, -1, true
+	}
+	return -1, -1, false
 }
 
 type crewMember struct {
@@ -82,7 +137,7 @@ type crewMember struct {
 // combatant is one tank in the current game.
 type combatant struct {
 	tank, tankName string
-	team           int
+	alliance       int
 	driver         crewMember
 	gunner         *crewMember // nil = one-player tank
 
@@ -125,7 +180,7 @@ func (c *combatant) crewNames() string {
 // playerStats is one player's numbers for the game.
 type playerStats struct {
 	name, tankName string
-	team           int
+	alliance       int
 	role           string // "driver", "gunner" or "" (one-player tank)
 	kills, deaths  int
 	damage         int
@@ -135,19 +190,21 @@ type playerStats struct {
 	damageFrom     map[string]int // shooter's name → damage they did to this player
 }
 
+// match is one game. The alliance and capture point lists can't change
+// while it runs (the host's tools refuse), so their indexes stay valid.
 type match struct {
-	gen        int                   // which game this is: shots from an earlier game are dropped
-	fighters   map[string]*combatant // by tank id
-	stats      map[string]*playerStats
-	teamPoints [2]int
-	teamDamage [2]int
-	winner     int    // -1 = none
-	endCode    string // "time", "points", "manual" (host ended or closed)
+	gen            int                   // which game this is: shots from an earlier game are dropped
+	fighters       map[string]*combatant // by tank id
+	stats          map[string]*playerStats
+	alliancePoints []int
+	allianceDamage []int
+	winner         int    // -1 = none
+	endCode        string // "time", "points", "manual" (host ended or closed)
 
-	cpOwners    [3]int    // -1 = nobody
-	cpCaptors   [3]string // player who took each point
-	cpAccum     [2]float64
-	cpFlashNext [2]int // round-robin: which owned point the beacon flashes next
+	cpOwners    []int     // per capture point: owning alliance, -1 = nobody
+	cpCaptors   []string  // player who took each point
+	cpAccum     []float64 // per alliance: seconds towards the next capture point
+	cpFlashNext []int     // per alliance: which owned point the beacon flashes next
 
 	lastCountdownTick int // last countdown number sent to the tanks
 
@@ -155,34 +212,36 @@ type match struct {
 	firstBlood   bool
 	killStreak   map[string]int
 	lowHpWarned  map[string]bool
-	half, nearly [2]bool
+	half, nearly []bool
 	leader       int
 }
 
-// rfidScan is one tag read, kept for the host's "RFID scans" list (to find a
-// tag's UID).
+// rfidScan is one tag read, for the host's RFID tag list.
 type rfidScan struct {
-	At   string `json:"at"`
-	Tank string `json:"tank"`
-	UID  string `json:"uid"`
-	What string `json:"what"` // "Desert Squad base", "North point", or ""
+	At   time.Time
+	Tank string
 }
 
 func (g *game) newMatch(players []*player) {
 	g.matchGen++
+	na, np := len(g.settings.Alliances), len(g.settings.CapturePoints)
 	m := &match{
 		gen: g.matchGen, fighters: map[string]*combatant{}, stats: map[string]*playerStats{},
-		winner: -1, cpOwners: [3]int{-1, -1, -1}, killStreak: map[string]int{}, lowHpWarned: map[string]bool{}, leader: -1,
+		alliancePoints: make([]int, na), allianceDamage: make([]int, na), winner: -1,
+		cpOwners: make([]int, np), cpCaptors: make([]string, np), cpAccum: make([]float64, na), cpFlashNext: make([]int, na),
+		killStreak: map[string]int{}, lowHpWarned: map[string]bool{}, half: make([]bool, na), nearly: make([]bool, na), leader: -1,
+	}
+	for i := range m.cpOwners {
+		m.cpOwners[i] = -1
 	}
 	for _, p := range players {
 		if p.role == roleGunner {
 			continue
 		}
-		c := &combatant{
-			tank: p.tank, tankName: g.tankNames[p.tank], team: g.teamOf(p.tank),
+		m.fighters[p.tank] = &combatant{
+			tank: p.tank, tankName: g.tankNames[p.tank], alliance: g.allianceOf(p.tank),
 			driver: crewMember{p.device, p.name}, hp: g.settings.MaxHp,
 		}
-		m.fighters[p.tank] = c
 	}
 	for _, p := range players {
 		if p.role == roleGunner {
@@ -200,29 +259,15 @@ func (g *game) newMatch(players []*player) {
 					role = roleGunner
 				}
 			}
-			m.stats[cm.name] = &playerStats{name: cm.name, tankName: c.tankName, team: c.team, role: role, damageFrom: map[string]int{}}
+			m.stats[cm.name] = &playerStats{name: cm.name, tankName: c.tankName, alliance: c.alliance, role: role, damageFrom: map[string]int{}}
 		}
 	}
 	g.match = m
 }
 
-// fighterOf is the tank a device crews in the current game, and its role.
-func (g *game) fighterOf(device string) (*combatant, string) {
-	if g.match == nil {
-		return nil, ""
-	}
-	for _, c := range g.match.fighters {
-		if c.driver.device == device {
-			if c.gunner != nil {
-				return c, roleDriver
-			}
-			return c, ""
-		}
-		if c.gunner != nil && c.gunner.device == device {
-			return c, roleGunner
-		}
-	}
-	return nil, ""
+// inMatch is true while a game is counting down or running.
+func (g *game) inMatch() bool {
+	return g.match != nil && (g.phase == phaseCountdown || g.phase == phasePlaying)
 }
 
 func (g *game) sendCrew(c *combatant, msg map[string]any) {
@@ -293,8 +338,8 @@ func (g *game) applyHit(shooter, target *combatant, mask byte, dir string) (int,
 	shooterName := ""
 	if shooter != nil {
 		shooterName = shooter.shooter().name
-		if shooter.team >= 0 {
-			m.teamDamage[shooter.team] += dmg
+		if shooter.alliance >= 0 {
+			m.allianceDamage[shooter.alliance] += dmg
 		}
 		if st := m.stats[shooterName]; st != nil {
 			st.damage += dmg
@@ -330,28 +375,29 @@ func (g *game) kill(target, shooter *combatant) {
 	g.sendCrew(target, map[string]any{"t": "you_are_dead"})
 	g.announceKill(shooter, target)
 
-	if shooter == nil || shooter.team < 0 {
+	if shooter == nil || shooter.alliance < 0 {
 		log.Printf("[Combat] %s destroyed", target.crewNames())
 		return
 	}
 	log.Printf("[Combat] %s destroyed %s", shooter.crewNames(), target.crewNames())
 	if st := m.stats[shooter.shooter().name]; st != nil {
 		st.kills++
-		st.vpFromKills += g.settings.TeamPointsPerKill
+		st.vpFromKills += g.settings.PointsPerKill
 	}
-	g.addTeamPoints(shooter.team, g.settings.TeamPointsPerKill)
+	g.addPoints(shooter.alliance, g.settings.PointsPerKill)
 }
 
-// addTeamPoints scores for a team and ends the game if it reached the target.
-func (g *game) addTeamPoints(team, pts int) {
+// addPoints scores for an alliance and ends the game if it reached the
+// target.
+func (g *game) addPoints(alliance, pts int) {
 	m := g.match
-	if team < 0 || pts <= 0 {
+	if alliance < 0 || alliance >= len(m.alliancePoints) || pts <= 0 {
 		return
 	}
-	m.teamPoints[team] += pts
+	m.alliancePoints[alliance] += pts
 	g.announcePoints()
-	if m.teamPoints[team] >= g.settings.MaxTeamPoints && g.phase == phasePlaying {
-		m.winner = team
+	if m.alliancePoints[alliance] >= g.settings.PointsToWin && g.phase == phasePlaying {
+		m.winner = alliance
 		g.endGame("points")
 	}
 }
@@ -382,26 +428,26 @@ func (g *game) tickCombat(now time.Time, dt time.Duration) bool {
 	return changed
 }
 
-// tickCapturePoints: 1 point held → 1 team point every CaptureSeconds,
-// 2 → twice as often, 3 → three times.
+// tickCapturePoints: 1 point held → 1 alliance point every CaptureSeconds,
+// 2 → twice as often, and so on.
 func (g *game) tickCapturePoints(dt time.Duration) bool {
 	m := g.match
 	changed := false
-	for team := 0; team < 2; team++ {
+	for a := range m.alliancePoints {
 		var held []int
 		for i, owner := range m.cpOwners {
-			if owner == team {
+			if owner == a {
 				held = append(held, i)
 			}
 		}
 		if len(held) == 0 {
-			m.cpAccum[team] = 0
+			m.cpAccum[a] = 0
 			continue
 		}
 		interval := g.settings.CaptureSeconds / float64(len(held))
-		m.cpAccum[team] += dt.Seconds()
-		for m.cpAccum[team] >= interval && g.phase == phasePlaying {
-			m.cpAccum[team] -= interval
+		m.cpAccum[a] += dt.Seconds()
+		for m.cpAccum[a] >= interval && g.phase == phasePlaying {
+			m.cpAccum[a] -= interval
 			share := 1 / float64(len(held))
 			for _, i := range held {
 				if st := m.stats[m.cpCaptors[i]]; st != nil {
@@ -409,9 +455,9 @@ func (g *game) tickCapturePoints(dt time.Duration) bool {
 				}
 			}
 			// The beacons take turns flashing for each point scored.
-			g.beaconVpRipple(held[m.cpFlashNext[team]%len(held)])
-			m.cpFlashNext[team]++
-			g.addTeamPoints(team, 1)
+			g.beaconVpRipple(held[m.cpFlashNext[a]%len(held)])
+			m.cpFlashNext[a]++
+			g.addPoints(a, 1)
 			changed = true
 		}
 	}
@@ -427,57 +473,25 @@ func (g *game) grantInvulnerability(c *combatant) {
 	g.tanks.sendTo(c.tank, `{"cmd":"invuln_start"}`)
 }
 
-func uidIn(uid string, list []string) bool {
-	for _, u := range list {
-		if strings.EqualFold(u, uid) {
-			return true
-		}
-	}
-	return false
-}
-
-func (g *game) baseTeam(uid string) int {
-	switch {
-	case uidIn(uid, g.settings.DesertBaseUids):
-		return 0
-	case uidIn(uid, g.settings.JungleBaseUids):
-		return 1
-	}
-	return -1
-}
-
-func (g *game) capturePoint(uid string) int {
-	switch {
-	case uidIn(uid, g.settings.NorthPointUids):
-		return 0
-	case uidIn(uid, g.settings.CentrePointUids):
-		return 1
-	case uidIn(uid, g.settings.SouthPointUids):
-		return 2
-	}
-	return -1
-}
-
 // rfidScanned handles a tank reading an RFID tag: capturing a point,
-// respawning or refilling at its own base.
+// respawning or refilling at its own base. A tag the hub hasn't seen before
+// is added to the host's RFID tag list, ready to be assigned.
 func (g *game) rfidScanned(tankID, uid string) {
 	uid = strings.ToUpper(strings.TrimSpace(uid))
-	base, point := g.baseTeam(uid), g.capturePoint(uid)
-	what := ""
-	switch {
-	case base >= 0:
-		what = g.teamName(base) + " base"
-	case point >= 0:
-		what = pointNames[point] + " point"
+	if uid == "" || len(uid) > 32 {
+		return
+	}
+	base, point, known := g.tagUse(uid)
+	if !known && len(g.settings.RfidTags) < maxRfidTags {
+		g.settings.RfidTags = append(g.settings.RfidTags, RfidTag{UID: uid})
+		saveSettings(g.settingsPath, g.settings)
+		log.Printf("[RFID] new tag %s", uid)
 	}
 	name := g.tankNames[tankID]
 	if name == "" {
 		name = tankID
 	}
-	g.rfidLog = append(g.rfidLog, rfidScan{At: time.Now().Format("15:04:05"), Tank: name, UID: uid, What: what})
-	if len(g.rfidLog) > 12 {
-		g.rfidLog = g.rfidLog[len(g.rfidLog)-12:]
-	}
+	g.rfidSeen[uid] = rfidScan{At: time.Now(), Tank: name}
 
 	if g.match == nil || g.phase != phasePlaying || g.paused {
 		return
@@ -490,24 +504,24 @@ func (g *game) rfidScanned(tankID, uid string) {
 	case exploding:
 		return // ignores everything while exploding
 	case returning:
-		if base >= 0 && base == c.team {
+		if base >= 0 && base == c.alliance {
 			g.respawn(c)
 			g.sendCrew(c, map[string]any{"t": "rfid", "text": "You have respawned!"})
 		}
 		return // returning tanks can't capture
 	}
 
-	if point >= 0 && c.team >= 0 {
-		if g.match.cpOwners[point] == c.team {
+	if point >= 0 && point < len(g.match.cpOwners) && c.alliance >= 0 {
+		if g.match.cpOwners[point] == c.alliance {
 			g.sendCrew(c, map[string]any{"t": "rfid", "text": "You already captured this point!"})
 		} else {
-			g.capture(point, c.team, c.driver.name)
+			g.capture(point, c.alliance, c.driver.name)
 			g.tanks.sendTo(c.tank, `{"cmd":"flash_capture"}`)
-			g.sendCrew(c, map[string]any{"t": "rfid", "text": "You have captured " + pointNames[point] + "!"})
+			g.sendCrew(c, map[string]any{"t": "rfid", "text": "You have captured " + g.pointName(point) + "!"})
 		}
 	}
 	switch {
-	case base >= 0 && base == c.team:
+	case base >= 0 && base == c.alliance:
 		if c.invulnerable(time.Now()) {
 			return // healed moments ago: repeated scans of the same tag
 		}
@@ -521,18 +535,19 @@ func (g *game) rfidScanned(tankID, uid string) {
 	}
 }
 
-// capture gives a point to a team (-1 = nobody). captor "" = the host did it.
-func (g *game) capture(point, team int, captor string) {
+// capture gives a point to an alliance (-1 = nobody). captor "" = the host
+// did it.
+func (g *game) capture(point, alliance int, captor string) {
 	m := g.match
-	m.cpOwners[point] = team
+	m.cpOwners[point] = alliance
 	m.cpCaptors[point] = captor
-	if team >= 0 && captor != "" {
+	if alliance >= 0 && captor != "" {
 		if st := m.stats[captor]; st != nil {
 			st.captures++
 		}
 	}
-	g.beaconShowOwner(point, team, true)
-	g.announceCapture(point, team, captor)
+	g.beaconShowOwner(point, alliance, true)
+	g.announceCapture(point, alliance, captor)
 }
 
 func (g *game) respawn(c *combatant) {
@@ -552,32 +567,38 @@ func (g *game) sendSetHp(c *combatant) {
 	g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"set_hp","hp":%d,"max":%d}`, c.hp, g.settings.MaxHp))
 }
 
-// winnerOnTime: more team points; on a tie, more tanks still in the fight
-// (a tank returning to base counts, an exploding one doesn't); then more
+// winnerOnTime: most points; on a tie, more tanks still in the fight (a
+// tank returning to base counts, an exploding one doesn't); then more
 // damage dealt. -1 if nobody.
 func (g *game) winnerOnTime() int {
 	m := g.match
-	if m.teamPoints[0] != m.teamPoints[1] {
-		if m.teamPoints[0] > m.teamPoints[1] {
-			return 0
-		}
-		return 1
-	}
-	surviving := map[int]int{}
+	surviving := make([]int, len(m.alliancePoints))
+	present := make([]bool, len(m.alliancePoints))
 	for _, c := range m.fighters {
-		if c.team < 0 || c.life == exploding {
+		if c.alliance < 0 {
 			continue
 		}
-		surviving[c.team]++
+		present[c.alliance] = true
+		if c.life != exploding {
+			surviving[c.alliance]++
+		}
 	}
-	best, bestN, bestDmg := -1, -1, -1
-	for _, team := range []int{0, 1} {
-		n, ok := surviving[team]
-		if !ok {
-			continue
+	best := -1
+	better := func(a, b int) bool { // is alliance a ahead of b?
+		if m.alliancePoints[a] != m.alliancePoints[b] {
+			return m.alliancePoints[a] > m.alliancePoints[b]
 		}
-		if n > bestN || (n == bestN && m.teamDamage[team] > bestDmg) {
-			best, bestN, bestDmg = team, n, m.teamDamage[team]
+		if surviving[a] != surviving[b] {
+			return surviving[a] > surviving[b]
+		}
+		return m.allianceDamage[a] > m.allianceDamage[b]
+	}
+	for a := range m.alliancePoints {
+		if !present[a] && m.alliancePoints[a] == 0 {
+			continue // not in this game
+		}
+		if best < 0 || better(a, best) {
+			best = a
 		}
 	}
 	return best
@@ -598,7 +619,7 @@ func (g *game) combatResults() []result {
 		}
 		capVp := int(math.RoundToEven(st.vpFromCaptures))
 		out = append(out, result{
-			Name: st.name, Tank: st.tankName, Team: g.teamName(st.team), Role: st.role,
+			Name: st.name, Tank: st.tankName, Alliance: g.allianceName(st.alliance), AllianceIndex: st.alliance, Role: st.role,
 			Kills: st.kills, Deaths: st.deaths, Damage: st.damage, Captures: st.captures,
 			VictoryPoints: st.vpFromKills + capVp, VpFromKills: st.vpFromKills, VpFromCaptures: capVp,
 			Nemesis: nemesis,

@@ -91,7 +91,8 @@ type player struct {
 type result struct {
 	Name           string  `json:"name"`
 	Tank           string  `json:"tank"`
-	Team           string  `json:"team"`
+	Alliance       string  `json:"alliance"`
+	AllianceIndex  int     `json:"allianceIndex"`
 	Role           string  `json:"role,omitempty"`
 	Kills          int     `json:"kills"`
 	Deaths         int     `json:"deaths"`
@@ -131,7 +132,7 @@ type game struct {
 	match    *match
 	matchGen int
 	ir       *irScheduler
-	rfidLog  []rfidScan
+	rfidSeen map[string]rfidScan // tag UID → when and by which tank it was last read
 
 	// Host tools: ping round trips to each tank.
 	pingSent map[string]time.Time
@@ -152,6 +153,7 @@ func newGame(tanks tankControl, settingsPath string) *game {
 		tankNames:    map[string]string{},
 		pingSent:     map[string]time.Time{},
 		pingMs:       map[string]int{},
+		rfidSeen:     map[string]rfidScan{},
 		clients:      map[*client]struct{}{},
 	}
 	g.ir = newIrScheduler(g)
@@ -192,7 +194,7 @@ type inMsg struct {
 	Device   string     `json:"device"`
 	Display  bool       `json:"display"` // hello from the spectator display
 	Name     string     `json:"name"`
-	Password string     `json:"password"`
+	Password string     `json:"password"` // host password
 	Tank     string     `json:"tank"`
 	Target   string     `json:"target"` // a player's device, for host actions
 	L        float64    `json:"l"`
@@ -200,9 +202,14 @@ type inMsg struct {
 	S        float64    `json:"s"`
 	On       bool       `json:"on"`
 	Force    bool       `json:"force"`
-	Dir      string     `json:"dir"`   // host test damage: N, E, S
-	Point    int        `json:"point"` // capture point 0-2
-	Team     int        `json:"team"`  // host_tank_team: -1 = from its name, 0, 1
+	Dir      string     `json:"dir"`      // host test damage: N, E, S
+	Point    int        `json:"point"`    // capture point 0-2
+	Alliance string     `json:"alliance"` // an alliance id ("" = from the tank's name)
+	ID       string     `json:"id"`       // an alliance or capture point id
+	Color    string     `json:"color"`
+	UID      string     `json:"uid"`    // an RFID tag
+	Use      string     `json:"use"`    // what a tag is for: "base:<id>", "point:<id>", ""
+	Beacon   int        `json:"beacon"` // a capture point's LED beacon, 0 = none
 	Flags    *tankFlags `json:"flags"`
 	Settings *Settings  `json:"settings"`
 }
@@ -232,7 +239,7 @@ func (g *game) handle(c *client, m inMsg) {
 	case "fire":
 		g.fire(c.device)
 	case "join":
-		g.join(c, m.Name, m.Password)
+		g.join(c, m.Name)
 	case "leave":
 		g.removePlayer(c.device)
 	case "pick_tank":
@@ -310,9 +317,20 @@ func (g *game) hostAction(c *client, m inMsg) {
 	}
 }
 
-// applySettings saves the host's new settings and sends tanks any tuning
-// that changed.
+// applySettings saves settings the host's page sent. The alliance, capture
+// point and tag lists have their own host messages (and a tank can add a tag
+// at any moment), so the page's copies of those are ignored.
 func (g *game) applySettings(s Settings) {
+	s.Alliances = g.settings.Alliances
+	s.TankAlliances = g.settings.TankAlliances
+	s.CapturePoints = g.settings.CapturePoints
+	s.RfidTags = g.settings.RfidTags
+	g.saveNewSettings(s)
+}
+
+// saveNewSettings saves new settings and sends tanks any tuning that
+// changed.
+func (g *game) saveNewSettings(s Settings) {
 	s.clamp()
 	old := g.settings
 	g.settings = s
@@ -364,14 +382,10 @@ func (g *game) clientGone(c *client) {
 	g.broadcast()
 }
 
-func (g *game) join(c *client, name, password string) {
+func (g *game) join(c *client, name string) {
 	name = cleanName(name)
 	if name == "" {
 		g.sendError(c, "Please enter a name.")
-		return
-	}
-	if g.settings.ClientPassword != "" && password != g.settings.ClientPassword {
-		g.sendError(c, "Wrong game password.")
 		return
 	}
 	p := g.players[c.device]
@@ -848,12 +862,12 @@ func (g *game) endGame(code string) {
 	case "time":
 		g.endReason = "Time's up"
 	case "points":
-		g.endReason = fmt.Sprintf("%s reached %d points", g.teamName(winner), g.settings.MaxTeamPoints)
+		g.endReason = fmt.Sprintf("%s reached %d points", g.allianceName(winner), g.settings.PointsToWin)
 	default:
 		g.endReason = "The host ended the game"
 	}
 	if winner >= 0 {
-		g.endReason += " · " + g.teamName(winner) + " win!"
+		g.endReason += " · " + g.allianceName(winner) + " win!"
 	}
 
 	g.results = g.combatResults()
@@ -911,6 +925,9 @@ func (g *game) setPhase(ph phase) {
 		for _, p := range g.players {
 			if p.status == stFinished {
 				p.tank, p.role, p.allowGunner = "", "", false
+				if p.isHost {
+					p.status = stLobby // the host playing too is back in the lobby
+				}
 			}
 		}
 		for _, t := range g.tanks.list() {
@@ -1024,53 +1041,54 @@ func (g *game) remaining() time.Duration {
 // ── What each page sees ──────────────────────────────────────────────────────
 
 type tankView struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Team        string `json:"team"`
-	TeamIndex   int    `json:"teamIndex"` // -1 = none
-	Player      string `json:"player"`    // who has chosen it (drives it)
-	Gunner      string `json:"gunner"`    // 2-player: the gunner
-	AllowGunner bool   `json:"allowGunner"`
-	Online      bool   `json:"online"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Alliance      string `json:"alliance"`
+	AllianceIndex int    `json:"allianceIndex"` // -1 = none
+	Player        string `json:"player"`        // who has chosen it (drives it)
+	Gunner        string `json:"gunner"`        // 2-player: the gunner
+	AllowGunner   bool   `json:"allowGunner"`
+	Online        bool   `json:"online"`
 
 	// In a game:
 	Hp   int    `json:"hp,omitempty"`
 	Life string `json:"life,omitempty"`
 
 	// Host only:
-	IP           string     `json:"ip,omitempty"`
-	Flags        *tankFlags `json:"flags,omitempty"`
-	PingMs       int        `json:"pingMs,omitempty"`
-	TeamOverride bool       `json:"teamOverride,omitempty"`
-	LastHit      string     `json:"lastHit,omitempty"` // side and sensor mask of the last hit
-	Invulnerable bool       `json:"invulnerable,omitempty"`
+	IP               string     `json:"ip,omitempty"`
+	Flags            *tankFlags `json:"flags,omitempty"`
+	PingMs           int        `json:"pingMs,omitempty"`
+	AllianceOverride bool       `json:"allianceOverride,omitempty"` // the host chose its alliance
+	LastHit          string     `json:"lastHit,omitempty"`          // side and sensor mask of the last hit
+	Invulnerable     bool       `json:"invulnerable,omitempty"`
 }
 
 type playerView struct {
-	Device  string `json:"device,omitempty"` // host only: used for kick / move to queue
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Tank    string `json:"tank"` // tank name
-	Team    string `json:"team"`
-	Role    string `json:"role,omitempty"`    // 2-player tank: driver or gunner
-	Partner string `json:"partner,omitempty"` // 2-player tank: the other crew member
-	Online  bool   `json:"online"`
-	Host    bool   `json:"host"`
-	Hp      int    `json:"hp,omitempty"`   // in a game
-	Life    string `json:"life,omitempty"` // in a game: alive, dead, returning
+	Device   string `json:"device,omitempty"` // host only: used for kick / move to queue
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Tank     string `json:"tank"` // tank name
+	Alliance string `json:"alliance"`
+	Role     string `json:"role,omitempty"`    // 2-player tank: driver or gunner
+	Partner  string `json:"partner,omitempty"` // 2-player tank: the other crew member
+	Online   bool   `json:"online"`
+	Host     bool   `json:"host"`
+	Hp       int    `json:"hp,omitempty"`   // in a game
+	Life     string `json:"life,omitempty"` // in a game: alive, dead, returning
 }
 
 type meView struct {
-	IsHost      bool   `json:"isHost"`
-	Status      string `json:"status"` // "" = not joined
-	Name        string `json:"name"`
-	Tank        string `json:"tank"`     // tank id
-	TankName    string `json:"tankName"` // tank name
-	Team        string `json:"team"`
-	QueuePos    int    `json:"queuePos"`          // 1 = next in
-	Role        string `json:"role"`              // "driver", "gunner", or "" (alone on the tank)
-	Partner     string `json:"partner,omitempty"` // the other crew member
-	AllowGunner bool   `json:"allowGunner"`
+	IsHost        bool   `json:"isHost"`
+	Status        string `json:"status"` // "" = not joined
+	Name          string `json:"name"`
+	Tank          string `json:"tank"`     // tank id
+	TankName      string `json:"tankName"` // tank name
+	Alliance      string `json:"alliance"`
+	AllianceIndex int    `json:"allianceIndex"`
+	QueuePos      int    `json:"queuePos"`          // 1 = next in
+	Role          string `json:"role"`              // "driver", "gunner", or "" (alone on the tank)
+	Partner       string `json:"partner,omitempty"` // the other crew member
+	AllowGunner   bool   `json:"allowGunner"`
 
 	// In a game:
 	Hp           int    `json:"hp"`
@@ -1080,10 +1098,21 @@ type meView struct {
 }
 
 type pointView struct {
-	Name   string `json:"name"`
-	Owner  int    `json:"owner"` // -1 = nobody
-	Captor string `json:"captor,omitempty"`
-	Beacon bool   `json:"beacon"` // its LED beacon is connected
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Owner        int    `json:"owner"` // -1 = nobody
+	Captor       string `json:"captor,omitempty"`
+	Beacon       int    `json:"beacon"`       // its LED beacon: 1-3, 0 = none
+	BeaconOnline bool   `json:"beaconOnline"` // that beacon is connected
+	Tags         int    `json:"tags"`         // how many RFID tags it has
+}
+
+// tagView is one RFID tag in the host's list.
+type tagView struct {
+	UID      string `json:"uid"`
+	Use      string `json:"use"`
+	LastSeen string `json:"lastSeen,omitempty"` // "15:04:05"
+	Tank     string `json:"tank,omitempty"`     // the tank that read it last
 }
 
 // controlsView is the joystick and turret feel, for the in-game page.
@@ -1099,49 +1128,48 @@ type controlsView struct {
 }
 
 type snapshot struct {
-	T                string       `json:"t"`
-	Phase            phase        `json:"phase"`
-	Paused           bool         `json:"paused"`
-	Hosted           bool         `json:"hosted"`
-	PasswordRequired bool         `json:"passwordRequired"`
-	RemainingMs      int64        `json:"remainingMs"` // countdown or match time left
-	Capacity         int          `json:"capacity"`
-	FireCooldownMs   int          `json:"fireCooldownMs"`
-	TwoPlayer        bool         `json:"twoPlayer"` // 2-player tanks are allowed
-	TeamNames        [2]string    `json:"teamNames"`
-	EndReason        string       `json:"endReason,omitempty"`
-	EndCode          string       `json:"endCode,omitempty"`    // "time", "points", "manual"
-	WinnerTeam       string       `json:"winnerTeam,omitempty"` // "" = no winner
-	TeamPoints       [2]int       `json:"teamPoints"`
-	MaxTeamPoints    int          `json:"maxTeamPoints"`
-	CapturePoints    []pointView  `json:"capturePoints"`
-	Controls         controlsView `json:"controls"`
-	Me               meView       `json:"me"`
-	Tanks            []tankView   `json:"tanks"`
-	Players          []playerView `json:"players"` // lobby and game
-	Queue            []playerView `json:"queue"`
-	Results          []result     `json:"results,omitempty"`
-	Settings         *Settings    `json:"settings,omitempty"`  // host only
-	RfidScans        []rfidScan   `json:"rfidScans,omitempty"` // host only: recent tag reads
-	Presets          []string     `json:"presets,omitempty"`   // host only: saved tuning presets
+	T              string       `json:"t"`
+	Phase          phase        `json:"phase"`
+	Paused         bool         `json:"paused"`
+	Hosted         bool         `json:"hosted"`
+	RemainingMs    int64        `json:"remainingMs"` // countdown or match time left
+	Capacity       int          `json:"capacity"`
+	FireCooldownMs int          `json:"fireCooldownMs"`
+	TwoPlayer      bool         `json:"twoPlayer"` // 2-player tanks are allowed
+	Alliances      []Alliance   `json:"alliances"`
+	EndReason      string       `json:"endReason,omitempty"`
+	EndCode        string       `json:"endCode,omitempty"`        // "time", "points", "manual"
+	WinnerAlliance string       `json:"winnerAlliance,omitempty"` // "" = no winner
+	AlliancePoints []int        `json:"alliancePoints"`
+	PointsToWin    int          `json:"pointsToWin"`
+	CapturePoints  []pointView  `json:"capturePoints"`
+	Controls       controlsView `json:"controls"`
+	Me             meView       `json:"me"`
+	Tanks          []tankView   `json:"tanks"`
+	Players        []playerView `json:"players"` // lobby and game
+	Queue          []playerView `json:"queue"`
+	Results        []result     `json:"results,omitempty"`
+	Settings       *Settings    `json:"settings,omitempty"` // host only
+	RfidTags       []tagView    `json:"rfidTags,omitempty"` // host only: every known tag
+	Presets        []string     `json:"presets,omitempty"`  // host only: saved tuning presets
 }
 
 func (g *game) snapshot(device string) snapshot {
 	isHost := device != "" && device == g.hostDevice
 	t := g.settings.Tuning
 	s := snapshot{
-		T:                "state",
-		Phase:            g.phase,
-		Paused:           g.paused,
-		Hosted:           g.hostDevice != "",
-		PasswordRequired: g.settings.ClientPassword != "",
-		Capacity:         g.capacity(),
-		FireCooldownMs:   g.settings.FireCooldownMs,
-		TwoPlayer:        g.settings.TwoPlayerTanks,
-		TeamNames:        g.settings.TeamNames,
-		EndReason:        g.endReason,
-		RemainingMs:      g.remaining().Milliseconds(),
-		MaxTeamPoints:    g.settings.MaxTeamPoints,
+		T:              "state",
+		Phase:          g.phase,
+		Paused:         g.paused,
+		Hosted:         g.hostDevice != "",
+		Capacity:       g.capacity(),
+		FireCooldownMs: g.settings.FireCooldownMs,
+		TwoPlayer:      g.settings.TwoPlayerTanks,
+		Alliances:      g.settings.Alliances,
+		AlliancePoints: make([]int, len(g.settings.Alliances)),
+		EndReason:      g.endReason,
+		RemainingMs:    g.remaining().Milliseconds(),
+		PointsToWin:    g.settings.PointsToWin,
 		Controls: controlsView{
 			Deadzone: t.JoyDeadzone, StartSpeed: t.JoyStartSpeed, FullAt: t.JoyFullAt, Curve: t.JoyCurve,
 			AxisSnap: t.JoyAxisSnap, TurnSpeed: t.JoyTurnSpeed, SlowTurretSpeed: t.SlowTurretSpeed,
@@ -1155,29 +1183,38 @@ func (g *game) snapshot(device string) snapshot {
 	if isHost {
 		st := g.settings
 		s.Settings = &st
-		s.RfidScans = g.rfidLog
+		s.RfidTags = g.tagViews()
 		s.Presets = g.presetNames()
 	}
 	beacons := g.beacons.connected()
-	for i, name := range pointNames {
-		pv := pointView{Name: name, Owner: -1, Beacon: beacons[i]}
-		if g.match != nil && (g.phase == phasePlaying || g.phase == phaseEnded) {
+	showOwners := g.match != nil && (g.phase == phasePlaying || g.phase == phaseEnded)
+	for i, cp := range g.settings.CapturePoints {
+		pv := pointView{ID: cp.ID, Name: cp.Name, Owner: -1, Beacon: cp.Beacon}
+		if cp.Beacon >= 1 && cp.Beacon <= 3 {
+			pv.BeaconOnline = beacons[cp.Beacon-1]
+		}
+		for _, t := range g.settings.RfidTags {
+			if t.Use == "point:"+cp.ID {
+				pv.Tags++
+			}
+		}
+		if showOwners && i < len(g.match.cpOwners) {
 			pv.Owner, pv.Captor = g.match.cpOwners[i], g.match.cpCaptors[i]
 		}
 		s.CapturePoints = append(s.CapturePoints, pv)
 	}
-	if g.match != nil {
-		s.TeamPoints = g.match.teamPoints
-		if g.phase == phaseEnded {
-			s.EndCode = g.match.endCode
-			s.WinnerTeam = g.teamName(g.match.winner)
-		}
+	if g.match != nil && len(g.match.alliancePoints) == len(s.AlliancePoints) {
+		s.AlliancePoints = g.match.alliancePoints
+	}
+	if g.match != nil && g.phase == phaseEnded {
+		s.EndCode = g.match.endCode
+		s.WinnerAlliance = g.allianceName(g.match.winner)
 	}
 
 	// Tanks: every connected one, plus any chosen tank that is offline.
 	viewTank := func(id, name string, online bool) tankView {
-		team := g.teamOf(id)
-		tv := tankView{ID: id, Name: name, Team: g.teamName(team), TeamIndex: team, Online: online}
+		a := g.allianceOf(id)
+		tv := tankView{ID: id, Name: name, Alliance: g.allianceName(a), AllianceIndex: a, Online: online}
 		if p := g.tankOwner(id); p != nil {
 			tv.Player, tv.AllowGunner = p.name, p.allowGunner
 		}
@@ -1197,7 +1234,7 @@ func (g *game) snapshot(device string) snapshot {
 		}
 		if isHost {
 			tv.PingMs = g.pingMs[id]
-			_, tv.TeamOverride = g.settings.TankTeams[id]
+			_, tv.AllianceOverride = g.settings.TankAlliances[id]
 		}
 		return tv
 	}
@@ -1224,7 +1261,7 @@ func (g *game) snapshot(device string) snapshot {
 	view := func(p *player) playerView {
 		v := playerView{Name: p.name, Status: string(p.status), Tank: g.tankNames[p.tank], Online: p.clients > 0, Host: p.isHost}
 		if p.tank != "" {
-			v.Team = g.teamName(g.teamOf(p.tank))
+			v.Alliance = g.allianceName(g.allianceOf(p.tank))
 			v.Role, v.Partner = g.crewOf(p)
 		}
 		if isHost {
@@ -1255,7 +1292,8 @@ func (g *game) snapshot(device string) snapshot {
 		s.Me.TankName = g.tankNames[p.tank]
 		s.Me.AllowGunner = p.allowGunner
 		if p.tank != "" {
-			s.Me.Team = g.teamName(g.teamOf(p.tank))
+			s.Me.AllianceIndex = g.allianceOf(p.tank)
+			s.Me.Alliance = g.allianceName(s.Me.AllianceIndex)
 			s.Me.Role, s.Me.Partner = g.crewOf(p)
 		}
 		for i, d := range g.queue {
@@ -1294,6 +1332,23 @@ func (g *game) crewOf(p *player) (role, partner string) {
 		return roleDriver, gu.name
 	}
 	return "", ""
+}
+
+// tagViews lists every known tag, the ones read most recently first.
+func (g *game) tagViews() []tagView {
+	out := make([]tagView, 0, len(g.settings.RfidTags))
+	for _, t := range g.settings.RfidTags {
+		v := tagView{UID: t.UID, Use: t.Use}
+		if seen, ok := g.rfidSeen[t.UID]; ok {
+			v.LastSeen, v.Tank = seen.At.Format("15:04:05"), seen.Tank
+		}
+		out = append(out, v)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := g.rfidSeen[out[i].UID].At, g.rfidSeen[out[j].UID].At
+		return si.After(sj)
+	})
+	return out
 }
 
 func (g *game) sortedPlayers() []*player {

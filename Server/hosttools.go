@@ -26,11 +26,14 @@ func (g *game) hostTool(c *client, m inMsg) {
 	case "host_heal":
 		g.hostHeal(c, m.Tank)
 	case "host_capture":
-		if g.phase != phasePlaying || g.match == nil || m.Point < 0 || m.Point > 2 {
+		if g.phase != phasePlaying || g.match == nil || m.Point < 0 || m.Point >= len(g.match.cpOwners) {
 			return
 		}
-		// Cycles nobody → first team → second team → nobody.
-		next := map[int]int{-1: 0, 0: 1, 1: -1}[g.match.cpOwners[m.Point]]
+		// Cycles nobody → each alliance in turn → nobody.
+		next := g.match.cpOwners[m.Point] + 1
+		if next >= len(g.match.alliancePoints) {
+			next = -1
+		}
 		g.capture(m.Point, next, "")
 
 	// Any time: one tank's settings.
@@ -46,20 +49,96 @@ func (g *game) hostTool(c *client, m inMsg) {
 		log.Printf("[Game] host renamed %s to %s", g.tankNames[m.Tank], name)
 		g.tanks.rename(m.Tank, name)
 		g.tankNames[m.Tank] = name
-	case "host_tank_team":
-		if g.phase == phasePlaying || g.phase == phaseCountdown {
-			g.sendError(c, "Change teams between games.")
+	case "host_tank_alliance":
+		if g.inMatch() {
+			g.sendError(c, "Change alliances between games.")
 			return
 		}
-		if g.settings.TankTeams == nil {
-			g.settings.TankTeams = map[string]int{}
+		g.changeSettings(func(s *Settings) {
+			if s.TankAlliances == nil {
+				s.TankAlliances = map[string]string{}
+			}
+			if m.Alliance == "" {
+				delete(s.TankAlliances, m.Tank)
+			} else {
+				s.TankAlliances[m.Tank] = m.Alliance
+			}
+		})
+	case "host_tank_free":
+		// Takes the players off a tank in the lobby (they stay in the lobby).
+		if g.phase == phaseLobby {
+			if gu := g.gunnerOf(m.Tank); gu != nil {
+				g.releaseTank(gu)
+			}
+			if d := g.tankOwner(m.Tank); d != nil {
+				g.releaseTank(d)
+			}
 		}
-		if m.Team == 0 || m.Team == 1 {
-			g.settings.TankTeams[m.Tank] = m.Team
-		} else {
-			delete(g.settings.TankTeams, m.Tank)
+
+	// Alliances, capture points and RFID tags.
+	case "host_alliance_add", "host_alliance_remove", "host_point_add", "host_point_remove":
+		if g.inMatch() {
+			g.sendError(c, "Add and remove these between games.")
+			return
 		}
-		saveSettings(g.settingsPath, g.settings)
+		g.changeSettings(func(s *Settings) { listChange(s, m) })
+	case "host_alliance_edit":
+		g.changeSettings(func(s *Settings) {
+			for i := range s.Alliances {
+				if s.Alliances[i].ID == m.ID {
+					if name := strings.TrimSpace(m.Name); name != "" {
+						s.Alliances[i].Name = name
+					}
+					if m.Color != "" {
+						s.Alliances[i].Color = m.Color
+					}
+				}
+			}
+		})
+		g.beaconsForPhase() // in a game, beacons show the new colour
+	case "host_point_edit":
+		g.changeSettings(func(s *Settings) {
+			for i := range s.CapturePoints {
+				if s.CapturePoints[i].ID != m.ID {
+					continue
+				}
+				if name := strings.TrimSpace(m.Name); name != "" {
+					s.CapturePoints[i].Name = name
+				}
+				if m.Beacon >= 0 && m.Beacon <= 3 {
+					// One beacon shows one point.
+					for j := range s.CapturePoints {
+						if j != i && m.Beacon > 0 && s.CapturePoints[j].Beacon == m.Beacon {
+							s.CapturePoints[j].Beacon = 0
+						}
+					}
+					s.CapturePoints[i].Beacon = m.Beacon
+				}
+			}
+		})
+		g.beaconsForPhase()
+	case "host_tag_use":
+		g.changeSettings(func(s *Settings) {
+			for i := range s.RfidTags {
+				if strings.EqualFold(s.RfidTags[i].UID, m.UID) {
+					s.RfidTags[i].Use = m.Use
+				}
+			}
+		})
+	case "host_tag_add":
+		uid := strings.ToUpper(strings.TrimSpace(m.UID))
+		if _, _, known := g.tagUse(uid); uid != "" && !known {
+			g.changeSettings(func(s *Settings) { s.RfidTags = append(s.RfidTags, RfidTag{UID: uid, Use: m.Use}) })
+		}
+	case "host_tag_forget":
+		g.changeSettings(func(s *Settings) {
+			for i := range s.RfidTags {
+				if strings.EqualFold(s.RfidTags[i].UID, m.UID) {
+					s.RfidTags = append(s.RfidTags[:i], s.RfidTags[i+1:]...)
+					return
+				}
+			}
+		})
 	case "host_tank_ping":
 		g.pingSent[m.Tank] = time.Now()
 		delete(g.pingMs, m.Tank)
@@ -257,4 +336,80 @@ func (g *game) loadPreset(c *client, name string) {
 	s.Tuning = t
 	g.applySettings(s)
 	log.Printf("[Presets] loaded %q", name)
+}
+
+// changeSettings applies a change to a copy of the settings (the lists are
+// copied too) and saves it.
+func (g *game) changeSettings(change func(s *Settings)) {
+	s := g.settings
+	s.Alliances = append([]Alliance(nil), s.Alliances...)
+	s.CapturePoints = append([]CapturePoint(nil), s.CapturePoints...)
+	s.RfidTags = append([]RfidTag(nil), s.RfidTags...)
+	tanks := map[string]string{}
+	for k, v := range s.TankAlliances {
+		tanks[k] = v
+	}
+	s.TankAlliances = tanks
+	change(&s)
+	g.saveNewSettings(s)
+}
+
+// Colours offered to new alliances.
+var allianceColors = []string{"#e04040", "#3a7bd5", "#a050d0", "#f08020", "#20b0b0", "#d040a0"}
+
+// listChange adds or removes an alliance or capture point.
+func listChange(s *Settings, m inMsg) {
+	newID := func(prefix string, taken func(id string) bool) string {
+		for i := 1; ; i++ {
+			if id := fmt.Sprintf("%s%d", prefix, i); !taken(id) {
+				return id
+			}
+		}
+	}
+	switch m.T {
+	case "host_alliance_add":
+		if len(s.Alliances) >= maxAlliances {
+			return
+		}
+		id := newID("alliance", func(id string) bool {
+			for _, a := range s.Alliances {
+				if a.ID == id {
+					return true
+				}
+			}
+			return false
+		})
+		color := allianceColors[len(s.Alliances)%len(allianceColors)]
+		s.Alliances = append(s.Alliances, Alliance{ID: id, Name: fmt.Sprintf("Alliance %d", len(s.Alliances)+1), Color: color})
+	case "host_alliance_remove":
+		if len(s.Alliances) <= 1 {
+			return // a game needs at least one
+		}
+		for i, a := range s.Alliances {
+			if a.ID == m.ID {
+				s.Alliances = append(s.Alliances[:i], s.Alliances[i+1:]...)
+				break
+			}
+		}
+	case "host_point_add":
+		if len(s.CapturePoints) >= maxCapturePoints {
+			return
+		}
+		id := newID("point", func(id string) bool {
+			for _, p := range s.CapturePoints {
+				if p.ID == id {
+					return true
+				}
+			}
+			return false
+		})
+		s.CapturePoints = append(s.CapturePoints, CapturePoint{ID: id, Name: fmt.Sprintf("Point %d", len(s.CapturePoints)+1)})
+	case "host_point_remove":
+		for i, p := range s.CapturePoints {
+			if p.ID == m.ID {
+				s.CapturePoints = append(s.CapturePoints[:i], s.CapturePoints[i+1:]...)
+				break
+			}
+		}
+	}
 }

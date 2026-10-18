@@ -201,9 +201,9 @@ func TestDeathReturnToBaseAndRespawn(t *testing.T) {
 		t.Fatal("Bob's tank didn't stop and explode")
 	}
 	g.mu.Lock()
-	pts := g.match.teamPoints
+	pts := g.match.alliancePoints
 	g.mu.Unlock()
-	if pts != [2]int{25, 0} {
+	if pts[0] != 25 || pts[1] != 0 {
 		t.Fatalf("team points %v, want Desert 25", pts)
 	}
 
@@ -276,7 +276,7 @@ func TestBaseHealRefillsHp(t *testing.T) {
 func TestKillPointsWinTheGame(t *testing.T) {
 	g, _, w, _, a, b := combatGame(t, func(s *Settings) {
 		s.DamagePerHit = 100
-		s.MaxTeamPoints = 25
+		s.PointsToWin = 25
 	})
 	w.set(map[string]int{"b": 0x01}, map[string]int{"b": 0x01})
 	shoot(g, a)
@@ -286,8 +286,8 @@ func TestKillPointsWinTheGame(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		st = b.state()
 	}
-	if st.Phase != phaseEnded || st.WinnerTeam != "Desert Squad" || st.EndCode != "points" {
-		t.Fatalf("phase %s, winner %q, code %q", st.Phase, st.WinnerTeam, st.EndCode)
+	if st.Phase != phaseEnded || st.WinnerAlliance != "Desert Squad" || st.EndCode != "points" {
+		t.Fatalf("phase %s, winner %q, code %q", st.Phase, st.WinnerAlliance, st.EndCode)
 	}
 	var alice result
 	for _, r := range st.Results {
@@ -315,8 +315,8 @@ func TestTimeUpWinner(t *testing.T) {
 	g.mu.Unlock()
 	g.tick(200 * time.Millisecond)
 	st := b.state()
-	if st.WinnerTeam != "Desert Squad" || st.EndCode != "time" {
-		t.Fatalf("winner %q code %q", st.WinnerTeam, st.EndCode)
+	if st.WinnerAlliance != "Desert Squad" || st.EndCode != "time" {
+		t.Fatalf("winner %q code %q", st.WinnerAlliance, st.EndCode)
 	}
 }
 
@@ -324,7 +324,7 @@ func TestHostEndHasNoWinner(t *testing.T) {
 	_, _, _, h, _, b := combatGame(t, nil)
 	h.send(inMsg{T: "host_end"})
 	st := b.state()
-	if st.Phase != phaseEnded || st.WinnerTeam != "" || st.EndCode != "manual" {
-		t.Fatalf("phase %s winner %q code %q", st.Phase, st.WinnerTeam, st.EndCode)
+	if st.Phase != phaseEnded || st.WinnerAlliance != "" || st.EndCode != "manual" {
+		t.Fatalf("phase %s winner %q code %q", st.Phase, st.WinnerAlliance, st.EndCode)
 	}
 }
