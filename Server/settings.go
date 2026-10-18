@@ -14,7 +14,7 @@ import (
 // Settings is everything the host can change. Field names are the JSON
 // names the phone pages use.
 type Settings struct {
-	HostPassword     string `json:"hostPassword"`
+	ClientPassword   string `json:"clientPassword"`   // players enter it on Name Entry; "" = anyone can join
 	MaxPlayers       int    `json:"maxPlayers"`       // lobby size before people queue; 0 = one per connected tank
 	MatchSeconds     int    `json:"matchSeconds"`     // length of a game
 	CountdownSeconds int    `json:"countdownSeconds"` // "3, 2, 1, GO" before a game
@@ -115,8 +115,6 @@ type Tuning struct {
 	VideoQuality   int  `json:"videoQuality"`   // JPEG quality: lower = better picture, bigger frames
 }
 
-const defaultHostPassword = "thundergeddon"
-
 func defaultTuning() Tuning {
 	return Tuning{
 		DriveMin: 0.8, DrivePulseMs: 20, DriveKickMs: 120, DriveBrake: true,
@@ -129,7 +127,6 @@ func defaultTuning() Tuning {
 
 func defaultSettings() Settings {
 	s := Settings{
-		HostPassword:     defaultHostPassword,
 		MatchSeconds:     5 * 60,
 		CountdownSeconds: 5,
 		FireCooldownMs:   3000,
@@ -178,8 +175,9 @@ func defaultSettings() Settings {
 
 // clamp keeps values in sensible ranges, whatever a page or an old file sent.
 func (s *Settings) clamp() {
-	if s.HostPassword == "" {
-		s.HostPassword = defaultHostPassword
+	s.ClientPassword = strings.TrimSpace(s.ClientPassword)
+	if len(s.ClientPassword) > 32 {
+		s.ClientPassword = s.ClientPassword[:32]
 	}
 	s.MaxPlayers = max(0, min(s.MaxPlayers, 40))
 	s.MatchSeconds = max(30, min(s.MatchSeconds, 60*60))

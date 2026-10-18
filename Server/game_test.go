@@ -134,7 +134,7 @@ func (p *testPhone) lastError() string {
 
 func hostUp(t *testing.T, g *game) *testPhone {
 	h := phone(t, g, "host")
-	h.send(inMsg{T: "host_login", Password: defaultHostPassword})
+	h.send(inMsg{T: "host_login"})
 	h.send(inMsg{T: "host_open"})
 	if s := h.state(); !s.Me.IsHost || s.Phase != phaseLobby {
 		t.Fatalf("host not in an open lobby: %+v", s)
@@ -166,18 +166,42 @@ func TestQueueBeforeHostThenLobbyByCapacity(t *testing.T) {
 	}
 }
 
-func TestWrongPasswords(t *testing.T) {
+// No host password (for now): Host Game is enough, and another phone can
+// take hosting over. Players need the game password when the host set one.
+func TestPasswords(t *testing.T) {
 	g, _ := newTestGame(t, "Desert-01")
-	h := phone(t, g, "host")
-	h.send(inMsg{T: "host_login", Password: "nope"})
-	if !strings.Contains(h.lastError(), "Wrong host password") || h.g.hostDevice != "" {
-		t.Fatal("wrong host password accepted")
-	}
-	h.send(inMsg{T: "host_open"})
+	a := phone(t, g, "a")
+	a.send(inMsg{T: "host_open"})
 	if g.phase != phaseIdle {
-		t.Fatal("non-host opened the lobby")
+		t.Fatal("a phone that isn't the host opened the lobby")
 	}
 
+	h := phone(t, g, "host")
+	h.send(inMsg{T: "host_login"})
+	if g.hostDevice != "host" {
+		t.Fatal("Host Game didn't make this phone the host")
+	}
+	st := g.settings
+	st.ClientPassword = "tanks"
+	h.send(inMsg{T: "host_settings", Settings: &st})
+	if s := a.state(); !s.PasswordRequired {
+		t.Fatal("players aren't told a password is needed")
+	}
+
+	a.send(inMsg{T: "join", Name: "Alice", Password: "x"})
+	if !strings.Contains(a.lastError(), "Wrong game password") {
+		t.Fatal("wrong game password accepted")
+	}
+	a.send(inMsg{T: "join", Name: "Alice", Password: "tanks"})
+	if a.state().Me.Status == "" {
+		t.Fatal("right game password refused")
+	}
+
+	h2 := phone(t, g, "host2")
+	h2.send(inMsg{T: "host_login"})
+	if g.hostDevice != "host2" {
+		t.Fatal("another phone couldn't take hosting over")
+	}
 }
 
 func TestPlayerCantUseHostActions(t *testing.T) {

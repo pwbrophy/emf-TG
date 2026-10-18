@@ -43,8 +43,9 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 Players' link: `http://<hub>:8088/join` goes straight to Name Entry (no
 title or menu), e.g. from a QR code at a festival.
 
-Host password default: `thundergeddon` (change it in Server Config →
-Server Settings). Settings are saved on the router in
+No host password for now: tapping Host Game makes that phone the host
+(taking over from another phone after a check). Players can be asked for a
+game password, set in Server Settings. Settings are saved on the router in
 `/etc/thundergeddon/settings.json`. The host pages follow
 `Docs/ui-flow.drawio`: Server Settings → Server Lobby (Robots, Players,
 Client Lobby, Queue) → Server Gameplay Control → Game Over; everything else

@@ -194,7 +194,7 @@ type inMsg struct {
 	Device   string     `json:"device"`
 	Display  bool       `json:"display"` // hello from the spectator display
 	Name     string     `json:"name"`
-	Password string     `json:"password"` // host password
+	Password string     `json:"password"` // the game password, when joining
 	Tank     string     `json:"tank"`
 	Target   string     `json:"target"` // a player's device, for host actions
 	L        float64    `json:"l"`
@@ -239,7 +239,7 @@ func (g *game) handle(c *client, m inMsg) {
 	case "fire":
 		g.fire(c.device)
 	case "join":
-		g.join(c, m.Name)
+		g.join(c, m.Name, m.Password)
 	case "leave":
 		g.removePlayer(c.device)
 	case "pick_tank":
@@ -258,7 +258,7 @@ func (g *game) handle(c *client, m inMsg) {
 		g.playAgain(c.device)
 
 	case "host_login":
-		g.hostLogin(c, m.Password)
+		g.hostLogin(c)
 	default:
 		if !strings.HasPrefix(m.T, "host_") {
 			return
@@ -388,10 +388,14 @@ func (g *game) clientGone(c *client) {
 	g.broadcast()
 }
 
-func (g *game) join(c *client, name string) {
+func (g *game) join(c *client, name, password string) {
 	name = cleanName(name)
 	if name == "" {
 		g.sendError(c, "Please enter a name.")
+		return
+	}
+	if g.settings.ClientPassword != "" && password != g.settings.ClientPassword {
+		g.sendError(c, "Wrong game password.")
 		return
 	}
 	p := g.players[c.device]
@@ -756,11 +760,9 @@ func (g *game) fire(device string) {
 
 // ── The game cycle ───────────────────────────────────────────────────────────
 
-func (g *game) hostLogin(c *client, password string) {
-	if password != g.settings.HostPassword {
-		g.sendError(c, "Wrong host password.")
-		return
-	}
+// hostLogin makes this phone the host. There is no host password for now:
+// tapping Host Game is enough (and takes hosting over from another phone).
+func (g *game) hostLogin(c *client) {
 	if g.hostDevice != "" && g.hostDevice != c.device {
 		log.Printf("[Game] hosting taken over by another phone")
 	} else {
@@ -1134,48 +1136,50 @@ type controlsView struct {
 }
 
 type snapshot struct {
-	T              string       `json:"t"`
-	Phase          phase        `json:"phase"`
-	Paused         bool         `json:"paused"`
-	Hosted         bool         `json:"hosted"`
-	RemainingMs    int64        `json:"remainingMs"` // countdown or match time left
-	Capacity       int          `json:"capacity"`
-	FireCooldownMs int          `json:"fireCooldownMs"`
-	TwoPlayer      bool         `json:"twoPlayer"` // 2-player tanks are allowed
-	Alliances      []Alliance   `json:"alliances"`
-	EndReason      string       `json:"endReason,omitempty"`
-	EndCode        string       `json:"endCode,omitempty"`        // "time", "points", "manual"
-	WinnerAlliance string       `json:"winnerAlliance,omitempty"` // "" = no winner
-	AlliancePoints []int        `json:"alliancePoints"`
-	PointsToWin    int          `json:"pointsToWin"`
-	CapturePoints  []pointView  `json:"capturePoints"`
-	Controls       controlsView `json:"controls"`
-	Me             meView       `json:"me"`
-	Tanks          []tankView   `json:"tanks"`
-	Players        []playerView `json:"players"` // lobby and game
-	Queue          []playerView `json:"queue"`
-	Results        []result     `json:"results,omitempty"`
-	Settings       *Settings    `json:"settings,omitempty"` // host only
-	RfidTags       []tagView    `json:"rfidTags,omitempty"` // host only: every known tag
-	Presets        []string     `json:"presets,omitempty"`  // host only: saved tuning presets
+	T                string       `json:"t"`
+	Phase            phase        `json:"phase"`
+	Paused           bool         `json:"paused"`
+	Hosted           bool         `json:"hosted"`
+	PasswordRequired bool         `json:"passwordRequired"` // joining needs the game password
+	RemainingMs      int64        `json:"remainingMs"`      // countdown or match time left
+	Capacity         int          `json:"capacity"`
+	FireCooldownMs   int          `json:"fireCooldownMs"`
+	TwoPlayer        bool         `json:"twoPlayer"` // 2-player tanks are allowed
+	Alliances        []Alliance   `json:"alliances"`
+	EndReason        string       `json:"endReason,omitempty"`
+	EndCode          string       `json:"endCode,omitempty"`        // "time", "points", "manual"
+	WinnerAlliance   string       `json:"winnerAlliance,omitempty"` // "" = no winner
+	AlliancePoints   []int        `json:"alliancePoints"`
+	PointsToWin      int          `json:"pointsToWin"`
+	CapturePoints    []pointView  `json:"capturePoints"`
+	Controls         controlsView `json:"controls"`
+	Me               meView       `json:"me"`
+	Tanks            []tankView   `json:"tanks"`
+	Players          []playerView `json:"players"` // lobby and game
+	Queue            []playerView `json:"queue"`
+	Results          []result     `json:"results,omitempty"`
+	Settings         *Settings    `json:"settings,omitempty"` // host only
+	RfidTags         []tagView    `json:"rfidTags,omitempty"` // host only: every known tag
+	Presets          []string     `json:"presets,omitempty"`  // host only: saved tuning presets
 }
 
 func (g *game) snapshot(device string) snapshot {
 	isHost := device != "" && device == g.hostDevice
 	t := g.settings.Tuning
 	s := snapshot{
-		T:              "state",
-		Phase:          g.phase,
-		Paused:         g.paused,
-		Hosted:         g.hostDevice != "",
-		Capacity:       g.capacity(),
-		FireCooldownMs: g.settings.FireCooldownMs,
-		TwoPlayer:      g.settings.TwoPlayerTanks,
-		Alliances:      g.settings.Alliances,
-		AlliancePoints: make([]int, len(g.settings.Alliances)),
-		EndReason:      g.endReason,
-		RemainingMs:    g.remaining().Milliseconds(),
-		PointsToWin:    g.settings.PointsToWin,
+		T:                "state",
+		Phase:            g.phase,
+		Paused:           g.paused,
+		Hosted:           g.hostDevice != "",
+		PasswordRequired: g.settings.ClientPassword != "",
+		Capacity:         g.capacity(),
+		FireCooldownMs:   g.settings.FireCooldownMs,
+		TwoPlayer:        g.settings.TwoPlayerTanks,
+		Alliances:        g.settings.Alliances,
+		AlliancePoints:   make([]int, len(g.settings.Alliances)),
+		EndReason:        g.endReason,
+		RemainingMs:      g.remaining().Milliseconds(),
+		PointsToWin:      g.settings.PointsToWin,
 		Controls: controlsView{
 			Deadzone: t.JoyDeadzone, StartSpeed: t.JoyStartSpeed, FullAt: t.JoyFullAt, Curve: t.JoyCurve,
 			AxisSnap: t.JoyAxisSnap, TurnSpeed: t.JoyTurnSpeed, SlowTurretSpeed: t.SlowTurretSpeed,

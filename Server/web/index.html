@@ -77,24 +77,6 @@
     </footer>
   </section>
 
-  <!-- Host sign-in -->
-  <section id="screen-host-login" class="screen" aria-label="Host sign in">
-    <header class="appbar"><h2 id="host-login-title">Enter Host Password</h2></header>
-    <main class="content center">
-      <form class="form" id="form-host-login" autocomplete="off">
-        <p id="host-login-detail">Enter the host password.</p>
-        <label class="field">Host password
-          <input type="password" id="host-password" autocomplete="current-password" required>
-        </label>
-      </form>
-    </main>
-    <footer class="navbar">
-      <button class="nav-btn back" type="button" data-action="to-menu">Back</button>
-      <span class="nav-mid"></span>
-      <button class="nav-btn next" type="submit" form="form-host-login">Continue</button>
-    </footer>
-  </section>
-
   <!-- Join -->
   <section id="screen-join" class="screen" aria-label="Join game">
     <header class="appbar"><h2>Name Entry</h2></header>
@@ -103,6 +85,9 @@
         <svg class="bolt" viewBox="0 0 24 36" aria-hidden="true"><path d="M15 0 2 20h8l-3 16L22 13h-8l5-13z" fill="url(#bolt-fill)"/></svg>
         <label class="field">Your name
           <input type="text" id="join-name" maxlength="16" autocomplete="nickname" required>
+        </label>
+        <label class="field" id="join-password-field" hidden>Game password
+          <input type="password" id="join-password" autocomplete="off">
         </label>
       </form>
     </main>

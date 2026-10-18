@@ -120,7 +120,7 @@ function onMessage(m) {
 
 // ── Which screen ─────────────────────────────────────────────────────────────
 
-// Before joining or hosting: title | menu | host-login | join.
+// Before joining or hosting: title | menu | join.
 let localView = JOIN_LINK ? 'join' : 'title';
 let hostWanted = true;    // the host sees the console (false after tapping Menu)
 
@@ -143,7 +143,7 @@ function currentScreen() {
     case 'playing': return 'play';
     case 'finished': return 'results';
   }
-  return localView === 'host-login' && me.isHost ? 'menu' : localView;
+  return localView;
 }
 
 let shownScreen = '';
@@ -161,7 +161,10 @@ function render() {
   }
   switch (screen) {
     case 'menu': renderMenu(); break;
-    case 'join': $('join-back').style.visibility = JOIN_LINK ? 'hidden' : ''; break; // keeps Join on the right
+    case 'join':
+      $('join-back').style.visibility = JOIN_LINK ? 'hidden' : ''; // keeps Join on the right
+      $('join-password-field').hidden = !(state && state.passwordRequired);
+      break;
     case 'host': renderHost(); break;
     case 'wait': renderWait(); break;
     case 'lobby': renderLobby(); break;
@@ -173,10 +176,6 @@ function enterScreen(screen) {
   if (screen === 'join') {
     $('join-name').value = store('tg_player_name') || '';
     setTimeout(() => $('join-name').focus(), 50);
-  }
-  if (screen === 'host-login') {
-    $('host-password').value = '';
-    setTimeout(() => $('host-password').focus(), 50);
   }
   if (screen === 'results') fireworks();
 }
@@ -259,29 +258,32 @@ function nav(el, left, mid, right) {
   setHTML(el, `${left || '<span></span>'}<span class="nav-mid">${mid || ''}</span>${right || '<span></span>'}`);
 }
 
-// ── Menu, sign-in, join ──────────────────────────────────────────────────────
+// ── Menu, join ───────────────────────────────────────────────────────────────
 
 function renderMenu() {
   const hosted = state && state.hosted;
   const isHost = state && state.me.isHost;
-  $('host-label').textContent = isHost ? 'Host Console' : hosted ? 'Resume Hosting' : 'Host Game';
+  $('host-label').textContent = isHost ? 'Host Console' : hosted ? 'Take Over Hosting' : 'Host Game';
   $('host-sub').textContent = isHost ? 'Back to running the game'
-    : hosted ? 'A game is being hosted: sign in to take over' : 'Run a battle on this hub';
+    : hosted ? 'A game is being hosted: run it from this phone instead' : 'Run a battle on this hub';
 }
 
-$('form-host-login').addEventListener('submit', (e) => {
-  e.preventDefault();
+// Host Game: no host password for now, so this phone becomes the host
+// straight away (after a check if another phone is hosting).
+function becomeHost() {
+  if (state && state.me.isHost) { hostWanted = true; render(); return; }
+  if (state && state.hosted && !confirm('Another phone is hosting. Run the game from this phone instead?')) return;
   hostWanted = true;
-  hostPage = '';
-  send({ t: 'host_login', password: $('host-password').value });
-});
+  setHostPage('');
+  send({ t: 'host_login' });
+}
 
 $('form-join').addEventListener('submit', (e) => {
   e.preventDefault();
   const name = $('join-name').value.trim();
   if (!name) return;
   store('tg_player_name', name);
-  send({ t: 'join', name });
+  send({ t: 'join', name, password: $('join-password').value });
 });
 
 // ── Wait for game / Queue ────────────────────────────────────────────────────
@@ -482,7 +484,7 @@ function setHostPage(p) {
 }
 
 const CONFIG_PAGES = [
-  ['config-server', 'Server Settings', 'Debug menu, players before queuing, 2-player tanks, buzzer, host password'],
+  ['config-server', 'Server Settings', 'Game password, players before queuing, debug menu, 2-player tanks, buzzer'],
   ['config-gameplay', 'Gameplay Settings', 'Match length, points, damage, reload, dead time'],
   ['config-advanced', 'Advanced Settings', 'Motor, control and video tuning, shot timing, presets'],
   ['config-alliances', 'Alliances', 'Names, colours, add and remove'],
@@ -722,7 +724,7 @@ function renderHostConfig() {
   let html = '';
   let tabs = [];
   switch (hostPage) {
-    case 'config-server': html = serverSettingsForm() + `<div class="settings-grid">${field('Host password', 'hostPassword', 'text', 'maxlength="32"', true)}</div>`; break;
+    case 'config-server': html = serverSettingsForm(); break;
     case 'config-gameplay': html = gameplaySettingsForm(); break;
     case 'config-advanced': html = advancedSettings(); break;
     case 'config-alliances': html = alliancesPage(); break;
@@ -802,6 +804,7 @@ document.addEventListener('change', (e) => {
 function serverSettingsForm() {
   return `<div class="settings-grid">
     <label class="field wide">Game<select disabled><option>Realtime</option><option>Turn-based (coming later)</option></select></label>
+    ${field('Game password for players (blank = none)', 'clientPassword', 'text', 'maxlength="32" autocomplete="off"', true)}
     ${field('Players in lobby before queuing (0 = one per robot)', 'maxPlayers', 'int', 'min="0" max="40"', true)}
     <div class="wide chk-grid">${check('Debug menu on players&rsquo; phones', 'debugConsole')}
       ${check('2-player tanks (driver + gunner)', 'twoPlayerTanks')}${check('Tank buzzers on', 'tuning.buzzer')}</div>
@@ -1009,12 +1012,7 @@ document.addEventListener('click', (e) => {
     case 'to-title': go('title'); break;
     case 'to-menu': go('menu'); break;
     case 'to-join': go('join'); break;
-    case 'to-host-login':
-      if (state && state.me.isHost) { hostWanted = true; render(); break; }
-      $('host-login-detail').textContent = state && state.hosted
-        ? 'Someone is hosting. Signing in moves hosting to this phone.' : 'Enter the host password.';
-      go('host-login');
-      break;
+    case 'to-host-login': becomeHost(); break;
     case 'host-menu': hostWanted = false; setHostView('console'); go('menu'); break;
     case 'host-config': setHostPage('config'); break;
     case 'host-page': setHostPage(el.dataset.page); break;
