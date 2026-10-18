@@ -113,7 +113,7 @@ function onMessage(m) {
       break;
     case 'confirm_start': {
       const names = m.names.join(', ');
-      if (confirm(`${names} ${m.names.length === 1 ? "hasn't" : "haven't"} chosen a tank and will sit this game out. Start anyway?`)) {
+      if (confirm(`${names} ${m.names.length === 1 ? "hasn't" : "haven't"} chosen a tank: they sit this game out at the front of the queue. Start anyway?`)) {
         send({ t: 'host_start', force: true });
       }
       break;

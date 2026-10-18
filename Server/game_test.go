@@ -318,6 +318,8 @@ func TestStartWarnsAboutPlayersWithoutTanks(t *testing.T) {
 	a.send(inMsg{T: "join", Name: "Alice"})
 	b := phone(t, g, "b")
 	b.send(inMsg{T: "join", Name: "Bob"})
+	c := phone(t, g, "c")
+	c.send(inMsg{T: "join", Name: "Cat"}) // the lobby holds 2: Cat queues
 	a.send(inMsg{T: "pick_tank", Tank: "a"})
 
 	h.send(inMsg{T: "host_start"})
@@ -329,8 +331,19 @@ func TestStartWarnsAboutPlayersWithoutTanks(t *testing.T) {
 	if g.phase != phaseCountdown {
 		t.Fatal("forced start didn't start")
 	}
+	// Bob had no tank: he goes to the front of the queue, ahead of Cat.
+	if s := b.state(); s.Me.Status != "queued" || s.Me.QueuePos != 1 {
+		t.Fatalf("Bob (no tank) should be first in the queue: %+v", s.Me)
+	}
+	if s := c.state(); s.Me.QueuePos != 2 {
+		t.Fatalf("Cat should be second: %+v", s.Me)
+	}
+
+	// After the game Bob is first back into the lobby.
+	h.send(inMsg{T: "host_end"})
+	h.send(inMsg{T: "host_lobby"})
 	if s := b.state(); s.Me.Status != "lobby" {
-		t.Fatalf("Bob (no tank) should wait in the lobby: %s", s.Me.Status)
+		t.Fatalf("Bob should be in the next lobby: %+v", s.Me)
 	}
 }
 

@@ -803,6 +803,21 @@ func (g *game) start(c *client, force bool) {
 		g.sendTo(c.device, map[string]any{"t": "confirm_start", "names": names})
 		return
 	}
+	// Players without a tank sit this game out at the front of the queue,
+	// so they're first into the lobby for the next one. (The host playing
+	// too stays on the host pages.)
+	sort.Slice(without, func(i, j int) bool { return strings.ToLower(without[i].name) < strings.ToLower(without[j].name) })
+	var front []string
+	for _, p := range without {
+		if p.isHost {
+			continue
+		}
+		g.dequeue(p.device)
+		p.status = stQueued
+		p.role, p.allowGunner = "", false
+		front = append(front, p.device)
+	}
+	g.queue = append(front, g.queue...)
 	for _, p := range ready {
 		p.status = stPlaying
 		p.shots, p.driveTime = 0, 0
