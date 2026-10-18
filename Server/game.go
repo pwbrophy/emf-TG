@@ -310,6 +310,12 @@ func (g *game) hostAction(c *client, m inMsg) {
 		if p := g.players[m.Target]; p != nil && p.status == stLobby {
 			g.releaseTank(p)
 		}
+	case "host_player_rename":
+		if p := g.players[m.Target]; p != nil {
+			if name := cleanName(m.Name); name != "" {
+				p.name = g.uniqueName(name, p.device)
+			}
+		}
 	case "host_play":
 		g.hostPlay(c, m.On, m.Name)
 	default:

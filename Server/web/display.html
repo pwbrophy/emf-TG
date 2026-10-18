@@ -1361,7 +1361,7 @@ function startGrid() {
   const container = document.getElementById('tank-grid');
   const desert = (state.robots || []).filter(r => (r.alliance ?? 0) === 0);
   const jungle = (state.robots || []).filter(r => r.alliance === 1);
-  if (desert.length === 0 && jungle.length === 0) { container.classList.remove('active'); return; }
+  if (!(state.robots || []).length) { container.classList.remove('active'); return; }
 
   container.innerHTML = '';
   const squadNames = state.allianceNames || ['Desert Squad', 'Jungle Squad'];
@@ -1381,6 +1381,21 @@ function startGrid() {
     label.className = 'squad-label a1';
     label.textContent = squadNames[1];
     container.appendChild(label);
+  }
+  // Go server: the host can add more alliances. Each gets a band of its own
+  // below, labelled in its colour (same order as findGridIndexByCallsign).
+  let offset = desert.length + jungle.length;
+  const colors = state.allianceColors || [];
+  for (let a = 2; a < squadNames.length; a++) {
+    const robots = (state.robots || []).filter(r => r.alliance === a);
+    if (!robots.length) continue;
+    buildSquadBand(container, robots, offset, '', 'footer-bottom');
+    const label = document.createElement('div');
+    label.className = 'squad-label';
+    label.style.color = colors[a] || '';
+    label.textContent = squadNames[a];
+    container.appendChild(label);
+    offset += robots.length;
   }
 
   container.classList.add('active');
@@ -1811,14 +1826,32 @@ function renderTeamBar() {
 
 function renderCapturePoints() {
   const pts = state.capturePoints || [];
-  for (let i = 0; i < 3; i++) {
+  const colors = state.allianceColors || [];
+  // The host names the alliances' colours (Go server): the first two drive
+  // the page's two team colours; the rest colour the capture points.
+  if (colors[0]) document.documentElement.style.setProperty('--blue', colors[0]);
+  if (colors[1]) document.documentElement.style.setProperty('--red', colors[1]);
+  // The host can add, remove and rename capture points: rebuild the column
+  // when they change.
+  const sidebar = document.getElementById('capture-sidebar');
+  const key = pts.map(p => p.name).join('\n');
+  if (sidebar.dataset.key !== key) {
+    sidebar.dataset.key = key;
+    sidebar.innerHTML = pts.map((p, i) =>
+      `<div class="cp-block"><div class="cp-circle" id="cp-${i}"></div><div class="cp-label">${escHtml(p.name)}</div></div>`).join('');
+    const size = pts.length > 3 ? Math.max(60, Math.floor(510 / pts.length)) : 170;
+    sidebar.querySelectorAll('.cp-circle').forEach(c => { c.style.width = c.style.height = size + 'px'; });
+  }
+  pts.forEach((p, i) => {
     const circle = document.getElementById('cp-' + i);
-    if (!circle) continue;
-    const owner = pts[i] ? pts[i].owner : -1;
+    if (!circle) return;
+    const owner = p.owner;
     // Use classList so cp-flash is never clobbered
     circle.classList.remove('owner-0', 'owner-1');
     if (owner >= 0) circle.classList.add('owner-' + owner);
-  }
+    circle.style.background = owner >= 2 && colors[owner] ? colors[owner] : '';
+    circle.style.borderColor = owner >= 2 && colors[owner] ? colors[owner] : '';
+  });
 }
 
 // ── Text-to-speech announcer ──────────────────────────────────────────────

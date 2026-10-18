@@ -40,22 +40,34 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | `web/streams.html` | Video test page |
 | `cmd/loadtest` | Fake tanks and viewers for load tests |
 
-Host password default: `thundergeddon` (change it in the host's Game
-settings). Settings are saved on the router in
-`/etc/thundergeddon/settings.json`.
+Players' link: `http://<hub>:8088/join` goes straight to Name Entry (no
+title or menu), e.g. from a QR code at a festival.
+
+Host password default: `thundergeddon` (change it in Server Config →
+Server Settings). Settings are saved on the router in
+`/etc/thundergeddon/settings.json`. The host pages follow
+`Docs/ui-flow.drawio`: Server Settings → Server Lobby (Robots, Players,
+Client Lobby, Queue) → Server Gameplay Control → Game Over; everything else
+is under Server Config (the sliders button).
 
 Combat follows the Unity version: 25 damage a hit (rear ×3, side ×1.5), a
 5 s explosion on death, then "return to base" until the tank scans its own
-team's base tag, 25 team points a kill and 300 to win. Teams come from tank
-names (Desert-… / Jungle-…): a game needs tanks from both teams for shots to
-hit anything. Base tags default to the ones in the Unity scene; the host can
-change them in Game settings, and the host's "RFID scans" list shows each
-tag a tank reads.
+alliance's base tag, 25 points a kill and 300 to win. "Alliance" is the
+realtime game's side (the planned turn-based mode can have several teams in
+an alliance). The host can add, remove, rename and recolour alliances; a
+tank is in the alliance its name starts with (Desert-01 → Desert Squad)
+unless the host chooses another.
 
-Capture points: driving over a point's tag (North / Centre / South) takes
-it; a team scores one point every 3 s per point held divided by the points
-it holds (Unity's rule). The LED beacons find the server by themselves and
-show each owner's colour.
+RFID tags: every tag a tank reads is listed in Server Config → Tags and
+Capture Points, where the host makes it an alliance's base or a capture
+point. The defaults are the tags in the Unity scene.
+
+Capture points (host can add, remove and rename them): driving over a
+point's tag takes it; an alliance scores one point every 3 s per point held
+divided by the points it holds (Unity's rule). There are three LED beacons
+(built as North, Centre, South); each capture point can be shown on one.
+They find the server by themselves and show the owner's colour. The
+spectator display's points bar shows the first two alliances.
 
 2-player tanks (host setting): a driver can let a second player join as
 gunner. The driver drives, the gunner turns the turret and fires; kills go

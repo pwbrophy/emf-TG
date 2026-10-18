@@ -79,7 +79,7 @@
 
   <!-- Host sign-in -->
   <section id="screen-host-login" class="screen" aria-label="Host sign in">
-    <header class="appbar"><h2 id="host-login-title">Host Game</h2></header>
+    <header class="appbar"><h2 id="host-login-title">Enter Host Password</h2></header>
     <main class="content center">
       <form class="form" id="form-host-login" autocomplete="off">
         <p id="host-login-detail">Enter the host password.</p>
@@ -97,19 +97,17 @@
 
   <!-- Join -->
   <section id="screen-join" class="screen" aria-label="Join game">
-    <header class="appbar"><h2>Join Game</h2></header>
+    <header class="appbar"><h2>Name Entry</h2></header>
     <main class="content center">
       <form class="form" id="form-join" autocomplete="off">
+        <svg class="bolt" viewBox="0 0 24 36" aria-hidden="true"><path d="M15 0 2 20h8l-3 16L22 13h-8l5-13z" fill="url(#bolt-fill)"/></svg>
         <label class="field">Your name
           <input type="text" id="join-name" maxlength="16" autocomplete="nickname" required>
-        </label>
-        <label class="field" id="join-password-field" hidden>Game password
-          <input type="password" id="join-password">
         </label>
       </form>
     </main>
     <footer class="navbar">
-      <button class="nav-btn back" type="button" data-action="to-menu">Back</button>
+      <button class="nav-btn back" type="button" data-action="to-menu" id="join-back">Back</button>
       <span class="nav-mid"></span>
       <button class="nav-btn next" type="submit" form="form-join">Join</button>
     </footer>
@@ -118,14 +116,22 @@
   <!-- Screens drawn from the game state: host console, waiting, lobby,
        results. app.js fills in each part. -->
   <section id="screen-host" class="screen" aria-label="Host">
-    <header class="appbar"><h2 id="host-title">Host</h2><span class="appbar-info" id="host-info"></span></header>
+    <header class="appbar">
+      <h2 id="host-title">Server</h2>
+      <span class="appbar-right"><span class="appbar-info" id="host-info"></span>
+        <button class="icon-btn small" type="button" data-action="host-config" id="host-config-btn" aria-label="Server Config" title="Server Config">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>
+          </svg>
+        </button></span>
+    </header>
     <nav class="tabs" id="host-tabs" role="tablist"></nav>
     <main class="content" id="host-body"></main>
     <footer class="navbar" id="host-nav"></footer>
   </section>
 
   <section id="screen-wait" class="screen" aria-label="Waiting">
-    <header class="appbar"><h2 id="wait-title">Waiting</h2></header>
+    <header class="appbar"><h2 id="wait-title">Wait for Game</h2></header>
     <main class="content center" id="wait-body"></main>
     <footer class="navbar">
       <button class="nav-btn back" type="button" data-action="leave">Leave</button>
@@ -135,7 +141,7 @@
   </section>
 
   <section id="screen-lobby" class="screen" aria-label="Lobby">
-    <header class="appbar"><h2>Lobby</h2><span class="appbar-info" id="lobby-info"></span></header>
+    <header class="appbar"><h2>Client Lobby</h2><span class="appbar-info" id="lobby-info"></span></header>
     <nav class="tabs" id="lobby-tabs" role="tablist"></nav>
     <main class="content" id="lobby-body"></main>
     <footer class="navbar">

@@ -102,6 +102,10 @@ func main() {
 	if *fakeTanks > 0 {
 		mux.HandleFunc("POST /api/dev/rfid", tanks.handleFakeRfid) // pretend tag scans
 	}
+	// The link to give players (e.g. on a QR code): straight to Name Entry.
+	mux.HandleFunc("GET /join", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/#join", http.StatusFound)
+	})
 	mux.Handle("/", noCacheHTML(http.FileServer(http.FS(web))))
 
 	srv := &http.Server{
