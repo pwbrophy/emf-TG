@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Thundergeddon – Test Grid</title>
+  <!--
+    Test grid: six player pages side by side, each a pretend phone of its
+    own (?device=…), opened on Name Entry with a random name. For trying the
+    game with several players from one computer. Rebuilt for the Go server
+    from the Unity-era Webserver/.../wwwroot/test-grid.html.
+
+    Options: ?players=N (1-12, default 6).
+  -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0d0d14;
+      color: #e8e8f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 10px;
+      padding: 6px 12px;
+      background: #111120;
+      border-bottom: 1px solid #2e2e50;
+      flex-shrink: 0;
+    }
+
+    #toolbar h1 {
+      font-size: 0.95rem;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      background: linear-gradient(135deg, #ff4d1c, #ff8c00);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-right: 4px;
+    }
+
+    .btn {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+    }
+    .btn:active { opacity: 0.8; }
+    .btn-primary   { background: #ff4d1c; color: #fff; }
+    .btn-secondary { background: #2e2e50; color: #e8e8f0; }
+
+    #password {
+      width: 150px;
+      padding: 5px 8px;
+      border: 1px solid #2e2e50;
+      border-radius: 6px;
+      background: #1a1a28;
+      color: #e8e8f0;
+      font-size: 0.8rem;
+    }
+
+    #toolbar-right {
+      margin-left: auto;
+      font-size: 0.78rem;
+      color: #6b6b90;
+    }
+
+    #grid {
+      flex: 1;
+      display: grid;
+      gap: 3px;
+      padding: 3px;
+      overflow: hidden;
+    }
+
+    .cell {
+      display: flex;
+      flex-direction: column;
+      background: #1a1a28;
+      border: 1px solid #2e2e50;
+      border-radius: 5px;
+      overflow: hidden;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .cell-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      background: #0d0d14;
+      border-bottom: 1px solid #2e2e50;
+      flex-shrink: 0;
+      height: 28px;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #2e2e50;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status-dot.pending { background: #ff8c00; }
+    .status-dot.joined  { background: #22cc55; }
+
+    .player-num   { font-size: 0.7rem; color: #6b6b90; font-weight: 700; flex-shrink: 0; }
+    .player-name  { font-size: 0.82rem; font-weight: 700; color: #ff8c00; }
+    .player-where { font-size: 0.72rem; color: #6b6b90; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .conn-btn {
+      padding: 2px 9px;
+      border: none;
+      border-radius: 4px;
+      background: #ff4d1c;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .conn-btn:active  { opacity: 0.8; }
+    .conn-btn:disabled { background: #2e2e50; color: #6b6b90; cursor: default; }
+    .conn-btn.joined   { background: #2a7a2a; }
+
+    iframe {
+      flex: 1;
+      border: none;
+      width: 100%;
+      min-height: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>THUNDERGEDDON TEST GRID</h1>
+  <button class="btn btn-primary"   type="button" onclick="connectAll()">Connect All</button>
+  <button class="btn btn-secondary" type="button" onclick="chooseTanks()">Choose Tanks</button>
+  <button class="btn btn-secondary" type="button" onclick="rerollNames()">New Names</button>
+  <button class="btn btn-secondary" type="button" onclick="reloadAll()">Reload All</button>
+  <input id="password" type="text" placeholder="Game password (if set)" aria-label="Game password">
+  <span id="toolbar-right"></span>
+</div>
+
+<div id="grid"></div>
+
+<script>
+'use strict';
+
+const COUNT = Math.max(1, Math.min(12, parseInt(new URLSearchParams(location.search).get('players'), 10) || 6));
+
+// ── Name pool ────────────────────────────────────────────────────────────────
+const NAME_POOL = [
+  'Blaze','Turbo','Nitro','Thunder','Viper','Storm',
+  'Ace','Bolt','Flash','Rex','Gunner','Shadow',
+  'Iron','Steel','Diesel','Hawk','Wolf','Bravo',
+  'Delta','Foxtrot','Kilo','Oscar','Zulu','Tank',
+];
+
+let playerNames = [];
+let connecting  = [];
+// Each frame is a pretend phone with its own id, so the server sees COUNT
+// different players. A new set of ids on every Reload All (the old ones are
+// told to leave first).
+let gridId = '';
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickNames() {
+  playerNames = shuffle(NAME_POOL).slice(0, COUNT);
+}
+
+function frameDoc(i) {
+  try { return document.getElementById('frame-' + i).contentDocument; } catch (_) { return null; }
+}
+
+function frameWin(i) {
+  try { return document.getElementById('frame-' + i).contentWindow; } catch (_) { return null; }
+}
+
+// ── Grid builder ─────────────────────────────────────────────────────────────
+function buildGrid() {
+  gridId = Math.random().toString(36).slice(2, 7);
+  connecting = Array(COUNT).fill(false);
+  const grid = document.getElementById('grid');
+  const cols = COUNT <= 3 ? COUNT : COUNT <= 8 ? Math.ceil(COUNT / 2) : Math.ceil(COUNT / 3);
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  grid.style.gridTemplateRows = `repeat(${Math.ceil(COUNT / cols)}, 1fr)`;
+  grid.innerHTML = '';
+
+  for (let i = 0; i < COUNT; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.innerHTML = `
+      <div class="cell-header">
+        <div class="status-dot" id="dot-${i}"></div>
+        <span class="player-num">P${i + 1}</span>
+        <span class="player-name" id="name-label-${i}"></span>
+        <span class="player-where" id="where-${i}"></span>
+        <button class="conn-btn" type="button" id="conn-btn-${i}" onclick="connectPlayer(${i})">Connect</button>
+      </div>
+      <iframe id="frame-${i}" title="Player ${i + 1}" src="/?device=grid-${gridId}-${i + 1}#join"></iframe>`;
+    cell.querySelector('.player-name').textContent = playerNames[i];
+    grid.appendChild(cell);
+    wireFrameLoad(i);
+  }
+  document.getElementById('toolbar-right').textContent =
+    `${COUNT} players · each frame is its own phone · ?players=N for more or fewer`;
+}
+
+// Pre-fill the name as soon as the frame has loaded.
+function wireFrameLoad(i) {
+  document.getElementById('frame-' + i).addEventListener('load', () => fillName(i));
+}
+
+function fillName(i) {
+  const doc = frameDoc(i);
+  const input = doc && doc.getElementById('join-name');
+  if (input) input.value = playerNames[i];
+}
+
+// Where a frame's player is: Name Entry, Queue, Client Lobby, in a game...
+function whereIs(i) {
+  const doc = frameDoc(i);
+  if (!doc) return '';
+  if (/\/play\.html$/.test(doc.location.pathname)) return 'In the game';
+  const active = doc.querySelector('.screen.active');
+  if (!active) return '';
+  const h2 = active.querySelector('.appbar h2');
+  return h2 ? h2.textContent.trim() : '';
+}
+
+function joined(i) {
+  const w = whereIs(i);
+  return w !== '' && w !== 'Name Entry';
+}
+
+// Keep each header up to date.
+setInterval(() => {
+  for (let i = 0; i < COUNT; i++) {
+    const where = document.getElementById('where-' + i);
+    if (!where) continue;
+    where.textContent = whereIs(i);
+    if (joined(i)) markJoined(i);
+    else if (!connecting[i]) markIdle(i);
+  }
+}, 500);
+
+// ── Per-player connect ────────────────────────────────────────────────────────
+function connectPlayer(i) {
+  if (connecting[i] || joined(i)) return;
+  connecting[i] = true;
+
+  document.getElementById('dot-' + i).className = 'status-dot pending';
+  const btn = document.getElementById('conn-btn-' + i);
+  btn.textContent = '…';
+  btn.disabled = true;
+
+  let tries = 0;
+  function tryJoin() {
+    if (joined(i)) { connecting[i] = false; markJoined(i); return; }
+    if (++tries > 40) { connecting[i] = false; markIdle(i); return; } // gave up (~12 s)
+    const doc = frameDoc(i);
+    const joinBtn = doc && doc.querySelector('button[form=form-join]');
+    if (!doc || doc.readyState !== 'complete' || !joinBtn) { setTimeout(tryJoin, 300); return; }
+    fillName(i);
+    const pw = doc.getElementById('join-password');
+    if (pw) pw.value = document.getElementById('password').value;
+    joinBtn.click();
+    setTimeout(tryJoin, 300); // check it worked (a wrong password stays on Name Entry)
+  }
+  tryJoin();
+}
+
+function markJoined(i) {
+  document.getElementById('dot-' + i).className = 'status-dot joined';
+  const btn = document.getElementById('conn-btn-' + i);
+  btn.textContent = 'Joined';
+  btn.disabled = true;
+  btn.classList.add('joined');
+}
+
+function markIdle(i) {
+  document.getElementById('dot-' + i).className = 'status-dot';
+  const btn = document.getElementById('conn-btn-' + i);
+  btn.textContent = 'Connect';
+  btn.disabled = false;
+  btn.classList.remove('joined');
+}
+
+// ── Toolbar actions ───────────────────────────────────────────────────────────
+function connectAll() {
+  for (let i = 0; i < COUNT; i++) setTimeout(() => connectPlayer(i), i * 150);
+}
+
+// Choose Tanks: each player in the Client Lobby without a tank takes the
+// first free one, one after another so they don't pick the same tank.
+function chooseTanks() {
+  let i = 0;
+  function next() {
+    if (i >= COUNT) return;
+    const doc = frameDoc(i++);
+    const card = doc && !doc.querySelector('.tank-card.mine') &&
+      doc.querySelector('#screen-lobby.active .tank-card[data-action="pick"]:not([disabled])');
+    if (card) card.click();
+    setTimeout(next, card ? 400 : 0);
+  }
+  next();
+}
+
+function rerollNames() {
+  pickNames();
+  for (let i = 0; i < COUNT; i++) {
+    document.getElementById('name-label-' + i).textContent = playerNames[i];
+    fillName(i);
+  }
+}
+
+function leaveAll() {
+  for (let i = 0; i < COUNT; i++) {
+    const w = frameWin(i);
+    try { if (w && typeof w.send === 'function') w.send({ t: 'leave' }); } catch (_) {}
+  }
+}
+
+function reloadAll() {
+  leaveAll();
+  pickNames();
+  setTimeout(buildGrid, 200);
+}
+
+window.addEventListener('pagehide', leaveAll);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+pickNames();
+buildGrid();
+</script>
+</body>
+</html>
