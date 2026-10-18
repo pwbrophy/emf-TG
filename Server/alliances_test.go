@@ -113,6 +113,17 @@ func TestNewTagAssignedAsBase(t *testing.T) {
 	}
 }
 
+// Every scan, of a known tag too, tells the host's page so its tag list can
+// flash that tag.
+func TestHostToldOfEveryScan(t *testing.T) {
+	g, _ := newTestGame(t, "Desert-01")
+	h := hostUp(t, g)
+	g.tankMessage("a", tankReport{Cmd: "rfid", UID: "118d6a5d"}) // a known base tag
+	if m := h.waitFor("rfid_scanned"); m["uid"] != "118D6A5D" {
+		t.Fatalf("scan event: %v", m)
+	}
+}
+
 // Capture points can be added, renamed, given a beacon, and removed; their
 // tags are freed with them.
 func TestCapturePointList(t *testing.T) {

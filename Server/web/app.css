@@ -888,6 +888,15 @@ details.item[open] > summary::after { transform: rotate(90deg); }
 .tag-row select { width: 100%; }
 .tag-row select, .point-row select { padding: 8px; font-size: 0.9rem; }
 .tag-row.unused { border-color: var(--accent2); }
+.tag-row.just-read { background: rgba(255, 140, 0, 0.25); border-color: var(--accent2); }
+.tag-row.flash { animation: tag-flash 1.4s ease-out; }
+
+/* A tag a robot just read: three quick pulses, then back to normal. */
+@keyframes tag-flash {
+  0%, 30%, 60% { background: rgba(255, 140, 0, 0.55); border-color: var(--accent2); }
+  15%, 45%     { background: var(--surface2); }
+  100%         { background: var(--surface2); }
+}
 
 .point-row input[type="text"], .alliance-card input[type="text"] { padding: 8px 10px; font-size: 1rem; }
 

@@ -108,6 +108,9 @@ function onMessage(m) {
       toast('The host removed you from the game.');
       localView = homeView();
       break;
+    case 'rfid_scanned':
+      flashTag(m.uid);
+      break;
     case 'confirm_start': {
       const names = m.names.join(', ');
       if (confirm(`${names} ${m.names.length === 1 ? "hasn't" : "haven't"} chosen a tank and will sit this game out. Start anyway?`)) {
@@ -909,9 +912,24 @@ function tagUseSelect(t) {
   </select>`;
 }
 
+// flashTag: a robot just read this tag. Its row in the RFID tag list (if
+// that list is on screen) flashes and scrolls into view.
+function flashTag(uid) {
+  const row = document.querySelector(`.tag-row[data-uid="${CSS.escape(uid)}"]`);
+  if (!row) return;
+  row.classList.remove('flash');
+  void row.offsetWidth; // restart the animation for a repeat scan
+  // flash pulses; just-read is a steady highlight, for phones set to
+  // reduce motion (they get no animations).
+  row.classList.add('flash', 'just-read');
+  clearTimeout(row._readTimer);
+  row._readTimer = setTimeout(() => row.classList.remove('just-read'), 2000);
+  row.scrollIntoView({ block: 'nearest' });
+}
+
 function rfidTagsTab() {
   const tags = state.rfidTags || [];
-  const rows = tags.map((t) => `<div class="item tag-row ${t.use ? '' : 'unused'}">
+  const rows = tags.map((t) => `<div class="item tag-row ${t.use ? '' : 'unused'}" data-uid="${esc(t.uid)}">
       <div class="main"><div class="name mono">${esc(t.uid)}</div>
         <div class="sub">${t.lastSeen ? `Read ${esc(t.lastSeen)} by ${esc(t.tank)}` : 'Not read yet'}</div></div>
       <div class="tag-use">${tagUseSelect(t)}</div>

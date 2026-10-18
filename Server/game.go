@@ -175,6 +175,10 @@ func (g *game) tankMessage(id string, m tankReport) {
 		g.mu.Lock()
 		g.rfidScanned(id, m.UID)
 		g.broadcast()
+		// After the new list: the host's RFID tag list flashes this tag.
+		if g.hostDevice != "" {
+			g.sendTo(g.hostDevice, map[string]any{"t": "rfid_scanned", "uid": strings.ToUpper(strings.TrimSpace(m.UID))})
+		}
 		g.mu.Unlock()
 	case "pong":
 		g.mu.Lock()
