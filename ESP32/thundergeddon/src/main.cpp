@@ -1631,10 +1631,19 @@ void loop()
             // event day. heap field lets the server monitor robot memory health.
             // maxblk = largest free internal block: falls over a long day if the
             // heap is fragmenting even while total free heap looks healthy.
-            char hb[112];
-            snprintf(hb, sizeof(hb), "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u,\"maxblk\":%u}",
+            // rssi = Wi-Fi signal (dBm) and v* = video since the last heartbeat
+            // (frames, bytes, total/longest send ms, camera misses): the server
+            // logs them per tank to tell a weak radio link from a busy one.
+            const MjpegServer::Stats vs = mjpeg.takeStats();
+            char hb[224];
+            snprintf(hb, sizeof(hb),
+                     "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u,\"maxblk\":%u,\"rssi\":%d,"
+                     "\"vf\":%u,\"vb\":%u,\"vsend\":%u,\"vmax\":%u,\"vmiss\":%u}",
                      (unsigned long)now, (unsigned)ESP.getFreeHeap(),
-                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                     (int)WiFi.RSSI(),
+                     (unsigned)vs.frames, (unsigned)vs.bytes, (unsigned)vs.sendMsSum,
+                     (unsigned)vs.sendMsMax, (unsigned)vs.noFrame);
             ws.send(hb);
         }
     } else {

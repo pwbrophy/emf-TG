@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -43,6 +44,8 @@ func main() {
 	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
 	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
 	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")
+	videoLogFile := flag.String("video-log", filepath.Join(os.TempDir(), "thundergeddon-video.csv"),
+		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); empty = off")
 	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
 	flag.Parse()
 
@@ -67,9 +70,12 @@ func main() {
 	defer stop()
 
 	rl := newRelay()
-	stats := startStats(rl)
+	vlog := openVideoLog(*videoLogFile)
+	defer vlog.close()
+	stats := startStats(rl, vlog)
 	tanks := newTankManager(rl, *tokenFile, httpPort)
 	g := newGame(tanks, *settingsFile)
+	g.vlog = vlog
 	g.beacons = newBeaconManager()
 	g.beacons.onHello = g.beaconConnected
 	tanks.onChange = g.tanksChanged
@@ -93,6 +99,7 @@ func main() {
 	mux.HandleFunc("GET /ws", g.handleWS)
 	mux.HandleFunc("/api/info", handleInfo)
 	mux.HandleFunc("GET /api/stats", stats.handle)
+	mux.HandleFunc("GET /api/video-log", vlog.handle)
 	mux.HandleFunc("GET /api/tanks", tanks.handleList)
 	mux.HandleFunc("GET /esp32", tanks.handleControl)
 	mux.HandleFunc("GET /beacon", g.beacons.handle) // capture-point beacons (any path works for them; this is what discovery tells them)
@@ -117,6 +124,10 @@ func main() {
 		// connections end at once on stop instead of holding the server up
 		// until the service manager kills it.
 		BaseContext: func(net.Listener) context.Context { return ctx },
+		// Video handlers tune their own socket (limitSendQueue).
+		ConnContext: func(c context.Context, conn net.Conn) context.Context {
+			return context.WithValue(c, connKey{}, conn)
+		},
 	}
 
 	go func() {

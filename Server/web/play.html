@@ -1879,8 +1879,8 @@ setInterval(() => {
 
 // ── Video stats report ─────────────────────────────────────────────────────
 // Every VS_REPORT_MS while in a game, measure for VS_SAMPLE_MS what this phone
-// actually puts on screen and send it to the server (GameHub.ReportVideoStats),
-// which logs it beside its own per-tank in/out frame rates in logs/video-*.log.
+// actually puts on screen and send it to the server (ReportVideoStats), which
+// logs it beside its own per-tank figures in its video log (/api/video-log).
 // Together they show whether choppy video came from the tank, the Wi-Fi link to
 // this phone, or the phone itself being too slow to draw what it received.
 //  - WS/canvas path (iOS, Firefox): exact counts of received and drawn frames.
@@ -2174,7 +2174,8 @@ class TGHub {
     else if (method === 'SendTurret') this._raw({ t: 'turret', s: a[0] });
     else if (method === 'Fire')       this._raw({ t: 'fire' });
     else if (method === 'SetStabilise') this._raw({ t: 'stabilise', on: !!a[0] });
-    // ReportVideoStats: the Go server logs its own video stats.
+    // What this phone drew, for the server's video log (/api/video-log).
+    else if (method === 'ReportVideoStats') this._raw({ t: 'vstats', vstats: a[0] });
     return Promise.resolve();
   }
   emit(name, ...args) {

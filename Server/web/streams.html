@@ -167,7 +167,7 @@
     <div class="stat"><span class="label">Free RAM</span><span class="value" id="s-mem">&ndash;</span></div>
   </div>
 
-  <p class="hint">Tap a tank to start or stop watching it on this phone. The number on each tile is the frame rate this phone is getting.</p>
+  <p class="hint">Tap a tank to start or stop watching it on this phone. Each tile shows the frame rate this phone is getting and the tank's Wi-Fi signal (below about -75 dBm is weak). Full history: <a href="/api/video-log">video log</a>.</p>
 
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden>No tanks are sending video yet. Switch on a tank near the router, or start the load test on the PC.</div>
@@ -247,7 +247,8 @@
         t.label = label;
         if (t.watching) {
           const mine = s.viewers.find((v) => v.who === WHO);
-          t.tag.textContent = label + (mine ? ' · ' + mine.fps.toFixed(0) + ' fps' : '');
+          t.tag.textContent = label + (mine ? ' · ' + mine.fps.toFixed(0) + ' fps' : '')
+            + (s.tank && s.tank.rssi ? ' · ' + s.tank.rssi + ' dBm' : '');
         }
       }
       document.getElementById('empty').hidden = live.length > 0 || tiles.size > 0;

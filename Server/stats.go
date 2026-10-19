@@ -24,13 +24,14 @@ type viewerStats struct {
 }
 
 type streamStats struct {
-	ID         string        `json:"id"`
-	Label      string        `json:"label"` // tank name, where known
-	Sources    int           `json:"sources"`
-	FPSIn      float64       `json:"fpsIn"`
-	KBPerFrame float64       `json:"kbPerFrame"`
-	MbitIn     float64       `json:"mbitIn"`
-	Viewers    []viewerStats `json:"viewers"`
+	ID         string         `json:"id"`
+	Label      string         `json:"label"` // tank name, where known
+	Sources    int            `json:"sources"`
+	FPSIn      float64        `json:"fpsIn"`
+	KBPerFrame float64        `json:"kbPerFrame"`
+	MbitIn     float64        `json:"mbitIn"`
+	Tank       *tankLinkStats `json:"tank,omitempty"` // the tank's own report: Wi-Fi signal, send times
+	Viewers    []viewerStats  `json:"viewers"`
 }
 
 type statsSnapshot struct {
@@ -41,12 +42,13 @@ type statsSnapshot struct {
 
 type statsSampler struct {
 	rl     *relay
+	vlog   *videoLog
 	mu     sync.Mutex
 	latest statsSnapshot
 }
 
-func startStats(rl *relay) *statsSampler {
-	ss := &statsSampler{rl: rl}
+func startStats(rl *relay, vlog *videoLog) *statsSampler {
+	ss := &statsSampler{rl: rl, vlog: vlog}
 	go ss.loop()
 	return ss
 }
@@ -69,6 +71,7 @@ func (ss *statsSampler) loop() {
 				Sources: int(s.sources.Load()),
 				FPSIn:   float64(frames) / secs,
 				MbitIn:  float64(bytes) * 8 / secs / 1e6,
+				Tank:    s.tankLink(),
 				Viewers: []viewerStats{},
 			}
 			if frames > 0 {
@@ -95,6 +98,16 @@ func (ss *statsSampler) loop() {
 		ss.latest = snap
 		ss.mu.Unlock()
 
+		var rows [][]string
+		for _, st := range snap.Streams {
+			// Only tanks sending video or being watched: idle tanks in the
+			// lobby would fill the log with nothing.
+			if st.FPSIn > 0 || len(st.Viewers) > 0 {
+				rows = append(rows, streamRows(last, st)...)
+			}
+		}
+		ss.vlog.rows(rows...)
+
 		// One summary line a minute in the router's log while video is flowing.
 		if len(snap.Streams) > 0 && time.Since(lastLog) >= time.Minute {
 			lastLog = time.Now()
@@ -118,17 +131,25 @@ func (ss *statsSampler) handle(w http.ResponseWriter, r *http.Request) {
 func logSummary(snap statsSnapshot) {
 	var fps, mbit float64
 	viewers := 0
+	weakest := ""
+	weakestRSSI := 0
 	for _, s := range snap.Streams {
 		fps += s.FPSIn
 		mbit += s.MbitIn
 		viewers += len(s.Viewers)
+		if s.Tank != nil && s.Tank.RSSI != 0 && (weakest == "" || s.Tank.RSSI < weakestRSSI) {
+			weakest, weakestRSSI = s.Label, s.Tank.RSSI
+		}
+	}
+	if weakest != "" {
+		weakest = fmt.Sprintf(" | weakest signal %s %d dBm", weakest, weakestRSSI)
 	}
 	cpu := ""
 	if sys := snap.System; sys != nil {
 		cpu = fmt.Sprintf(" | cpu %.0f%% (softirq %.0f%%, server %.0f%%)", sys.CPUBusyPct, sys.CPUSoftirqPct, sys.ProcCPUPct)
 	}
-	log.Printf("[VideoStats] %d streams, %.0f fps in, %.1f Mbit/s in, %d viewers%s",
-		len(snap.Streams), fps, mbit, viewers, cpu)
+	log.Printf("[VideoStats] %d streams, %.0f fps in, %.1f Mbit/s in, %d viewers%s%s",
+		len(snap.Streams), fps, mbit, viewers, weakest, cpu)
 }
 
 func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }
