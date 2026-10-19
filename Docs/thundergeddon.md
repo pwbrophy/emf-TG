@@ -543,6 +543,10 @@ I have a green LED (D4 C2297) to control from GPIO48.
 
 I will connect an external antenna via the IPX connector on the ESP32.  
 
+#### Noise Suppression Sheet
+
+Two layers of **NS1020CA** noise suppression sheet (0.2 mm thick, cut from a 300 mm × 300 mm sheet) sit between the turret and the hull, under the turret circuit board.  Without them, the Wi-Fi connection drops when the turret rotates to a certain angle.  
+
 #### Test Points
 
 - TP1 - +3V3
