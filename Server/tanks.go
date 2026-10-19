@@ -81,6 +81,7 @@ type tankSession struct {
 	connectedAt time.Time
 	lastSeen    atomic.Int64 // unix nanoseconds
 	heap        atomic.Int64 // free heap bytes from the latest heartbeat
+	rssi        atomic.Int32 // Wi-Fi signal (dBm) from the latest heartbeat; 0 = not reported
 	stop        context.CancelFunc
 	flags       tankFlags // guarded by tankManager.mu
 	video       [3]int    // saved camera fps, frame size, quality from the hello (0 = unknown)
@@ -232,6 +233,13 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			Name string `json:"name"`
 			IP   string `json:"ip"`
 			Heap int64  `json:"heap"`
+			// Heartbeat: Wi-Fi signal and video sent since the last one
+			// (firmware from October 2026 on; older tanks leave them out).
+			RSSI    *int `json:"rssi"`
+			VFrames int  `json:"vf"`
+			VSend   int  `json:"vsend"`
+			VMax    int  `json:"vmax"`
+			VMiss   int  `json:"vmiss"`
 			// Camera settings the tank has saved (hello only).
 			FPS      *int `json:"fps"`
 			FSize    *int `json:"fsize"`
@@ -278,6 +286,11 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 		case "hb":
 			if sess != nil && msg.Heap > 0 {
 				sess.heap.Store(msg.Heap)
+			}
+			if sess != nil && msg.RSSI != nil {
+				sess.rssi.Store(int32(*msg.RSSI))
+				tm.rl.get(sess.id).setTankHB(tankVideoHB{at: time.Now(), rssi: *msg.RSSI,
+					frames: msg.VFrames, sendMsSum: msg.VSend, sendMsMax: msg.VMax, camMisses: msg.VMiss})
 			}
 		case "ir_emit_ack", "ir_window_result", "rfid", "pong":
 			if sess != nil && tm.onReport != nil {
@@ -597,6 +610,7 @@ type tankStatus struct {
 	ConnectedS   int     `json:"connectedS"`
 	LastSeenAgoS float64 `json:"lastSeenAgoS"`
 	FreeHeapKB   int64   `json:"freeHeapKB"`
+	RSSI         int     `json:"rssi,omitempty"` // Wi-Fi signal, dBm
 }
 
 // handleList reports the connected tanks: GET /api/tanks.
@@ -611,6 +625,7 @@ func (tm *tankManager) handleList(w http.ResponseWriter, r *http.Request) {
 			ConnectedS:   int(time.Since(s.connectedAt).Seconds()),
 			LastSeenAgoS: round1(time.Since(time.Unix(0, s.lastSeen.Load())).Seconds()),
 			FreeHeapKB:   s.heap.Load() / 1024,
+			RSSI:         int(s.rssi.Load()),
 		})
 	}
 	tm.mu.Unlock()

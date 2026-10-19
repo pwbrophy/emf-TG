@@ -64,7 +64,12 @@ public:
         _cfg.xclk_freq_hz  = 20000000; // 20 MHz
 
         _cfg.pixel_format  = PIXFORMAT_JPEG;
-        _cfg.frame_size    = _frameSize;
+        // The driver sizes its frame buffers from this at init (w*h/5 bytes for
+        // JPEG) and never resizes them, so init at the largest size the host can
+        // pick; start() then switches the sensor to the chosen size. Initialising
+        // at HVGA and switching to VGA later overflowed the 30 KB buffers and
+        // dropped frames until the camera was restarted.
+        _cfg.frame_size    = kMaxFrameSize;
         _cfg.jpeg_quality  = _jpegQuality;
         _cfg.fb_count      = 2;                 // double-buffer in PSRAM
         _cfg.fb_location   = CAMERA_FB_IN_PSRAM;
@@ -125,13 +130,12 @@ public:
     int getHMirror() const { return _hmirror; }
 
     // Set capture resolution at runtime. Safe to call before or after start().
-    // The esp32-camera driver reconfigures the sensor and reallocates its frame
-    // buffers on a framesize change (same mechanism the Espressif CameraWebServer
-    // example uses), so no deinit/reinit is required.
+    // Only the sensor is reconfigured; the frame buffers were allocated for
+    // kMaxFrameSize at init, so any size up to that fits (larger is clamped).
     void setFrameSize(framesize_t fs)
     {
-        _frameSize      = fs;
-        _cfg.frame_size = fs;
+        if (fs > kMaxFrameSize) fs = kMaxFrameSize;
+        _frameSize = fs;
         if (_started) {
             if (sensor_t* s = esp_camera_sensor_get()) s->set_framesize(s, fs);
         }
@@ -151,6 +155,9 @@ public:
     }
 
 private:
+    // Largest frame size main.cpp's videoIdxToFrameSize() offers (VGA 640x480).
+    static constexpr framesize_t kMaxFrameSize = FRAMESIZE_VGA;
+
     camera_config_t _cfg;
     bool            _started;
     framesize_t     _frameSize;

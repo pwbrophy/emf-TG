@@ -84,6 +84,27 @@ public:
         else                _minFrameIntervalMs = 1000u / (uint32_t)fps;
     }
 
+    // Video counters since the last call, for the heartbeat. sendMs is time
+    // spent pushing frames into the socket: it rises when the Wi-Fi link is
+    // slow or busy (weak signal, retries, other tanks using the air), so a
+    // low frame rate with long sends points at the radio, not the camera.
+    struct Stats {
+        uint32_t frames;     // frames sent
+        uint32_t bytes;      // JPEG bytes sent
+        uint32_t sendMsSum;  // total ms spent sending them
+        uint32_t sendMsMax;  // longest single frame send
+        uint32_t noFrame;    // times the camera had no frame ready
+    };
+
+    Stats takeStats()
+    {
+        portENTER_CRITICAL(&_statsMux);
+        Stats out = _stats;
+        _stats = {};
+        portEXIT_CRITICAL(&_statsMux);
+        return out;
+    }
+
 private:
     // Writes every byte of the iovec list, retrying partial writes. False if the
     // client has gone (or stalled past httpd's 5 s send timeout).
@@ -179,6 +200,9 @@ private:
 
             camera_fb_t* fb = esp_camera_fb_get();
             if (!fb) {
+                portENTER_CRITICAL(&self->_statsMux);
+                self->_stats.noFrame++;
+                portEXIT_CRITICAL(&self->_statsMux);
                 // Camera not ready yet; brief wait avoids busy-loop
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
@@ -196,7 +220,18 @@ private:
                 { fb->buf,             fb->len },
                 { (void*)kEndBoundary, sizeof(kEndBoundary) - 1 },
             };
+            const uint32_t sendStart = millis();
             bool ok = _writevAll(fd, iov, 3);
+            const uint32_t sendMs = millis() - sendStart;
+
+            if (ok) {
+                portENTER_CRITICAL(&self->_statsMux);
+                self->_stats.frames++;
+                self->_stats.bytes     += fb->len;
+                self->_stats.sendMsSum += sendMs;
+                if (sendMs > self->_stats.sendMsMax) self->_stats.sendMsMax = sendMs;
+                portEXIT_CRITICAL(&self->_statsMux);
+            }
 
             esp_camera_fb_return(fb);
             if (!ok) break;
@@ -212,4 +247,6 @@ private:
     volatile bool    _enabled = false;
     volatile bool    _stopping = false;
     volatile uint32_t _minFrameIntervalMs = 50; // 50 ms = 20 fps default cap
+    portMUX_TYPE     _statsMux = portMUX_INITIALIZER_UNLOCKED;
+    Stats            _stats    = {};
 };

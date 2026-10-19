@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -35,6 +36,19 @@ const maxFrameBytes = 512 * 1024
 // connections when a phone just disappears.
 const viewerWriteTimeout = 20 * time.Second
 
+// Video allowed to sit unsent in the kernel per viewer (see limitSendQueue):
+// about one tank frame.
+const viewerSendQueueBytes = 16 * 1024
+
+// connKey finds the connection a request came in on (set by main's ConnContext).
+type connKey struct{}
+
+func limitViewerSendQueue(r *http.Request) {
+	if c, ok := r.Context().Value(connKey{}).(net.Conn); ok {
+		limitSendQueue(c)
+	}
+}
+
 type relay struct {
 	mu      sync.Mutex
 	streams map[string]*stream
@@ -48,6 +62,10 @@ type stream struct {
 	sources  atomic.Int32
 	framesIn atomic.Int64
 	bytesIn  atomic.Int64
+
+	// The tank's latest heartbeat (Wi-Fi signal, send times); guarded by mu.
+	link     *tankLinkStats
+	lastHBAt time.Time
 }
 
 type viewer struct {
@@ -142,6 +160,25 @@ func (s *stream) getLabel() string {
 	return s.label
 }
 
+// setTankHB records the video part of the tank's heartbeat.
+func (s *stream) setTankHB(h tankVideoHB) {
+	s.mu.Lock()
+	s.link = h.stats(s.lastHBAt)
+	s.lastHBAt = h.at
+	s.mu.Unlock()
+}
+
+// tankLink is the tank's latest heartbeat, or nil if it hasn't sent one lately.
+func (s *stream) tankLink() *tankLinkStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.link == nil || time.Since(s.lastHBAt) > 5*time.Second {
+		return nil
+	}
+	l := *s.link
+	return &l
+}
+
 func (s *stream) addViewer(v *viewer) {
 	s.mu.Lock()
 	s.viewers[v] = struct{}{}
@@ -214,6 +251,7 @@ func (rl *relay) handleVideoWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing url", http.StatusBadRequest)
 		return
 	}
+	limitViewerSendQueue(r)
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
@@ -246,6 +284,7 @@ func (rl *relay) handleVideoWS(w http.ResponseWriter, r *http.Request) {
 func (rl *relay) serveMJPEG(w http.ResponseWriter, r *http.Request, id string) {
 	s := rl.get(id)
 	v := newViewer(r)
+	limitViewerSendQueue(r)
 
 	rc := http.NewResponseController(w)
 	w.Header().Set("Content-Type", mjpeg.ContentType)

@@ -113,6 +113,7 @@ type game struct {
 	mu           sync.Mutex
 	tanks        tankControl
 	beacons      *beaconManager // nil in tests
+	vlog         *videoLog      // phones' video reports go here; nil = off
 	settingsPath string
 	settings     Settings
 	presetsPath  string
@@ -205,28 +206,29 @@ func (g *game) tankMessage(id string, m tankReport) {
 // ── Messages from phones ─────────────────────────────────────────────────────
 
 type inMsg struct {
-	T        string     `json:"t"`
-	Device   string     `json:"device"`
-	Display  bool       `json:"display"` // hello from the spectator display
-	Name     string     `json:"name"`
-	Password string     `json:"password"` // the game password, when joining
-	Tank     string     `json:"tank"`
-	Target   string     `json:"target"` // a player's device, for host actions
-	L        float64    `json:"l"`
-	R        float64    `json:"r"`
-	S        float64    `json:"s"`
-	On       bool       `json:"on"`
-	Force    bool       `json:"force"`
-	Dir      string     `json:"dir"`      // host test damage: N, E, S
-	Point    int        `json:"point"`    // capture point 0-2
-	Alliance string     `json:"alliance"` // an alliance id ("" = from the tank's name)
-	ID       string     `json:"id"`       // an alliance or capture point id
-	Color    string     `json:"color"`
-	UID      string     `json:"uid"`    // an RFID tag
-	Use      string     `json:"use"`    // what a tag is for: "base:<id>", "point:<id>", ""
-	Beacon   int        `json:"beacon"` // a capture point's LED beacon, 0 = none
-	Flags    *tankFlags `json:"flags"`
-	Settings *Settings  `json:"settings"`
+	T        string           `json:"t"`
+	Device   string           `json:"device"`
+	Display  bool             `json:"display"` // hello from the spectator display
+	Name     string           `json:"name"`
+	Password string           `json:"password"` // the game password, when joining
+	Tank     string           `json:"tank"`
+	Target   string           `json:"target"` // a player's device, for host actions
+	L        float64          `json:"l"`
+	R        float64          `json:"r"`
+	S        float64          `json:"s"`
+	On       bool             `json:"on"`
+	Force    bool             `json:"force"`
+	Dir      string           `json:"dir"`      // host test damage: N, E, S
+	Point    int              `json:"point"`    // capture point 0-2
+	Alliance string           `json:"alliance"` // an alliance id ("" = from the tank's name)
+	ID       string           `json:"id"`       // an alliance or capture point id
+	Color    string           `json:"color"`
+	UID      string           `json:"uid"`    // an RFID tag
+	Use      string           `json:"use"`    // what a tag is for: "base:<id>", "point:<id>", ""
+	Beacon   int              `json:"beacon"` // a capture point's LED beacon, 0 = none
+	Flags    *tankFlags       `json:"flags"`
+	Settings *Settings        `json:"settings"`
+	VStats   *phoneVideoStats `json:"vstats"` // what the phone's video looked like (play.html, every 30 s)
 }
 
 func (g *game) handle(c *client, m inMsg) {
@@ -252,6 +254,20 @@ func (g *game) handle(c *client, m inMsg) {
 		return
 	case "stabilise":
 		g.setStabilise(c.device, m.On)
+	case "vstats":
+		if m.VStats != nil {
+			tank := ""
+			if s := g.seat(c.device); s != nil {
+				tank = s.tank
+				for _, t := range g.tanks.list() {
+					if t.ID == s.tank && t.Name != "" {
+						tank = t.Name
+					}
+				}
+			}
+			g.vlog.phone(tank, *m.VStats)
+		}
+		return
 
 	case "fire":
 		g.fire(c.device)
