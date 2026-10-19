@@ -110,10 +110,15 @@ type result struct {
 }
 
 type game struct {
-	mu           sync.Mutex
-	tanks        tankControl
-	beacons      *beaconManager // nil in tests
-	vlog         *videoLog      // phones' video reports go here; nil = off
+	mu      sync.Mutex
+	tanks   tankControl
+	beacons *beaconManager // nil in tests
+	vlog    *videoLog      // phones' video reports go here; nil = off
+
+	// The check on Start (health.go): checkTanks is nil in tests that don't
+	// set it; camSince is when each tank's camera last came on.
+	checkTanks   func(ids []string, fpsCap map[string]int, camSince map[string]time.Time) []tankWarning
+	camSince     map[string]time.Time
 	settingsPath string
 	settings     Settings
 	presetsPath  string
@@ -165,6 +170,7 @@ func newGame(tanks tankControl, settingsPath string) *game {
 		pingMs:       map[string]int{},
 		rfidSeen:     map[string]rfidScan{},
 		tankColor:    map[string]int{},
+		camSince:     map[string]time.Time{},
 		colorShown:   map[string]int{},
 		clients:      map[*client]struct{}{},
 	}
@@ -722,7 +728,7 @@ func (g *game) tankConnected(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.sendTuning(id, true)
-	g.tanks.setStreaming(id, g.cameraWanted(id))
+	g.syncCamera(id, true)
 	delete(g.colorShown, id) // a rebooted tank has forgotten its colour
 	g.syncTankColors()
 	if g.phase == phasePlaying && g.match != nil {
@@ -822,6 +828,31 @@ func (g *game) hostLogin(c *client) {
 	g.hostDevice = c.device
 }
 
+// checkPlayingTanks runs the check on Start (health.go) on the tanks these
+// players chose, and logs what it finds.
+func (g *game) checkPlayingTanks(ready []*player) []tankWarning {
+	if g.checkTanks == nil {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, p := range ready {
+		if !seen[p.tank] {
+			seen[p.tank] = true
+			ids = append(ids, p.tank)
+		}
+	}
+	caps := map[string]int{}
+	for _, t := range g.tanks.list() {
+		caps[t.ID] = t.Video[0]
+	}
+	warnings := g.checkTanks(ids, caps, g.camSince)
+	for _, w := range warnings {
+		log.Printf("[Health] %s: %s", w.Tank, strings.Join(w.Problems, "; "))
+	}
+	return warnings
+}
+
 func (g *game) start(c *client, force bool) {
 	if g.phase != phaseLobby {
 		return
@@ -841,14 +872,17 @@ func (g *game) start(c *client, force bool) {
 		g.sendError(c, "Nobody has chosen a tank yet.")
 		return
 	}
-	if len(without) > 0 && !force {
+	if !force {
 		names := make([]string, len(without))
 		for i, p := range without {
 			names[i] = p.name
 		}
 		sort.Strings(names)
-		g.sendTo(c.device, map[string]any{"t": "confirm_start", "names": names})
-		return
+		warnings := g.checkPlayingTanks(ready)
+		if len(names) > 0 || len(warnings) > 0 {
+			g.sendTo(c.device, map[string]any{"t": "confirm_start", "names": names, "warnings": warnings})
+			return
+		}
 	}
 	// Players without a tank sit this game out at the front of the queue,
 	// so they're first into the lobby for the next one. (The host playing

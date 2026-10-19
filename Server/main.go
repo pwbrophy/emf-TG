@@ -76,6 +76,7 @@ func main() {
 	tanks := newTankManager(rl, *tokenFile, httpPort)
 	g := newGame(tanks, *settingsFile)
 	g.vlog = vlog
+	g.checkTanks = stats.check
 	g.beacons = newBeaconManager()
 	g.beacons.onHello = g.beaconConnected
 	tanks.onChange = g.tanksChanged

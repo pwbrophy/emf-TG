@@ -67,6 +67,10 @@ type stream struct {
 	link     *tankLinkStats
 	lastHBAt time.Time
 	motors   motorTracker // tracks and turret running time; guarded by mu
+
+	// Longest wait between two frames arriving (a freeze); guarded by mu.
+	lastFrameAt time.Time
+	maxGap      time.Duration
 }
 
 type viewer struct {
@@ -118,6 +122,10 @@ func (s *stream) publish(f mjpeg.Frame) {
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.lastFrameAt.IsZero() {
+		s.maxGap = max(s.maxGap, now.Sub(s.lastFrameAt))
+	}
+	s.lastFrameAt = now
 	for v := range s.viewers {
 		if v.maxFPS > 0 {
 			v.credit = min(v.credit+now.Sub(v.lastSeen).Seconds()*v.maxFPS, 2)
@@ -182,6 +190,27 @@ func (s *stream) noteCommand(msg string, now time.Time) {
 		s.motors.turret.set(running, now)
 	}
 	s.mu.Unlock()
+}
+
+// startGapTiming forgets the last frame: called when a new connection to the
+// camera opens, so the time it was off doesn't count as a freeze.
+func (s *stream) startGapTiming() {
+	s.mu.Lock()
+	s.lastFrameAt, s.maxGap = time.Time{}, 0
+	s.mu.Unlock()
+}
+
+// takeMaxGap returns the longest wait between frames since the last call,
+// counting a wait still going on while the camera is connected.
+func (s *stream) takeMaxGap(now time.Time) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g := s.maxGap
+	if !s.lastFrameAt.IsZero() && s.sources.Load() > 0 {
+		g = max(g, now.Sub(s.lastFrameAt))
+	}
+	s.maxGap = 0
+	return g
 }
 
 // takeMotors returns how long the tracks and turret ran since the last call.

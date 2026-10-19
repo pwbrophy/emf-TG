@@ -48,7 +48,7 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 		t.Fatalf("want header + 2 lines, got:\n%s", b)
 	}
 	cols := len(strings.Split(lines[0], ","))
-	if !strings.Contains(lines[1], ",tank,Desert-01,-71,19.5,11.7,") || !strings.Contains(lines[1], ",2,62,0,Alice,19.5,") {
+	if !strings.Contains(lines[1], ",tank,Desert-01,-71,19.5,11.7,") || !strings.Contains(lines[1], ",2,62,0,0,Alice,19.5,") {
 		t.Errorf("tank line: %s", lines[1])
 	}
 	if !strings.Contains(lines[2], ",phone,Desert-01,") || !strings.Contains(lines[2], `"Pixel 7, Android 14"`) {

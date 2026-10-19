@@ -578,6 +578,7 @@ func (s *tankSession) pullOnce(ctx context.Context, url string, out *stream) (in
 		return 0, fmt.Errorf("camera answered %s", resp.Status)
 	}
 
+	out.startGapTiming()
 	out.sources.Add(1)
 	defer out.sources.Add(-1)
 

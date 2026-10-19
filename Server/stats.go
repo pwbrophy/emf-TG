@@ -31,6 +31,7 @@ type streamStats struct {
 	KBPerFrame float64        `json:"kbPerFrame"`
 	MbitIn     float64        `json:"mbitIn"`
 	Tank       *tankLinkStats `json:"tank,omitempty"` // the tank's own report: Wi-Fi signal, send times
+	MaxGapMs   int            `json:"maxGapMs"`       // longest wait between two frames arriving
 	DrivePct   float64        `json:"drivePct"`       // share of the sample the tracks were running
 	TurretPct  float64        `json:"turretPct"`      // share of the sample the turret was turning
 	Viewers    []viewerStats  `json:"viewers"`
@@ -45,6 +46,7 @@ type statsSnapshot struct {
 type statsSampler struct {
 	rl     *relay
 	vlog   *videoLog
+	health tankHistory // recent samples per tank for the check on Start; guarded by mu
 	mu     sync.Mutex
 	latest statsSnapshot
 }
@@ -64,9 +66,11 @@ func (ss *statsSampler) loop() {
 		last = time.Now()
 
 		snap := statsSnapshot{IntervalS: secs, System: sys.sample()}
+		var all []streamStats // including idle ones: the check on Start needs "no frames" too
 		for _, s := range ss.rl.all() {
 			frames := s.framesIn.Swap(0)
 			drive, turret := s.takeMotors(last)
+			gap := s.takeMaxGap(last)
 			bytes := s.bytesIn.Swap(0)
 			st := streamStats{
 				ID:        s.id,
@@ -75,6 +79,7 @@ func (ss *statsSampler) loop() {
 				FPSIn:     float64(frames) / secs,
 				MbitIn:    float64(bytes) * 8 / secs / 1e6,
 				Tank:      s.tankLink(),
+				MaxGapMs:  int(gap.Milliseconds()),
 				DrivePct:  min(100, drive.Seconds()/secs*100),
 				TurretPct: min(100, turret.Seconds()/secs*100),
 				Viewers:   []viewerStats{},
@@ -90,17 +95,19 @@ func (ss *statsSampler) loop() {
 					Skipped: float64(v.skipped.Swap(0)) / secs,
 				})
 			}
+			sort.Slice(st.Viewers, func(i, j int) bool { return st.Viewers[i].Who < st.Viewers[j].Who })
+			all = append(all, st)
 			// Streams nobody is sending or watching are left out.
 			if st.Sources == 0 && len(st.Viewers) == 0 && frames == 0 {
 				continue
 			}
-			sort.Slice(st.Viewers, func(i, j int) bool { return st.Viewers[i].Who < st.Viewers[j].Who })
 			snap.Streams = append(snap.Streams, st)
 		}
 		sort.Slice(snap.Streams, func(i, j int) bool { return naturalLess(snap.Streams[i].ID, snap.Streams[j].ID) })
 
 		ss.mu.Lock()
 		ss.latest = snap
+		ss.health.add(last, all)
 		ss.mu.Unlock()
 
 		var rows [][]string

@@ -112,8 +112,17 @@ function onMessage(m) {
       flashTag(m.uid);
       break;
     case 'confirm_start': {
-      const names = m.names.join(', ');
-      if (confirm(`${names} ${m.names.length === 1 ? "hasn't" : "haven't"} chosen a tank: they sit this game out at the front of the queue. Start anyway?`)) {
+      // Players without a tank, and tanks the check on Start didn't like
+      // (Server/health.go): the host can fix things first or start anyway.
+      const parts = [];
+      for (const w of m.warnings || []) {
+        parts.push(`${w.tank}: ${w.problems.join('; ')}. ${w.advice}`);
+      }
+      const names = m.names || [];
+      if (names.length) {
+        parts.push(`${names.join(', ')} ${names.length === 1 ? "hasn't" : "haven't"} chosen a tank: they sit this game out at the front of the queue.`);
+      }
+      if (confirm(parts.join('\n\n') + '\n\nStart anyway?')) {
         send({ t: 'host_start', force: true });
       }
       break;

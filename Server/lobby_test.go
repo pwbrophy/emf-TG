@@ -94,16 +94,17 @@ func TestPickAlliance(t *testing.T) {
 	}
 }
 
-// Cameras stream only for tanks in the game, from the countdown to game
-// over, and not while paused.
+// Every camera streams in the lobby (for the check on Start); in a game only
+// the tanks playing stream, from the countdown to game over, and not while
+// paused.
 func TestCamerasOnlyDuringGames(t *testing.T) {
 	g, ft := newTestGame(t, "Desert-01", "Jungle-02")
 	for _, id := range []string{"a", "b"} {
 		g.tankConnected(id)
 	}
 	h := hostUp(t, g)
-	if ft.cameraOn("a") || ft.cameraOn("b") {
-		t.Fatal("cameras on in the lobby")
+	if !ft.cameraOn("a") || !ft.cameraOn("b") {
+		t.Fatal("cameras off in the lobby")
 	}
 	a := phone(t, g, "a")
 	a.send(inMsg{T: "join", Name: "Alice"})
@@ -127,6 +128,10 @@ func TestCamerasOnlyDuringGames(t *testing.T) {
 	h.send(inMsg{T: "host_end"})
 	if ft.cameraOn("a") {
 		t.Fatal("camera on after the game")
+	}
+	h.send(inMsg{T: "host_lobby"})
+	if !ft.cameraOn("a") || !ft.cameraOn("b") {
+		t.Fatal("cameras off back in the lobby")
 	}
 
 	s := g.settings

@@ -36,7 +36,7 @@ import (
 
 const videoLogMaxBytes = 8 << 20
 
-const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct," +
+const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct,max_gap_ms," +
 	"viewer,viewer_fps,viewer_dropped_per_s,phone_path,phone_shown_fps,phone_recv_fps,phone_decode_ms,phone_page_fps,phone_device\n"
 
 type videoLog struct {
@@ -147,7 +147,7 @@ func (vl *videoLog) handle(w http.ResponseWriter, r *http.Request) {
 func streamRows(now time.Time, s streamStats) [][]string {
 	ts := now.Format("15:04:05.0")
 	base := []string{ts, "tank", s.Label, "", f1(s.FPSIn), f1(s.KBPerFrame), "", "", "", "",
-		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5))}
+		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5)), strconv.Itoa(s.MaxGapMs)}
 	if t := s.Tank; t != nil {
 		base[3] = strconv.Itoa(t.RSSI)
 		base[6] = f1(t.FPSSent)
@@ -181,7 +181,7 @@ func (vl *videoLog) phone(tankLabel string, p phoneVideoStats) {
 	if vl == nil {
 		return
 	}
-	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "",
+	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "",
 		viewerName(p.Name), "", "", p.Path, f1(p.ShownFps), f1(p.RecvFps), f1(p.DecodeMs), f1(p.PageFps), p.Device})
 }
 

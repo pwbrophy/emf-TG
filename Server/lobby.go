@@ -7,8 +7,9 @@ package main
 //     RED!", so they can find it on the table. Cleared when the game starts.
 //   - Choosing an alliance: players pick a side and are given its first free
 //     tank (all tanks are the same), which keeps the start simple.
-//   - Cameras: a tank's camera only streams while it is needed: from the
-//     countdown to game over for tanks in the game, never while paused.
+//   - Cameras: every tank's camera streams in the lobby, so the check on
+//     Start (health.go) has fresh figures; in a game only the tanks playing
+//     stream, from the countdown to game over, never while paused.
 //
 // game.mu is held throughout.
 
@@ -16,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"time"
 )
 
 // The Unity version's ten colours: LED levels and the colour for screens
@@ -120,9 +122,11 @@ func (g *game) pickAlliance(c *client, allianceID string) {
 	g.sendError(c, "No free tanks in "+g.allianceName(a)+".")
 }
 
-// cameraWanted: should this tank's camera be streaming now?
+// cameraWanted: should this tank's camera be streaming now? Every tank's
+// camera runs in the lobby too, so the check on Start (health.go) has fresh
+// video figures for each one; in a game only the tanks playing stream.
 func (g *game) cameraWanted(id string) bool {
-	if g.settings.CamerasAlwaysOn {
+	if g.settings.CamerasAlwaysOn || g.phase == phaseLobby {
 		return true
 	}
 	if g.paused || g.match == nil || (g.phase != phaseCountdown && g.phase != phasePlaying) {
@@ -134,6 +138,19 @@ func (g *game) cameraWanted(id string) bool {
 // syncCameras switches every tank's camera on or off as needed.
 func (g *game) syncCameras() {
 	for _, t := range g.tanks.list() {
-		g.tanks.setStreaming(t.ID, g.cameraWanted(t.ID))
+		g.syncCamera(t.ID, false)
 	}
+}
+
+// syncCamera switches one tank's camera on or off as needed, noting when it
+// came on (the check on Start ignores figures from before that). restarted =
+// the tank has just (re)connected, so its camera starts afresh.
+func (g *game) syncCamera(id string, restarted bool) {
+	on := g.cameraWanted(id)
+	if !on {
+		delete(g.camSince, id)
+	} else if _, was := g.camSince[id]; !was || restarted {
+		g.camSince[id] = time.Now()
+	}
+	g.tanks.setStreaming(id, on)
 }
