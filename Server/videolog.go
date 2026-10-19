@@ -13,6 +13,9 @@ package main
 //     tanks, other networks), not this tank's antenna.
 //   - fps in fine, viewer fps low or dropped high: the link to that phone.
 //   - viewer fps fine, phone shown fps low: the phone itself.
+// drive_pct and turret_pct say how much of each sample the tank's tracks and
+// turret were running, so a feed that only breaks up while the tank moves
+// points at motor noise rather than the radio link itself.
 //
 // The file lives in the temp folder (RAM on the router, so it is gone after a
 // reboot) and is downloadable at GET /api/video-log. It is rotated at
@@ -20,7 +23,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -31,7 +36,7 @@ import (
 
 const videoLogMaxBytes = 8 << 20
 
-const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses," +
+const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct," +
 	"viewer,viewer_fps,viewer_dropped_per_s,phone_path,phone_shown_fps,phone_recv_fps,phone_decode_ms,phone_page_fps,phone_device\n"
 
 type videoLog struct {
@@ -141,7 +146,8 @@ func (vl *videoLog) handle(w http.ResponseWriter, r *http.Request) {
 // with the viewer columns empty when nobody is watching.
 func streamRows(now time.Time, s streamStats) [][]string {
 	ts := now.Format("15:04:05.0")
-	base := []string{ts, "tank", s.Label, "", f1(s.FPSIn), f1(s.KBPerFrame), "", "", "", ""}
+	base := []string{ts, "tank", s.Label, "", f1(s.FPSIn), f1(s.KBPerFrame), "", "", "", "",
+		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5))}
 	if t := s.Tank; t != nil {
 		base[3] = strconv.Itoa(t.RSSI)
 		base[6] = f1(t.FPSSent)
@@ -175,7 +181,7 @@ func (vl *videoLog) phone(tankLabel string, p phoneVideoStats) {
 	if vl == nil {
 		return
 	}
-	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "",
+	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "",
 		viewerName(p.Name), "", "", p.Path, f1(p.ShownFps), f1(p.RecvFps), f1(p.DecodeMs), f1(p.PageFps), p.Device})
 }
 
@@ -216,4 +222,81 @@ func (h *tankVideoHB) stats(prevAt time.Time) *tankLinkStats {
 		st.FPSSent = float64(h.frames) / secs
 	}
 	return st
+}
+
+// ── Motor activity ──────────────────────────────────────────────────────────
+
+// Below this a drive or turret value doesn't move the motors.
+const motorDeadZone = 0.05
+
+// A tank stops its tracks itself when no drive command arrives for this long
+// (DRIVE_WATCHDOG_MS in the firmware); the turret keeps going until told.
+const tankDriveWatchdog = 500 * time.Millisecond
+
+// motorChannel adds up how long one motor (tracks or turret) was running.
+type motorChannel struct {
+	on      bool
+	since   time.Time // when it started running, or the current window's start
+	lastCmd time.Time
+	accum   time.Duration
+	timeout time.Duration // 0 = runs until told to stop
+}
+
+func (m *motorChannel) set(on bool, now time.Time) {
+	m.settle(now)
+	if on && !m.on {
+		m.since = now
+	} else if !on && m.on {
+		m.accum += now.Sub(m.since)
+	}
+	m.on = on
+	m.lastCmd = now
+}
+
+// settle stops a motor the tank's own watchdog will have stopped.
+func (m *motorChannel) settle(now time.Time) {
+	if m.on && m.timeout > 0 && now.Sub(m.lastCmd) > m.timeout {
+		m.accum += m.lastCmd.Add(m.timeout).Sub(m.since)
+		m.on = false
+	}
+}
+
+// take returns the running time since the last take.
+func (m *motorChannel) take(now time.Time) time.Duration {
+	m.settle(now)
+	d := m.accum
+	if m.on {
+		d += now.Sub(m.since)
+		m.since = now
+	}
+	m.accum = 0
+	return d
+}
+
+type motorTracker struct {
+	drive, turret motorChannel
+}
+
+func newMotorTracker() motorTracker {
+	return motorTracker{drive: motorChannel{timeout: tankDriveWatchdog}}
+}
+
+// motorCommand reads a drive or turret command on its way to a tank.
+// ok is false for every other command.
+func motorCommand(msg string) (isDrive, running, ok bool) {
+	switch {
+	case strings.HasPrefix(msg, `{"cmd":"drive"`):
+		var d struct{ L, R float64 }
+		if json.Unmarshal([]byte(msg), &d) != nil {
+			return false, false, false
+		}
+		return true, math.Abs(d.L) > motorDeadZone || math.Abs(d.R) > motorDeadZone, true
+	case strings.HasPrefix(msg, `{"cmd":"turret"`):
+		var t struct{ Speed float64 }
+		if json.Unmarshal([]byte(msg), &t) != nil {
+			return false, false, false
+		}
+		return false, math.Abs(t.Speed) > motorDeadZone, true
+	}
+	return false, false, false
 }

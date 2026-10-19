@@ -476,6 +476,7 @@ func (tm *tankManager) sendTo(id, msg string) bool {
 		return false
 	}
 	s.send(msg)
+	tm.rl.get(id).noteCommand(msg, time.Now()) // motor activity for the video log
 	return true
 }
 

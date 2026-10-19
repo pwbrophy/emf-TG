@@ -31,6 +31,8 @@ type streamStats struct {
 	KBPerFrame float64        `json:"kbPerFrame"`
 	MbitIn     float64        `json:"mbitIn"`
 	Tank       *tankLinkStats `json:"tank,omitempty"` // the tank's own report: Wi-Fi signal, send times
+	DrivePct   float64        `json:"drivePct"`       // share of the sample the tracks were running
+	TurretPct  float64        `json:"turretPct"`      // share of the sample the turret was turning
 	Viewers    []viewerStats  `json:"viewers"`
 }
 
@@ -64,15 +66,18 @@ func (ss *statsSampler) loop() {
 		snap := statsSnapshot{IntervalS: secs, System: sys.sample()}
 		for _, s := range ss.rl.all() {
 			frames := s.framesIn.Swap(0)
+			drive, turret := s.takeMotors(last)
 			bytes := s.bytesIn.Swap(0)
 			st := streamStats{
-				ID:      s.id,
-				Label:   s.getLabel(),
-				Sources: int(s.sources.Load()),
-				FPSIn:   float64(frames) / secs,
-				MbitIn:  float64(bytes) * 8 / secs / 1e6,
-				Tank:    s.tankLink(),
-				Viewers: []viewerStats{},
+				ID:        s.id,
+				Label:     s.getLabel(),
+				Sources:   int(s.sources.Load()),
+				FPSIn:     float64(frames) / secs,
+				MbitIn:    float64(bytes) * 8 / secs / 1e6,
+				Tank:      s.tankLink(),
+				DrivePct:  min(100, drive.Seconds()/secs*100),
+				TurretPct: min(100, turret.Seconds()/secs*100),
+				Viewers:   []viewerStats{},
 			}
 			if frames > 0 {
 				st.KBPerFrame = float64(bytes) / 1024 / float64(frames)

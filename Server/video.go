@@ -66,6 +66,7 @@ type stream struct {
 	// The tank's latest heartbeat (Wi-Fi signal, send times); guarded by mu.
 	link     *tankLinkStats
 	lastHBAt time.Time
+	motors   motorTracker // tracks and turret running time; guarded by mu
 }
 
 type viewer struct {
@@ -94,7 +95,7 @@ func (rl *relay) get(id string) *stream {
 	defer rl.mu.Unlock()
 	s := rl.streams[id]
 	if s == nil {
-		s = &stream{id: id, viewers: map[*viewer]struct{}{}}
+		s = &stream{id: id, viewers: map[*viewer]struct{}{}, motors: newMotorTracker()}
 		rl.streams[id] = s
 	}
 	return s
@@ -166,6 +167,28 @@ func (s *stream) setTankHB(h tankVideoHB) {
 	s.link = h.stats(s.lastHBAt)
 	s.lastHBAt = h.at
 	s.mu.Unlock()
+}
+
+// noteCommand records a drive or turret command sent to the tank.
+func (s *stream) noteCommand(msg string, now time.Time) {
+	isDrive, running, ok := motorCommand(msg)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	if isDrive {
+		s.motors.drive.set(running, now)
+	} else {
+		s.motors.turret.set(running, now)
+	}
+	s.mu.Unlock()
+}
+
+// takeMotors returns how long the tracks and turret ran since the last call.
+func (s *stream) takeMotors(now time.Time) (drive, turret time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.motors.drive.take(now), s.motors.turret.take(now)
 }
 
 // tankLink is the tank's latest heartbeat, or nil if it hasn't sent one lately.
