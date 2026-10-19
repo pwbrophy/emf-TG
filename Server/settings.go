@@ -107,6 +107,19 @@ type Tuning struct {
 	SlowTurretSpeed   float64 `json:"slowTurretSpeed"`   // the turret slider's SLOW zones
 	SlowTurretEnabled bool    `json:"slowTurretEnabled"` // cap every turret speed at the slow speed
 
+	// Turret stabilisation (stabilise.go). The hull's turn rate is worked out
+	// from the drive commands, so these describe how the hull really turns.
+	StabAllowed    bool    `json:"stabAllowed"`    // players get the STAB button
+	StabGain       float64 `json:"stabGain"`       // turret speed per unit of hull turn ((l-r)/2), turning on the spot
+	StabArcGain    float64 `json:"stabArcGain"`    // × StabGain when turning while driving forward or back
+	StabCurve      float64 `json:"stabCurve"`      // 1 = in proportion; above 1 = gentle turns get less correction
+	StabDeadband   float64 `json:"stabDeadband"`   // hull turns smaller than this get no correction
+	StabMax        float64 `json:"stabMax"`        // the most correction added (at or below TurretMin keeps it pulsed)
+	StabSpinUpMs   int     `json:"stabSpinUpMs"`   // how long the hull takes to get up to its turning speed
+	StabSpinDownMs int     `json:"stabSpinDownMs"` // how long it takes to stop turning
+	StabSendMs     int     `json:"stabSendMs"`     // shortest gap between turret updates while the correction changes
+	StabInvert     bool    `json:"stabInvert"`     // the turret corrects the wrong way: flip it
+
 	JoyDeadzone   float64 `json:"joyDeadzone"`
 	JoyStartSpeed float64 `json:"joyStartSpeed"`
 	JoyFullAt     float64 `json:"joyFullAt"`
@@ -125,7 +138,9 @@ func defaultTuning() Tuning {
 		DriveMin: 0.8, DrivePulseMs: 20, DriveKickMs: 120, DriveBrake: true,
 		TurretMin: 0.4, TurretPulseMs: 20, TurretKickMs: 20, TurretBrake: true, TurretBacklashMs: 110,
 		SlowTurretSpeed: 0.2,
-		JoyDeadzone:     0.08, JoyStartSpeed: 0.4, JoyFullAt: 1, JoyCurve: 2, JoyAxisSnap: 0.15, JoyTurnSpeed: 0.7,
+		StabAllowed:     true, StabGain: 0.5, StabArcGain: 1, StabCurve: 1, StabDeadband: 0.05, StabMax: 0.4,
+		StabSpinUpMs: 150, StabSpinDownMs: 100, StabSendMs: 50,
+		JoyDeadzone: 0.08, JoyStartSpeed: 0.4, JoyFullAt: 1, JoyCurve: 2, JoyAxisSnap: 0.15, JoyTurnSpeed: 0.7,
 		Buzzer: true, VideoFps: 25, VideoFrameSize: 2, VideoQuality: 20,
 	}
 }
@@ -215,6 +230,12 @@ func (s *Settings) clamp() {
 	t.DriveKickMs, t.TurretKickMs = ms(t.DriveKickMs, 200), ms(t.TurretKickMs, 200)
 	t.DriveBacklashMs, t.TurretBacklashMs = ms(t.DriveBacklashMs, 300), ms(t.TurretBacklashMs, 300)
 	t.SlowTurretSpeed = unit(t.SlowTurretSpeed)
+	t.StabGain, t.StabArcGain = max(0, min(t.StabGain, 3)), max(0, min(t.StabArcGain, 3))
+	t.StabCurve = max(0.2, min(t.StabCurve, 5))
+	t.StabDeadband = max(0, min(t.StabDeadband, 0.5))
+	t.StabMax = unit(t.StabMax)
+	t.StabSpinUpMs, t.StabSpinDownMs = ms(t.StabSpinUpMs, 2000), ms(t.StabSpinDownMs, 2000)
+	t.StabSendMs = max(20, min(t.StabSendMs, 500))
 	t.JoyDeadzone = max(0, min(t.JoyDeadzone, 0.5))
 	t.JoyStartSpeed = unit(t.JoyStartSpeed)
 	t.JoyFullAt = max(t.JoyDeadzone+0.05, min(t.JoyFullAt, 1))

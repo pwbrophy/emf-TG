@@ -27,6 +27,7 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | `ir.go` | The IR shot handshake (left barrel, ack, listen, right barrel, listen) |
 | `combat.go` | HP, directional damage, death, return to base, respawn, invulnerability, capture points, team points, winner, stats; crews (driver + gunner) |
 | `hosttools.go` | Host tools: pause, test hits, heal/revive, capture points by hand, each tank's flips/reversed controls/name/team, ping, turret test; Advanced tuning pushed to tanks; presets (`presets.json`) |
+| `stabilise.go` | Turret stabilisation (the STAB button): works out the hull's turn rate from the drive commands (firmware ramp + watchdog, spin-up/down inertia) and turns the turret against it; the player's turret speed adds on top. Tuned in Advanced → Stabiliser (`Tuning.Stab*`) |
 | `beacons.go` | Capture-point LED beacons (`/beacon`): owner colours, capture and score ripples |
 | `display.go` | The spectator display's feed and the announcer lines (from Unity) |
 | `fake.go` | Pretend IR for `-fake-tanks`, and `POST /api/dev/rfid` to pretend a tag scan |

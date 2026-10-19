@@ -77,6 +77,7 @@ func main() {
 	tanks.onReport = g.tankMessage
 	go g.runClock(ctx.Done())
 	go g.ir.run(ctx.Done())
+	go g.runStabiliser(ctx.Done())
 	for i := 1; i <= *fakeTanks; i++ {
 		team := "Desert"
 		if i%2 == 0 {

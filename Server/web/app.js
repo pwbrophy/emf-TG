@@ -866,7 +866,7 @@ function gameplaySettingsForm() {
 }
 
 function advancedSettings() {
-  const opts = [['motors', 'Motor'], ['controls', 'Control'], ['video', 'Video'], ['shots', 'Shots'], ['presets', 'Presets']];
+  const opts = [['motors', 'Motor'], ['controls', 'Control'], ['stab', 'Stabiliser'], ['video', 'Video'], ['shots', 'Shots'], ['presets', 'Presets']];
   const sub = segChoice('advanced', opts);
   let html = '';
   const motor = (who, w) => `<h4>${who}</h4>
@@ -893,6 +893,23 @@ function advancedSettings() {
         ${field('Turning speed', 'tuning.joyTurnSpeed', 'num', 'min="0.05" max="1" step="0.05"')}
         ${field('Turret slow speed', 'tuning.slowTurretSpeed', 'num', 'min="0" max="1" step="0.05"')}
         <div class="wide">${check('Turret always slow', 'tuning.slowTurretEnabled')}</div></div>`;
+      break;
+    case 'stab':
+      html = `<p class="hint">Turret stabilisation: with STAB on, the turret turns against the hull so it keeps pointing the same way,
+        and the player's turret slider adds on top. Robots have no compass, so the server works out the hull's turning from the drive commands.
+        Tune with a robot spinning on the spot: raise the gain if the turret still turns with the hull, lower it if it overshoots.</p>
+        <div class="settings-grid">
+        <div class="wide chk-grid">${check('STAB button on players&rsquo; phones', 'tuning.stabAllowed')}${check('Correct the other way', 'tuning.stabInvert')}</div>
+        ${field('Gain (turning on the spot)', 'tuning.stabGain', 'num', 'min="0" max="3" step="0.05"')}
+        ${field('Gain &times; when driving and turning', 'tuning.stabArcGain', 'num', 'min="0" max="3" step="0.05"')}
+        ${field('Curve (1 = in proportion)', 'tuning.stabCurve', 'num', 'min="0.2" max="5" step="0.1"')}
+        ${field('Ignore turns below', 'tuning.stabDeadband', 'num', 'min="0" max="0.5" step="0.01"')}
+        ${field('Most correction', 'tuning.stabMax', 'num', 'min="0" max="1" step="0.05"')}
+        ${field('Hull spin-up (ms)', 'tuning.stabSpinUpMs', 'int', 'min="0" max="2000" step="10"')}
+        ${field('Hull spin-down (ms)', 'tuning.stabSpinDownMs', 'int', 'min="0" max="2000" step="10"')}
+        ${field('Update every (ms)', 'tuning.stabSendMs', 'int', 'min="20" max="500" step="10"')}</div>
+        <p class="hint" style="margin-top:8px">Keep &ldquo;Most correction&rdquo; at or below the turret&rsquo;s lowest steady speed (Motor tab)
+        so corrections use the smooth pulsed mode. The hull model also follows the tracks&rsquo; acceleration settings.</p>`;
       break;
     case 'video':
       html = `<p class="hint">Changing these restarts each robot's camera for a moment. Lower quality number = sharper picture, bigger frames.</p>

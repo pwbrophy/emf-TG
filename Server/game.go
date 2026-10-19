@@ -79,6 +79,8 @@ type player struct {
 	role        string
 	allowGunner bool
 
+	stabilise bool // turret stabilisation on (stabilise.go); kept between games
+
 	clients        int       // open pages for this device
 	disconnectedAt time.Time // when the last page closed; zero while connected
 
@@ -248,6 +250,8 @@ func (g *game) handle(c *client, m inMsg) {
 	case "turret":
 		g.turret(c.device, m.S)
 		return
+	case "stabilise":
+		g.setStabilise(c.device, m.On)
 
 	case "fire":
 		g.fire(c.device)
@@ -399,6 +403,11 @@ func (g *game) clientGone(c *client) {
 		if p.status == stPlaying && p.tank != "" {
 			g.tanks.sendTo(p.tank, `{"cmd":"drive","l":0,"r":0}`)
 			g.tanks.sendTo(p.tank, `{"cmd":"turret","speed":0}`)
+			if g.match != nil {
+				if c := g.match.fighters[p.tank]; c != nil {
+					c.stab.driveL, c.stab.driveR, c.stab.turretIn = 0, 0, 0
+				}
+			}
 		}
 	}
 	g.broadcast()
@@ -736,6 +745,7 @@ func (g *game) drive(device string, l, r float64) {
 	}
 	l, r = clampUnit(l), clampUnit(r)
 	g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"drive","l":%.3f,"r":%.3f}`, l, r))
+	c.stab.driveL, c.stab.driveR, c.stab.driveAt = l, r, time.Now() // the stabiliser follows the hull
 
 	p := g.players[device]
 	now := time.Now()
@@ -754,7 +764,12 @@ func (g *game) turret(device string, s float64) {
 	if t := g.settings.Tuning; t.SlowTurretEnabled {
 		s = max(-t.SlowTurretSpeed, min(s, t.SlowTurretSpeed))
 	}
-	g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"turret","speed":%.3f}`, s))
+	c.stab.turretIn = s
+	if g.stabWanted(c) && c.life != exploding {
+		g.stepStabiliser(c, time.Now(), 0) // the player's speed plus the correction, sent now
+		return
+	}
+	g.sendTurretSpeed(c, s)
 }
 
 func (g *game) fire(device string) {
@@ -1145,6 +1160,7 @@ type meView struct {
 	AllowGunner   bool   `json:"allowGunner"`
 	TankColor     string `json:"tankColor,omitempty"`    // lobby: "your tank is glowing RED"
 	TankColorCSS  string `json:"tankColorCss,omitempty"` // that colour for the screen
+	Stabilise     bool   `json:"stabilise"`              // turret stabilisation is on
 
 	// In a game:
 	Hp           int    `json:"hp"`
@@ -1180,6 +1196,7 @@ type controlsView struct {
 	AxisSnap        float64 `json:"axisSnap"`
 	TurnSpeed       float64 `json:"turnSpeed"`
 	SlowTurretSpeed float64 `json:"slowTurretSpeed"`
+	StabAllowed     bool    `json:"stabAllowed"` // show the STAB (turret stabilisation) button
 	DebugConsole    bool    `json:"debugConsole"`
 }
 
@@ -1231,7 +1248,7 @@ func (g *game) snapshot(device string) snapshot {
 		Controls: controlsView{
 			Deadzone: t.JoyDeadzone, StartSpeed: t.JoyStartSpeed, FullAt: t.JoyFullAt, Curve: t.JoyCurve,
 			AxisSnap: t.JoyAxisSnap, TurnSpeed: t.JoyTurnSpeed, SlowTurretSpeed: t.SlowTurretSpeed,
-			DebugConsole: g.settings.DebugConsole,
+			StabAllowed: t.StabAllowed, DebugConsole: g.settings.DebugConsole,
 		},
 		Me:      meView{IsHost: isHost},
 		Tanks:   []tankView{},
@@ -1351,6 +1368,7 @@ func (g *game) snapshot(device string) snapshot {
 		s.Me.Tank = p.tank
 		s.Me.TankName = g.tankNames[p.tank]
 		s.Me.AllowGunner = p.allowGunner
+		s.Me.Stabilise = p.stabilise
 		if p.tank != "" {
 			s.Me.TankColor, s.Me.TankColorCSS = g.lobbyColor(p.tank)
 		}

@@ -284,8 +284,14 @@ func (g *game) pushTuning(old Tuning) {
 func (g *game) readPresets() map[string]Tuning {
 	if g.presets == nil {
 		g.presets = map[string]Tuning{}
-		if b, err := os.ReadFile(g.presetsPath); err == nil {
-			_ = json.Unmarshal(b, &g.presets)
+		var raw map[string]json.RawMessage
+		if b, err := os.ReadFile(g.presetsPath); err == nil && json.Unmarshal(b, &raw) == nil {
+			for name, r := range raw {
+				t := defaultTuning() // settings added since the preset was saved keep their defaults
+				if json.Unmarshal(r, &t) == nil {
+					g.presets[name] = t
+				}
+			}
 		}
 	}
 	ps := make(map[string]Tuning, len(g.presets))

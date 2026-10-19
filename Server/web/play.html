@@ -571,6 +571,38 @@
     #turret-thumb.zone-slow { background: #e4e4ea; }
     #turret-thumb.zone-fast { background: #ffffff; }
 
+    /* ── Turret stabilisation toggle (Go server addition): above the turret
+       slider, left of the fire button. Lit while stabilisation is on. ── */
+    #stab-btn {
+      position: absolute;
+      right: calc(var(--ctrl-right) + 42vmin);
+      bottom: calc(var(--ctrl-bottom) + 26.5vmin);
+      width: 19.2vmin;
+      height: 13.33vmin;
+      border-radius: 6.67vmin;
+      background: rgba(0,0,0,0.45);
+      border: 2px solid rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.8);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5vmin;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      line-height: 1;
+      pointer-events: all;
+      touch-action: none;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: background 0.1s, transform 0.08s;
+    }
+    #stab-btn:active   { transform: scale(0.92); }
+    #stab-btn.on       { background: rgba(255,255,255,0.85); color: #111; border-color: #fff; }
+    #stab-word         { font-size: 3.2vmin; pointer-events: none; }
+    #stab-state        { font-size: 2.6vmin; opacity: 0.8; pointer-events: none; }
+
 
     /* ── Fire button ── */
     #fire-btn {
@@ -1350,6 +1382,12 @@
       <span class="turret-zone-label" style="left:90%">FAST</span>
       <div id="turret-thumb">TURRET</div>
     </div>
+
+    <!-- Turret stabilisation on/off (Go server addition) -->
+    <div id="stab-btn" onpointerdown="toggleStab(event)" style="display:none">
+      <span id="stab-word">STAB</span>
+      <span id="stab-state">OFF</span>
+    </div>
   </div>
 
   <!-- Fire result toast -->
@@ -2073,6 +2111,7 @@ function returnToJoin(message) {
   document.getElementById('fire-btn').style.display       = '';
   document.getElementById('turret-buttons').style.display = '';
   document.getElementById('reticle').style.display        = '';
+  updateStabBtn();
   const roleEl    = document.getElementById('role-label');
   const partnerEl = document.getElementById('partner-label');
   if (roleEl)    { roleEl.style.display    = ''; roleEl.textContent    = ''; }
@@ -2134,6 +2173,7 @@ class TGHub {
     if (method === 'SendDrive')       this._raw({ t: 'drive', l: a[0], r: a[1] });
     else if (method === 'SendTurret') this._raw({ t: 'turret', s: a[0] });
     else if (method === 'Fire')       this._raw({ t: 'fire' });
+    else if (method === 'SetStabilise') this._raw({ t: 'stabilise', on: !!a[0] });
     // ReportVideoStats: the Go server logs its own video stats.
     return Promise.resolve();
   }
@@ -2222,6 +2262,10 @@ function tgOnMessage(hub, m) {
     hub.emit('TurretSettings', c.slowTurretSpeed);
     hub.emit('DebugConsole', !!c.debugConsole);
   }
+  // Turret stabilisation: the server's word on whether it's allowed and on.
+  stabAllowed = !!(c && c.stabAllowed);
+  stabOn      = !!me.stabilise;
+  updateStabBtn();
 
   if (me.status === 'playing' && m.phase === 'countdown') {
     if (!tgCountdownShown) {
@@ -2759,6 +2803,7 @@ function onGameStarted(data) {
   document.getElementById('joystick-base').style.display  = isGunner ? 'none' : '';
   document.getElementById('fire-btn').style.display       = isDriver ? 'none' : '';
   document.getElementById('turret-buttons').style.display = isDriver ? 'none' : '';
+  updateStabBtn();
   // Driver only loses the reticle when there's an actual gunner aiming for them —
   // a driver with no partner (e.g. gunner hasn't joined) still needs it themselves.
   document.getElementById('reticle').style.display        = (isDriver && partnerName) ? 'none' : '';
@@ -3569,6 +3614,29 @@ turretBase.addEventListener('pointermove', e => {
 turretBase.addEventListener('pointerup',     releaseTurretSlider);
 turretBase.addEventListener('pointercancel', releaseTurretSlider);
 
+// ════════════════════════════════════════════════════════
+// Turret stabilisation (Go server addition): STAB keeps the turret pointing
+// the same way while the hull turns. The server does the work (it turns the
+// turret against the hull, and the slider adds on top); this button only
+// switches it, and shows what the server says. Also Q on a keyboard, Y on a
+// gamepad. Hidden for a driver with a gunner, and when the host turned it off.
+// ════════════════════════════════════════════════════════
+let stabOn = false, stabAllowed = false;
+
+function toggleStab(e) {
+  if (e) e.preventDefault();
+  if (!connection || isDead) return;
+  connection.send('SetStabilise', !stabOn).catch(() => {});
+}
+
+function updateStabBtn() {
+  const btn = document.getElementById('stab-btn');
+  if (!btn) return;
+  btn.style.display = stabAllowed && myRole !== 'driver' ? '' : 'none';
+  btn.classList.toggle('on', stabOn);
+  document.getElementById('stab-state').textContent = stabOn ? 'ON' : 'OFF';
+}
+
 // Suppress browser context menu everywhere (prevents Android long-press
 // "save image / open in new tab" popup on any element during gameplay).
 // Capture phase (true) intercepts before any element handler fires.
@@ -4140,6 +4208,7 @@ document.addEventListener('keydown', e => {
   if (k === ',') { e.preventDefault(); _updateKbTurret(); return; }
   if (k === '.') { e.preventDefault(); _updateKbTurret(); return; }
   if (k === ' ') { e.preventDefault(); onFire(); return; }
+  if (k === 'q' && myRole !== 'driver' && stabAllowed) { e.preventDefault(); toggleStab(); return; }
 });
 
 document.addEventListener('keyup', e => {
@@ -4222,7 +4291,13 @@ function _gpPoll(now) {
   const fireNow = !!(gp.buttons[0]?.pressed || gp.buttons[2]?.pressed);
   if (fireNow && !_gpFireWasPressed) onFire();
   _gpFireWasPressed = fireNow;
+
+  // Turret stabilisation: Y (button 3) toggles it
+  const stabNow = !!gp.buttons[3]?.pressed;
+  if (stabNow && !_gpStabWasPressed && myRole !== 'driver' && stabAllowed) toggleStab();
+  _gpStabWasPressed = stabNow;
 }
+let _gpStabWasPressed = false;
 
 window.addEventListener('gamepadconnected', e => {
   dbg('gamepad connected: ' + e.gamepad.id);

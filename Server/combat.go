@@ -149,6 +149,8 @@ type combatant struct {
 	lastHitDir  string // for the host's "IR sensor hit display"
 	hits        int    // hits taken (the host's compass flashes on each new one)
 	lastHitMask byte
+
+	stab stabState // turret stabilisation (stabilise.go)
 }
 
 func (c *combatant) invulnerable(now time.Time) bool {
