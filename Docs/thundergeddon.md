@@ -2,59 +2,76 @@
 
 ## What is Thundergeddon?
 
-**Thundergeddon** is a hybrid tabletop/RC tank battle game: real, small robotic tanks fight in the physical world, while a **Unity companion app** runs the match logic and controls the robots over the local network.
+**Thundergeddon** is a hybrid tabletop/RC tank battle game: real, small robotic tanks fight on a physical battlefield, while a **game server running on a small Wi-Fi router (the "hub")** runs the match and controls the tanks. Players join from their phone's web browser: there's no app to install and no laptop needed.
 
 * **Physical side:**
-  
-  * Custom ESP32 electronics, motor + turret control, and an IR “shooting / hit detection” system plus FPV camera streaming
-  
+
+  * Custom ESP32 electronics, motor + turret control, an IR "shooting / hit detection" system with eight directional receivers, FPV camera streaming, and an RFID reader underneath for capture points and bases
   * Robots measure about 13cm long, 8cm wide and 8cm high
   * Robots body is 3d printed in Sunlu PLA+, with the barrel in Sunlu Matte black, created in OnShape
-  * Electronics designed in KiCad, manufactured by JLC PCB
-  
+  * Electronics designed in KiCad, manufactured by JLC PCB. Ten tanks have been built (Desert-01 to 05 and Jungle-06 to 10); games are usually 3v3
+  * Three LED capture-point beacons (North, Centre, South) show which alliance holds each point
+
   The prototype electronics are designed to be simple, rather than fully featured e.g. I have left out charging.
-  
-* **Digital side (Unity app):** discovers/hosts robots on Wi-Fi (UDP discovery + WebSocket control), lets you select and drive a tank with an on-screen joystick, shows a live video feed per robot, and runs **realtime** or **turn-based rules** like player/alliance turns, action points, and a coordinated “shoot” sequence.
+
+* **Digital side (game server on the hub):** a Go program running on a GL.iNet GL-MT3000 router. Tanks find it on the network by themselves and are controlled over WebSocket. Players open the join link (e.g. from a QR code), enter a name, wait in the queue, choose an alliance in the lobby and are given a tank. In the game they drive with a joystick, aim the turret with a slider and fire, while watching the tank's live camera. The host runs everything from a phone too, and a spectator display shows every tank's camera, the score and a spoken commentary on a big screen.
+
+  The realtime game has directional damage (rear hits do 3×), capture points, return-to-base respawns via RFID, and optional two-player crews (driver + gunner). A turn-based mode similar to X-COM is planned.
+
+## Events
+
+### Shown so far
+
+- **EMF Camp, July 2026:** the first public installation of Thundergeddon.
+- **Battles Through History, October 2026:** two full days of public games (3–4 October). Running all day revealed slowdowns, a freeze when tanks dropped off Wi-Fi together, reconnect problems and choppy video, all fixed afterwards.
+
+### Coming up
+
+- **Beachhead Tabletop Games Expo, Bournemouth, February 2027:** exhibiting the game.
+- **Mojo Pitch, June 2027:** pitching Thundergeddon to toy companies. The ideal outcome is a licensing deal with Spin Master.
 
 ## To-do
 
-V0.2
+### Tanks
 
-- [x] Test reverse polarity protection
-- [x] Add hull board LED on spare GPIO
-- [x] Hull: Battery terminal holder tighten
-- [x] Hull: Remove bit between battery terminals
-- [ ] Turret Gear Tighter on Motor
-- [x] Turret->Hull screws length compensation
-- [x] Camera Holder
-- [x] Turret Slip Ring Wires Holder
-- [x] Move Antenna
-- [x] NFC reader
-- [x] Redesign tracks
-- [ ] Order Batteries
-- [ ] To order from Aliexpress:
-  - [ ] Cameras
-  - [ ] Motors
-  - [ ] Antenna and connector
+- [x] V0.2 fixes: reverse polarity protection tested, hull board LED, battery terminal holder, turret->hull screw lengths, camera holder, slip ring wire holder, antenna moved, NFC reader, redesigned tracks
+- [x] Parts ordered (batteries, charger, cameras, motors, antennas, LED strip, IR LEDs)
+- [x] All ten tanks built and tested
+- [ ] Turret gear tighter on motor (backlash is currently compensated in software)
+- [ ] Robot 1: swap the barrel for the updated version
+- [ ] Robot 8: buzzer sounds strange (check the transistor and piezo solder joints)
+- [ ] Paint the front of each hull so players can tell which way it faces (the turret turns independently)
+- [ ] Label batteries
+- [ ] Make a battery box
 
-- [ ] Check qty
-  - [ ] LED strip
-  - [ ] IR LEDs
+### Battlefield
 
-- [ ] Order Battery Charger
+- [ ] Scenery: walls
+- [ ] Scenery: oil drums
+- [ ] Signs for each capture point and base
+- [ ] RFID card holders
 
-V0.3
+### Software
 
-- [ ] Polyfuse on battery
+- [x] Game server moved from the laptop to the hub
+- [ ] Run a public event on the hub server
+- [ ] Some iPhones can't reach the lobby ("server is http, should be https" error)
+- [ ] Controls guide for players before the game starts
+- [ ] Turn-based game mode (X-COM style)
+
+### Next hardware revision (v2)
+
+- [ ] Battery protection (2S protection IC) instead of a polyfuse
+- [ ] Battery charging via USB-C on the hull
+- [ ] Battery voltage sensing
 - [ ] Stable voltage for motors - consistent tank speed as battery voltage drops
-- [x] NFC reader for capture points
-- [ ] Battery charging via USB
+- [ ] Variable motor speed: an ESP32-C6 on the hull replaces the PCA9555 (real PWM, IR receivers, RFID, audio)
+- [ ] Speaker sound instead of buzzer (PAM8302A amp on the hull)
+- [ ] IR code transmission/decoding for robot ID on hit
+- [ ] H.264 video: ESP32-P4 + ESP32-C5 (Wi-Fi) on the turret
 - [ ] Turret 5V for LEDs
 - [ ] More robust USB power input
-- [ ] Speaker sound instead of buzzer: I2S + MAX98357A
 - [ ] Vertical turret motor; move turret backwards
-- [ ] IR code transmission/decoding for robot ID on hit 
-
 
 
 ## Hardware
@@ -564,10 +581,35 @@ https://www.aliexpress.com/item/32790073855.html?
 
 ### Software
 
-#### **Unity program:**
+#### **Game server on the hub**
 
- The Unity app is the **main controller for the game**. It finds the robots, keeps track of players/turns/game state, shows the UI and video feeds, and sends movement, turret, motor, and shooting commands to the robots.
+The game server is the **main controller for the game**. It is a single Go program (`Server/` in the repository) that runs on a **GL.iNet GL-MT3000 (Beryl AX)** travel router, which acts as the hub for the whole installation: the tanks, the players' phones and the spectator display all join the router's Wi-Fi, and the server runs on the router itself. No laptop or PC is needed during a game.
+
+```
+Phones / spectator display ──WebSocket (/ws)──►  Game server on the hub  ◄──WebSocket (/esp32)── Tanks
+                           ◄──relayed video────  (Go, port 8088)         ◄──MJPEG (:81/stream)── Tanks
+                                                                         ◄──WebSocket (/beacon)── Capture-point beacons
+```
+
+What it does:
+
+* **Finds the tanks:** a tank with no server broadcasts on UDP port 30560 every 2 s, and the server replies with its WebSocket address. The tank connects, says hello with its id, name and a shared token, then sends a heartbeat every 2 s. The capture-point beacons find the server the same way.
+* **Controls the tanks:** it sends drive, turret, motor, LED, buzzer and IR commands, and receives heartbeats, IR receiver results and RFID tag scans.
+* **Runs the game:** the queue, lobby, alliances, countdown, HP and directional damage, the IR shot handshake between the shooter and every enemy tank, deaths and return-to-base respawns, capture points and scoring, the winner and end-of-game stats. Game rules are tested with Go unit tests.
+* **Relays video:** while a tank is in a game, the server pulls its camera stream once and passes it on to the player's phone and the spectator display. The tank's camera can only serve one viewer, so this keeps its load the same however many people watch. In a load test, ten tanks at 20 fps used about 15% of the router's CPU.
+* **Serves the web pages:** the phone app (join, queue, lobby, game, results and the host console), the in-game control screen and the spectator display are all built into the program. Players use the `/join` link, which can go in a QR code.
+* **Host console:** whoever taps Host Game on their phone runs the game. Host settings (game rules, alliances and their colours, capture points, RFID tags, an optional game password, tank tuning and presets) are saved on the router in `/etc/thundergeddon/settings.json`. Host tools include pause, test hits, heal/revive, per-tank settings, ping and a turret test.
+
+How it runs on the hub:
+
+* The router runs OpenWrt on an ARM64 processor; the server is built for `linux/arm64` and installed to `/opt/thundergeddon`.
+* It is a system service: it starts when the router boots and restarts itself if it crashes.
+* Updates go over the network: `Server/deploy.ps1` builds the program on the PC, uploads it to the router over SSH and restarts the service. No USB cable is needed.
+* Logs are in the router's system log (`logread -e thundergeddon`).
+* The same program also runs on a PC for development (`Server/run.ps1`), including pretend tanks for testing without hardware.
 
 #### **ESP32 code:**
 
- The ESP32 code is the **robot-side controller**. It connects to Unity over the network, receives commands, drives the hardware (motors, turret, LEDs, camera, IR), and sends status, heartbeats, hit data, and video back to Unity.
+ The ESP32 code is the **robot-side controller**. It finds the hub server over the network, receives commands, drives the hardware (motors, turret, LEDs, buzzer, camera, IR, RFID), and sends status, heartbeats, hit data and RFID scans back to the server. Its camera serves video over HTTP for the server to relay. Firmware updates go over Wi-Fi (OTA), and the whole fleet can be updated at once.
+
+ The capture-point beacons run their own ESP32 firmware, which drives an LED strip in the colour of the alliance holding that point.
