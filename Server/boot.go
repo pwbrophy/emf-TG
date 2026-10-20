@@ -24,6 +24,11 @@ type bootReport struct {
 	BSSID     string `json:"bssid"` // the access point it joined
 	Cal       string `json:"cal"`   // radio calibration: "full"
 	Firmware  string `json:"fw"`    // build date and time
+	// The last crash's summary from the tank's core dump (task, pc, cause,
+	// backtrace), reported once; "" = none. Decode the addresses with
+	// xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <addresses> using
+	// the build that crashed.
+	Crash string `json:"crash"`
 }
 
 func (b bootReport) known() bool { return b.Reset != "" }
@@ -38,8 +43,12 @@ func (b bootReport) describe(helloAt, now time.Time) string {
 	if b.WifiTries > 1 {
 		tries = fmt.Sprintf(", %d tries", b.WifiTries)
 	}
-	return fmt.Sprintf("started %s ago (%s); Wi-Fi channel %d in %.1f s%s, %d dBm; firmware %s",
+	text := fmt.Sprintf("started %s ago (%s); Wi-Fi channel %d in %.1f s%s, %d dBm; firmware %s",
 		ago(now.Sub(started)), b.Reset, b.Channel, float64(b.WifiMs)/1000, tries, b.RSSI, b.Firmware)
+	if b.Crash != "" {
+		text += "; last crash: " + b.Crash
+	}
+	return text
 }
 
 // ago is a short, rounded duration: "8 s", "4 min", "2 h 5 min".

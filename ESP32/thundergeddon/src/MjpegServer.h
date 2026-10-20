@@ -73,6 +73,21 @@ public:
     void setEnabled(bool on) { _enabled = on; }
     bool isEnabled()   const { return _enabled; }
 
+    // Waits (up to timeoutMs) until the streaming task isn't using the camera
+    // driver. Call after setEnabled(false) and before esp_camera_deinit():
+    // the task can be inside esp_camera_fb_get(), which waits up to 4 s for a
+    // frame, and a deinit under it crashed the tank about 4 s later (three
+    // tanks when the server restarted with cameras on, 20 October 2026).
+    bool waitCameraIdle(uint32_t timeoutMs)
+    {
+        const uint32_t start = millis();
+        while (_usingCamera) {
+            if (millis() - start > timeoutMs) return false;
+            delay(5);
+        }
+        return true;
+    }
+
     // Cap the streamed frame rate. fps <= 0 = uncapped; fps > 30 clamped to 30.
     // Default is 20 fps (set on the member). The streaming task paces itself to
     // this interval so it never emits frames faster than requested — this is the
@@ -198,8 +213,16 @@ private:
                 lastFrameMs = millis();
             }
 
+            // Mark the camera as in use, then check again that streaming is
+            // still on: waitCameraIdle() relies on seeing this flag (see there).
+            self->_usingCamera = true;
+            if (!self->_enabled || self->_stopping) {
+                self->_usingCamera = false;
+                continue;
+            }
             camera_fb_t* fb = esp_camera_fb_get();
             if (!fb) {
+                self->_usingCamera = false;
                 portENTER_CRITICAL(&self->_statsMux);
                 self->_stats.noFrame++;
                 portEXIT_CRITICAL(&self->_statsMux);
@@ -234,6 +257,7 @@ private:
             }
 
             esp_camera_fb_return(fb);
+            self->_usingCamera = false;
             if (!ok) break;
             // No explicit delay; esp_camera_fb_get() naturally paces at the sensor rate
         }
@@ -246,6 +270,7 @@ private:
     httpd_handle_t   _server  = nullptr;
     volatile bool    _enabled = false;
     volatile bool    _stopping = false;
+    volatile bool    _usingCamera = false; // streaming task is inside the camera driver
     volatile uint32_t _minFrameIntervalMs = 50; // 50 ms = 20 fps default cap
     portMUX_TYPE     _statsMux = portMUX_INITIALIZER_UNLOCKED;
     Stats            _stats    = {};

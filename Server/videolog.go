@@ -19,7 +19,9 @@ package main
 //
 // The file lives in the temp folder (RAM on the router, so it is gone after a
 // reboot) and is downloadable at GET /api/video-log. It is rotated at
-// videoLogMaxBytes, keeping one older file.
+// videoLogMaxBytes, keeping one older file. A server restart (a deploy)
+// carries on the same file; it used to start afresh and lost the game just
+// played.
 
 import (
 	"bufio"
@@ -47,19 +49,36 @@ type videoLog struct {
 	size int64
 }
 
-// openVideoLog starts a fresh log at path. Returns nil (logging off) if the
-// file can't be created; every method is safe on a nil *videoLog.
+// openVideoLog carries on the log at path, or starts one if there is none
+// (or it has older columns: that one is kept as path.1). Returns nil (logging
+// off) if the file can't be written; every method is safe on a nil *videoLog.
 func openVideoLog(path string) *videoLog {
 	if path == "" {
 		return nil
 	}
 	vl := &videoLog{path: path}
-	if err := vl.open(); err != nil {
+	if err := vl.reopen(); err != nil {
 		log.Printf("[VideoLog] can't write %s: %v", path, err)
 		return nil
 	}
 	log.Printf("[VideoLog] writing %s", path)
 	return vl
+}
+
+// reopen appends to the existing file if it has the current columns.
+func (vl *videoLog) reopen() error {
+	if b, err := os.ReadFile(vl.path); err == nil && len(b) > 0 {
+		if strings.HasPrefix(string(b), videoLogHeader) {
+			f, err := os.OpenFile(vl.path, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				return err
+			}
+			vl.f, vl.w, vl.size = f, bufio.NewWriter(f), int64(len(b))
+			return nil
+		}
+		_ = os.Rename(vl.path, vl.path+".1")
+	}
+	return vl.open()
 }
 
 func (vl *videoLog) open() error {

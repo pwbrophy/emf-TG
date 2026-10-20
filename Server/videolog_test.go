@@ -91,3 +91,31 @@ func TestMotorTracking(t *testing.T) {
 		t.Errorf("drive with stick centred = %v", drive)
 	}
 }
+
+// A server restart carries on the same log; a log with older columns is kept
+// as .1 and a new one started.
+func TestVideoLogSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "video.csv")
+	vl := openVideoLog(path)
+	vl.note("Desert-01", "boot", "first run")
+	vl.close()
+
+	vl = openVideoLog(path)
+	vl.note("Desert-01", "boot", "after restart")
+	vl.close()
+	b, _ := os.ReadFile(path)
+	if s := string(b); strings.Count(s, videoLogHeader) != 1 || !strings.Contains(s, "first run") || !strings.Contains(s, "after restart") {
+		t.Fatalf("log after restart:\n%s", s)
+	}
+
+	if err := os.WriteFile(path, []byte("time,kind,old,columns\nx,y,z,w\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vl = openVideoLog(path)
+	vl.close()
+	old, _ := os.ReadFile(path + ".1")
+	cur, _ := os.ReadFile(path)
+	if !strings.Contains(string(old), "old,columns") || string(cur) != videoLogHeader {
+		t.Fatalf("old %q, new %q", old, cur)
+	}
+}

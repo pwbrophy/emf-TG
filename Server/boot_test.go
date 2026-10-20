@@ -15,7 +15,8 @@ func TestBootReport(t *testing.T) {
 	c := dialTank(t, srv)
 	sendJSON(t, c, map[string]any{"cmd": "hello", "id": "AABBCCDDEEFF", "name": "Desert-01", "ip": "127.0.0.1",
 		"up": 4200, "rst": "power-on", "wifi_ms": 1400, "wifi_tries": 1, "ch": 6, "rssi0": -31,
-		"bssid": "94:83:C4:00:11:22", "cal": "full", "fw": "Oct 20 2026 10:12:00"})
+		"bssid": "94:83:C4:00:11:22", "cal": "full", "fw": "Oct 20 2026 10:12:00",
+		"crash": "task httpd pc 0x4201abcd cause 28 bt 0x4201abcd 0x42005678"})
 	<-connected
 	sendJSON(t, c, map[string]any{"cmd": "cam_status", "ok": 1, "tries": 2, "err": 0})
 
@@ -27,7 +28,7 @@ func TestBootReport(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"started 4 s ago (power-on)", "Wi-Fi channel 6 in 1.4 s, -31 dBm",
-		"firmware Oct 20 2026 10:12:00", "camera started on try 2"} {
+		"firmware Oct 20 2026 10:12:00", "last crash: task httpd pc 0x4201abcd", "camera started on try 2"} {
 		if !strings.Contains(boot, want) {
 			t.Errorf("boot %q lacks %q", boot, want)
 		}

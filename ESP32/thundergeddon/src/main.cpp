@@ -33,6 +33,7 @@ extern "C" void __attribute__((constructor(101))) buzzerEarlyLow()
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include "esp_phy_init.h"  // esp_phy_erase_cal_data_in_nvs: full radio calibration each start-up
+#include "esp_core_dump.h" // crash summary from the coredump partition
 #include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
 
@@ -116,6 +117,31 @@ static int         g_wifiChannel     = 0;
 static int         g_wifiRssiConnect = 0; // signal (dBm) on connecting
 static String      g_wifiBssid;           // the access point joined
 static uint32_t    g_rebootAt        = 0; // millis() to restart at (server's reboot command); 0 = no
+static String      g_crashInfo;           // summary of the last crash, if one was saved
+
+// A crash saves a core dump in flash (the coredump partition). Summarise it
+// for the server — crashing task, program counter, exception cause and
+// backtrace; decode the addresses with xtensa-esp32s3-elf-addr2line against
+// the firmware.elf of the build that crashed — then erase it so it's
+// reported once.
+static void readCrashDump()
+{
+    if (esp_core_dump_image_check() != ESP_OK) return; // none saved (or unreadable)
+    auto* sum = (esp_core_dump_summary_t*)calloc(1, sizeof(esp_core_dump_summary_t));
+    if (sum && esp_core_dump_get_summary(sum) == ESP_OK) {
+        char buf[240];
+        sum->exc_task[sizeof(sum->exc_task) - 1] = 0;
+        int n = snprintf(buf, sizeof(buf), "task %s pc 0x%08lx cause %lu bt",
+                         sum->exc_task, (unsigned long)sum->exc_pc,
+                         (unsigned long)sum->ex_info.exc_cause);
+        for (uint32_t i = 0; i < sum->exc_bt_info.depth && i < 16 && n < (int)sizeof(buf) - 12; i++)
+            n += snprintf(buf + n, sizeof(buf) - n, " 0x%08lx", (unsigned long)sum->exc_bt_info.bt[i]);
+        g_crashInfo = buf;
+        Serial.printf("[BOOT] last crash: %s\n", buf);
+    }
+    free(sum);
+    esp_core_dump_image_erase();
+}
 
 static const char* resetReasonName(esp_reset_reason_t r)
 {
@@ -1023,7 +1049,12 @@ static void onWsClose()
     motors.enable(false);
     ir.stopEmit();
     mjpeg.setEnabled(false);
-    if (cam.isStarted()) cam.stop();
+    // Only once the streaming task has let go of the camera (see
+    // MjpegServer::waitCameraIdle): stopping it under the task crashed tanks.
+    if (cam.isStarted()) {
+        if (mjpeg.waitCameraIdle(4500)) cam.stop();
+        else Serial.println("[CAM] stream still busy: camera left running");
+    }
     leds.resetToIdle(); // clear any dead-blink/death-explosion effect so boot animation can show
     leds.setStatus(StatusPattern::SearchingFast);
     leds.setBootPhase(BootPhase::ServerConnecting);
@@ -1415,7 +1446,8 @@ static void connectWebSocket()
                            ",\"rssi0\":"         + String(g_wifiRssiConnect) +
                            ",\"bssid\":\""       + g_wifiBssid +
                            "\",\"cal\":\"full\"" +
-                           ",\"fw\":\""          + __DATE__ " " __TIME__ + "\"}";
+                           ",\"crash\":\""       + g_crashInfo +
+                           "\",\"fw\":\""        + __DATE__ " " __TIME__ + "\"}";
             rfid.takeStatusChanged(); // hello already carries the current RFID state
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
@@ -1454,6 +1486,7 @@ void setup()
     Serial.begin(115200);
     delay(100);
     g_resetReason = resetReasonName(esp_reset_reason());
+    readCrashDump();
     Serial.printf("[BOOT] Thundergeddon ESP32-S3 (start: %s, firmware %s %s)\n",
                   g_resetReason, __DATE__, __TIME__);
 
