@@ -1478,7 +1478,7 @@
       <span id="ui-scale-value">100%</span>
       <button id="ui-scale-up" type="button" onclick="stepUiScale(1)" aria-label="Bigger">+</button>
     </div>
-    <button id="ui-scale-reset" type="button" onclick="setUiScale(1)">RESET</button>
+    <button id="ui-scale-reset" type="button" onclick="resetUiScale()">RESET</button>
   </div>
   </div>
 </div>
@@ -3517,6 +3517,9 @@ function maybeSendDrive(now) {
 // Not above 100%: the HP bar (70vmax wide) would grow into the HOST button.
 const UI_SCALE_MIN = 0.4, UI_SCALE_MAX = 1, UI_SCALE_STEP = 0.1;
 const UI_SCALE_KEY = 'tg_ui_scale';
+// Starting size: 70% in a browser on a computer (mouse or trackpad as the main
+// pointer), where the phone-sized HUD is huge; 100% on phones and tablets.
+const UI_SCALE_DEFAULT = matchMedia('(pointer: fine)').matches ? 0.7 : 1;
 let uiScale = 1;
 
 function setUiScale(s, save = true) {
@@ -3528,6 +3531,13 @@ function setUiScale(s, save = true) {
   document.getElementById('ui-scale-up').disabled   = s >= UI_SCALE_MAX - 0.001;
   if (save) { try { localStorage.setItem(UI_SCALE_KEY, String(s)); } catch (_) {} }
   if (save) recomputeControlRadii(); // not at load: the joystick code below isn't set up yet
+}
+
+// RESET: back to this device's starting size, and forget the saved one.
+function resetUiScale() {
+  setUiScale(UI_SCALE_DEFAULT, false);
+  try { localStorage.removeItem(UI_SCALE_KEY); } catch (_) {}
+  recomputeControlRadii();
 }
 
 function stepUiScale(dir) {
@@ -3550,7 +3560,7 @@ document.addEventListener('pointerdown', e => {
 {
   let saved = null;
   try { saved = localStorage.getItem(UI_SCALE_KEY); } catch (_) {}
-  setUiScale(saved === null ? 1 : saved, false);
+  setUiScale(saved === null ? UI_SCALE_DEFAULT : saved, false);
 }
 
 const joyBase  = document.getElementById('joystick-base');
