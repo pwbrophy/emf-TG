@@ -76,17 +76,29 @@ public:
         _cfg.grab_mode     = CAMERA_GRAB_LATEST; // always return the newest frame
     }
 
-    // Initialise and power up the camera driver (idempotent).
+    // Initialise and power up the camera driver (idempotent). Tries up to
+    // kStartTries times: the sensor has no reset or power-down line on this
+    // board, so after a software restart (OTA, reboot command) it is still
+    // running from before and a first init can fail.
     bool start()
     {
         if (_started) return true;
 
-        Serial.println("[CAM] init...");
-        esp_err_t err = esp_camera_init(&_cfg);
-        if (err != ESP_OK) {
+        esp_err_t err = ESP_FAIL;
+        for (_lastTries = 1; _lastTries <= kStartTries; _lastTries++) {
+            Serial.printf("[CAM] init (try %u)...\n", (unsigned)_lastTries);
+            err = esp_camera_init(&_cfg);
+            if (err == ESP_OK) break;
             Serial.printf("[CAM] init failed: 0x%x\n", (int)err);
+            esp_camera_deinit();       // tidy any half-done init; harmless if none
+            delay(200);
+        }
+        if (err != ESP_OK) {
+            _lastTries = kStartTries;
+            _lastError = (int)err;
             return false;
         }
+        _lastError = 0;
 
         if (sensor_t* s = esp_camera_sensor_get()) {
             s->set_framesize(s, _frameSize);
@@ -112,6 +124,10 @@ public:
     }
 
     bool isStarted() const { return _started; }
+
+    // How the last start() went: attempts used, and the error if it failed.
+    uint8_t lastTries() const { return _lastTries; }
+    int     lastError() const { return _lastError; }
 
     // Apply flip/mirror at runtime. Safe to call before or after start().
     void applyFlip(bool vflip, bool hmirror)
@@ -157,6 +173,9 @@ public:
 private:
     // Largest frame size main.cpp's videoIdxToFrameSize() offers (VGA 640x480).
     static constexpr framesize_t kMaxFrameSize = FRAMESIZE_VGA;
+    static constexpr uint8_t     kStartTries   = 3;
+    uint8_t                      _lastTries    = 0;
+    int                          _lastError    = 0;
 
     camera_config_t _cfg;
     bool            _started;

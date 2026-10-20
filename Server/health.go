@@ -44,6 +44,7 @@ const (
 
 // tankWarning is one tank's problems, shown to the host on Start.
 type tankWarning struct {
+	ID       string   `json:"id"`   // the tank's id (for the Restart offer)
 	Tank     string   `json:"tank"` // the tank's name
 	Problems []string `json:"problems"`
 	Advice   string   `json:"advice"`
@@ -163,7 +164,7 @@ func checkTanks(h tankHistory, ids []string, fpsCap map[string]int, camSince map
 			if f.noVideo {
 				advice = adviceRestart
 			}
-			out = append(out, tankWarning{Tank: f.label, Problems: p, Advice: advice})
+			out = append(out, tankWarning{ID: id, Tank: f.label, Problems: p, Advice: advice})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return naturalLess(out[i].Tank, out[j].Tank) })

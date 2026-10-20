@@ -5,6 +5,7 @@ package main
 // test, and the Advanced tuning with saved presets. game.mu is held.
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -163,6 +164,12 @@ func (g *game) hostTool(c *client, m inMsg) {
 		}
 	case "host_tank_resync":
 		g.sendTuning(m.Tank, false)
+	case "host_tank_restart":
+		// The tank restarts itself (firmware's reboot command) and comes back
+		// through discovery about 10 s later; older firmware ignores it.
+		if g.tanks.sendTo(m.Tank, `{"cmd":"reboot"}`) {
+			log.Printf("[Game] host restarted tank %s", cmp.Or(g.tankNames[m.Tank], m.Tank))
+		}
 
 	// Advanced tuning presets.
 	case "host_preset_save":

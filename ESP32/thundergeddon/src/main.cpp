@@ -32,6 +32,7 @@ extern "C" void __attribute__((constructor(101))) buzzerEarlyLow()
 }
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include "esp_phy_init.h"  // esp_phy_erase_cal_data_in_nvs: full radio calibration each start-up
 #include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
 
@@ -103,6 +104,34 @@ static int g_inv_turret   = 0;
 static int g_videoFps          = 20;  // default 20 fps cap
 static int g_videoFrameSizeIdx = 2;   // default HVGA 480x320 (matches old behaviour)
 static int g_videoQuality      = 10;  // default JPEG quality
+
+// ---- Start-up report (sent in hello) ----
+// A tank that came up badly (Desert-01, October 2026: slow video and a weak
+// signal until it was power-cycled) left nothing to compare with a good start.
+// hello now says how this start went, so the server can log it.
+static const char* g_resetReason     = "";
+static uint32_t    g_wifiConnectMs   = 0; // millis() when Wi-Fi first connected
+static uint8_t     g_wifiTries       = 0; // network attempts it took
+static int         g_wifiChannel     = 0;
+static int         g_wifiRssiConnect = 0; // signal (dBm) on connecting
+static String      g_wifiBssid;           // the access point joined
+static uint32_t    g_rebootAt        = 0; // millis() to restart at (server's reboot command); 0 = no
+
+static const char* resetReasonName(esp_reset_reason_t r)
+{
+    switch (r) {
+        case ESP_RST_POWERON:   return "power-on";
+        case ESP_RST_EXT:       return "reset pin";
+        case ESP_RST_SW:        return "software";   // OTA update or reboot command
+        case ESP_RST_PANIC:     return "crash";
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT:       return "watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep sleep";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        default:                return "unknown";
+    }
+}
 
 // Map the operator-facing frame-size index to an esp32-camera framesize_t.
 static framesize_t videoIdxToFrameSize(int idx)
@@ -862,8 +891,18 @@ static String makeRobotId()
 // ---- Wi-Fi ----
 static void connectWifi()
 {
+    // Full radio calibration on every start-up. By default the radio only
+    // partly re-tunes itself, starting from data saved on its first ever boot;
+    // erasing that data makes it calibrate from scratch (about 0.1-0.3 s more).
+    // Aimed at starts where the radio comes up weak until the next restart.
+    esp_phy_erase_cal_data_in_nvs();
+
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);           // low-latency radio; important for drive commands
+    // Look on every channel and join the strongest access point with our name,
+    // not the first one found (matters if a repeater or second router shares it).
+    WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+    WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
     const int NET_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
     const unsigned long ATTEMPT_MS = 15000; // max ms before moving to next network
@@ -871,13 +910,19 @@ static void connectWifi()
     while (true) {
         for (int i = 0; i < NET_COUNT; i++) {
             Serial.printf("[WIFI] trying %s\n", WIFI_NETWORKS[i].ssid);
+            g_wifiTries++;
             WiFi.begin(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].pass);
             unsigned long start = millis();
             while (millis() - start < ATTEMPT_MS) {
                 wl_status_t s = WiFi.status();
                 if (s == WL_CONNECTED) {
-                    Serial.printf("[WIFI] connected to %s, IP=%s\n",
-                        WIFI_NETWORKS[i].ssid,
+                    g_wifiConnectMs   = millis();
+                    g_wifiChannel     = WiFi.channel();
+                    g_wifiRssiConnect = WiFi.RSSI();
+                    g_wifiBssid       = WiFi.BSSIDstr();
+                    Serial.printf("[WIFI] connected to %s (%s ch %d, %d dBm) in %lu ms, IP=%s\n",
+                        WIFI_NETWORKS[i].ssid, g_wifiBssid.c_str(), g_wifiChannel,
+                        g_wifiRssiConnect, (unsigned long)g_wifiConnectMs,
                         WiFi.localIP().toString().c_str());
                     return;
                 }
@@ -1036,9 +1081,18 @@ static void handleWsText(const String& s)
     // ---- Camera stream ----
 
     if (strcmp(cmd, "stream_on") == 0) {
-        if (!cam.isStarted() && !cam.start()) {
-            Serial.println("[CAM] start failed");
-            return;
+        if (!cam.isStarted()) {
+            const bool ok = cam.start(); // retries itself (CameraController::start)
+            // Tell the server how the camera start went: a camera that needed
+            // retries, or never started, shows up in its log.
+            char msg[80];
+            snprintf(msg, sizeof(msg), "{\"cmd\":\"cam_status\",\"ok\":%d,\"tries\":%u,\"err\":%d}",
+                     ok ? 1 : 0, (unsigned)cam.lastTries(), cam.lastError());
+            ws.send(msg);
+            if (!ok) {
+                Serial.println("[CAM] start failed");
+                return;
+            }
         }
         mjpeg.setEnabled(true);
         leds.setStatus(StatusPattern::InGameSolid);
@@ -1050,6 +1104,18 @@ static void handleWsText(const String& s)
         mjpeg.setEnabled(false);
         leds.setStatus(StatusPattern::ConnectedSlow);
         Serial.println("[CAM] stream OFF");
+        return;
+    }
+
+    // ---- Restart (host's Restart button) ----
+    // Done from loop(), not here: this runs inside the WebSocket callback,
+    // which mustn't close its own socket.
+    if (strcmp(cmd, "reboot") == 0) {
+        Serial.println("[SYS] restart requested by the server");
+        motors.enable(false);
+        ir.stopEmit();
+        g_rebootAt = millis() + 300;
+        if (g_rebootAt == 0) g_rebootAt = 1;
         return;
     }
 
@@ -1338,7 +1404,18 @@ static void connectWebSocket()
                            ",\"fsize\":"         + String(g_videoFrameSizeIdx) +
                            ",\"fquality\":"      + String(g_videoQuality) +
                            ",\"rfid\":"          + String(rfid.ok() ? 1 : 0) +
-                           ",\"rfid_recoveries\":" + String((unsigned)rfid.recoveries()) + "}";
+                           ",\"rfid_recoveries\":" + String((unsigned)rfid.recoveries()) +
+                           // Start-up report: how long ago and why it started,
+                           // how Wi-Fi connected, which firmware build.
+                           ",\"up\":"            + String((unsigned long)millis()) +
+                           ",\"rst\":\""         + g_resetReason +
+                           "\",\"wifi_ms\":"     + String((unsigned long)g_wifiConnectMs) +
+                           ",\"wifi_tries\":"    + String((unsigned)g_wifiTries) +
+                           ",\"ch\":"            + String(g_wifiChannel) +
+                           ",\"rssi0\":"         + String(g_wifiRssiConnect) +
+                           ",\"bssid\":\""       + g_wifiBssid +
+                           "\",\"cal\":\"full\"" +
+                           ",\"fw\":\""          + __DATE__ " " __TIME__ + "\"}";
             rfid.takeStatusChanged(); // hello already carries the current RFID state
             ws.send(hello);
             leds.setStatus(StatusPattern::ConnectedSlow);
@@ -1376,7 +1453,9 @@ void setup()
 
     Serial.begin(115200);
     delay(100);
-    Serial.println("[BOOT] Thundergeddon ESP32-S3");
+    g_resetReason = resetReasonName(esp_reset_reason());
+    Serial.printf("[BOOT] Thundergeddon ESP32-S3 (start: %s, firmware %s %s)\n",
+                  g_resetReason, __DATE__, __TIME__);
 
     // LEDs and status pin
     leds.begin();
@@ -1526,6 +1605,15 @@ void loop()
     }
 
     OtaSupport::handle();
+
+    // ---- Restart requested by the server (reboot command) ----
+    if (g_rebootAt != 0 && (int32_t)(now - g_rebootAt) >= 0) {
+        mjpeg.stop();                 // ends a live stream first (see MjpegServer::stop)
+        if (cam.isStarted()) cam.stop();
+        ws.close();
+        delay(100);
+        ESP.restart();
+    }
 
     // ---- Motor soft-PWM tick (every 1 ms) ----
     if (now - g_lastMotorTick >= MOTOR_TICK_MS) {

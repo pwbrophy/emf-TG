@@ -74,6 +74,7 @@ func main() {
 	defer vlog.close()
 	stats := startStats(rl, vlog)
 	tanks := newTankManager(rl, *tokenFile, httpPort)
+	tanks.vlog = vlog
 	g := newGame(tanks, *settingsFile)
 	g.vlog = vlog
 	g.checkTanks = stats.check

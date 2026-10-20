@@ -71,6 +71,8 @@ type tankManager struct {
 	onReport    func(id string, r tankReport) // IR replies and RFID reads
 
 	fake fakeWorld // pretend IR for -fake-tanks
+
+	vlog *videoLog // start-up and camera reports go here too; nil = off
 }
 
 type tankSession struct {
@@ -83,8 +85,11 @@ type tankSession struct {
 	heap        atomic.Int64 // free heap bytes from the latest heartbeat
 	rssi        atomic.Int32 // Wi-Fi signal (dBm) from the latest heartbeat; 0 = not reported
 	stop        context.CancelFunc
-	flags       tankFlags // guarded by tankManager.mu
-	video       [3]int    // saved camera fps, frame size, quality from the hello (0 = unknown)
+	flags       tankFlags  // guarded by tankManager.mu
+	video       [3]int     // saved camera fps, frame size, quality from the hello (0 = unknown)
+	boot        bootReport // start-up report from the hello; guarded by tankManager.mu
+	helloAt     time.Time  // when that hello arrived; guarded by tankManager.mu
+	camStatus   string     // how the last camera start went; guarded by tankManager.mu
 
 	// Commands queued for the tank. Sending never blocks the caller (the game
 	// holds its lock while sending); a writer goroutine drains this.
@@ -106,6 +111,7 @@ type tankInfo struct {
 	ID, Name, IP string
 	Flags        tankFlags
 	Video        [3]int // fps, frame size, quality the tank has saved (0 = unknown)
+	Boot         string // how it started and how its camera started (boot.go); "" = old firmware
 }
 
 // tankFlags are settings each tank keeps (in its own memory) and reports in
@@ -250,6 +256,11 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			InvThrottle int `json:"inv_throttle"`
 			InvSteer    int `json:"inv_steer"`
 			InvTurret   int `json:"inv_turret"`
+			// Start-up report (hello) and camera start (cam_status, whose
+			// "ok" arrives in tankReport.RfidOK).
+			bootReport
+			Tries int `json:"tries"`
+			Err   int `json:"err"`
 			tankReport
 		}
 		if json.Unmarshal(data, &msg) != nil {
@@ -277,7 +288,16 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			if msg.FPS != nil && msg.FSize != nil && msg.FQuality != nil {
 				sess.video = [3]int{*msg.FPS, *msg.FSize, *msg.FQuality}
 			}
+			sess.boot, sess.helloAt = msg.bootReport, time.Now()
 			tm.mu.Unlock()
+			if b := msg.bootReport; b.known() {
+				text := b.describe(sess.helloAt, sess.helloAt)
+				if b.UpMs > 60_000 {
+					text = "reconnected; " + text // not a fresh start
+				}
+				log.Printf("[Tanks] %s %s", sess.label(), text)
+				tm.vlog.note(sess.label(), "boot", text)
+			}
 			if msg.FPS != nil && msg.FSize != nil && msg.FQuality != nil {
 				log.Printf("[Tanks] %s camera settings: max %d fps, frame size %d, JPEG quality %d",
 					sess.label(), *msg.FPS, *msg.FSize, *msg.FQuality)
@@ -295,6 +315,17 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 		case "ir_emit_ack", "ir_window_result", "rfid", "pong":
 			if sess != nil && tm.onReport != nil {
 				tm.onReport(sess.id, msg.tankReport)
+			}
+		case "cam_status":
+			if sess != nil {
+				text := camStatusText(msg.RfidOK != 0, msg.Tries, msg.Err)
+				tm.mu.Lock()
+				sess.camStatus = text
+				tm.mu.Unlock()
+				if msg.RfidOK == 0 || msg.Tries > 1 {
+					log.Printf("[Tanks] %s %s", sess.label(), text)
+				}
+				tm.vlog.note(sess.label(), "camera", text)
 			}
 		case "rfid_status":
 			if sess != nil {
@@ -389,7 +420,11 @@ func (tm *tankManager) list() []tankInfo {
 	defer tm.mu.Unlock()
 	out := make([]tankInfo, 0, len(tm.tanks))
 	for _, s := range tm.tanks {
-		out = append(out, tankInfo{ID: s.id, Name: s.label(), IP: s.ip, Flags: s.flags, Video: s.video})
+		boot := s.boot.describe(s.helloAt, time.Now())
+		if s.camStatus != "" {
+			boot += "; " + s.camStatus
+		}
+		out = append(out, tankInfo{ID: s.id, Name: s.label(), IP: s.ip, Flags: s.flags, Video: s.video, Boot: boot})
 	}
 	return out
 }

@@ -1180,6 +1180,7 @@ type tankView struct {
 	LastHitMask      int        `json:"lastHitMask,omitempty"`      // the 8 sensors: bit 0 N … bit 7 NW
 	Hits             int        `json:"hits,omitempty"`             // hits taken this game (the compass flashes on a new one)
 	Invulnerable     bool       `json:"invulnerable,omitempty"`
+	Boot             string     `json:"boot,omitempty"` // how it started (boot.go)
 }
 
 type playerView struct {
@@ -1374,7 +1375,7 @@ func (g *game) snapshot(device string) snapshot {
 		tv := viewTank(t.ID, t.Name, true)
 		if isHost {
 			f := t.Flags
-			tv.Flags, tv.IP = &f, t.IP
+			tv.Flags, tv.IP, tv.Boot = &f, t.IP, t.Boot
 		}
 		s.Tanks = append(s.Tanks, tv)
 	}

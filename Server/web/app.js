@@ -124,6 +124,14 @@ function onMessage(m) {
       }
       if (confirm(parts.join('\n\n') + '\n\nStart anyway?')) {
         send({ t: 'host_start', force: true });
+      } else {
+        // Not starting: offer to restart the tanks that looked wrong.
+        const warned = (m.warnings || []).filter(w => w.id);
+        const who = warned.map(w => w.tank).join(', ');
+        if (warned.length && confirm(`Restart ${who} now? ${warned.length === 1 ? 'It is' : 'They are'} back in about 10 seconds; tap Start again after that.`)) {
+          for (const w of warned) send({ t: 'host_tank_restart', tank: w.id });
+          toast('Restarting ' + who);
+        }
       }
       break;
     }
@@ -674,6 +682,7 @@ function hostTankRow(t) {
         ${inGame && t.player ? '' : `<button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="-0.5">&#9664; Turret</button>
         <button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="0.5">Turret &#9654;</button>`}
         <button class="btn small secondary" type="button" data-action="tank-resync" data-tank="${esc(t.id)}">Reset</button>
+        <button class="btn small secondary" type="button" data-action="tank-restart" data-tank="${esc(t.id)}" data-name="${esc(t.name)}">Restart</button>
         ${state.phase === 'lobby' && t.player ? `<button class="btn small danger" type="button" data-action="tank-free" data-tank="${esc(t.id)}">Remove Player</button>` : ''}
       </div>
       <h4>Name and default alliance</h4>
@@ -682,7 +691,8 @@ function hostTankRow(t) {
         <button class="btn small secondary" type="button" data-action="tank-rename" data-tank="${esc(t.id)}">Rename</button>
       </div>
       <div class="inline-form" style="margin-top:6px">${allianceSelect(t)}</div>
-      <p class="hint" style="margin-top:6px">${esc(t.ip || '')}${t.ip ? ' &middot; ' : ''}id ${esc(t.id)}</p>`;
+      <p class="hint" style="margin-top:6px">${esc(t.ip || '')}${t.ip ? ' &middot; ' : ''}id ${esc(t.id)}</p>
+      ${t.boot ? `<p class="hint">${esc(t.boot.charAt(0).toUpperCase() + t.boot.slice(1))}</p>` : ''}`;
   }
   return `<details class="item" data-row="tank-${esc(t.id)}" ${openRows.has('tank-' + t.id) ? 'open' : ''}>
     <summary><span class="dot ${t.online ? '' : 'off'}"></span>
@@ -1156,6 +1166,12 @@ document.addEventListener('click', (e) => {
     case 'tank-identify': send({ t: 'host_tank_identify', tank }); break;
     case 'tank-ping': send({ t: 'host_tank_ping', tank }); break;
     case 'tank-resync': send({ t: 'host_tank_resync', tank }); toast('Settings sent to the robot'); break;
+    case 'tank-restart':
+      if (confirm(`Restart ${el.dataset.name}? It is back in about 10 seconds.`)) {
+        send({ t: 'host_tank_restart', tank });
+        toast(`Restarting ${el.dataset.name}`);
+      }
+      break;
     case 'tank-free': send({ t: 'host_tank_free', tank }); break;
     case 'tank-rename': {
       const input = $('rename-' + tank);
