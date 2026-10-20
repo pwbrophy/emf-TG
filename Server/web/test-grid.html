@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Thundergeddon – Test Grid</title>
   <!--
-    Test grid: six player pages side by side, each a pretend phone of its
+    Test grid: several player pages side by side, each a pretend phone of its
     own (?device=…), opened on Name Entry with a random name. For trying the
     game with several players from one computer. Rebuilt for the Go server
     from the Unity-era Webserver/.../wwwroot/test-grid.html.
 
-    Options: ?players=N (1-12, default 6).
+    The Players box sets how many (1-10, default 6; also ?players=N). Changing
+    it adds or removes players at the end and keeps the others as they are.
   -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -60,14 +61,24 @@
     .btn-primary   { background: #ff4d1c; color: #fff; }
     .btn-secondary { background: #2e2e50; color: #e8e8f0; }
 
-    #password {
-      width: 150px;
+    #password, #count {
       padding: 5px 8px;
       border: 1px solid #2e2e50;
       border-radius: 6px;
       background: #1a1a28;
       color: #e8e8f0;
       font-size: 0.8rem;
+    }
+    #password { width: 150px; }
+    #count    { width: 56px; font-weight: 700; }
+
+    .count-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #c8c8e0;
     }
 
     #toolbar-right {
@@ -149,6 +160,12 @@
 
 <div id="toolbar">
   <h1>THUNDERGEDDON TEST GRID</h1>
+  <label class="count-label">Players
+    <input id="count" type="number" min="1" max="10" step="1" aria-label="Number of players">
+  </label>
+  <label class="count-label" title="Every player who reaches the lobby without a team joins one, taking turns between the teams">
+    <input id="auto-teams" type="checkbox"> Join teams
+  </label>
   <button class="btn btn-primary"   type="button" onclick="connectAll()">Connect All</button>
   <button class="btn btn-secondary" type="button" onclick="chooseTanks()">Choose Tanks</button>
   <button class="btn btn-secondary" type="button" onclick="rerollNames()">New Names</button>
@@ -162,7 +179,14 @@
 <script>
 'use strict';
 
-const COUNT = Math.max(1, Math.min(12, parseInt(new URLSearchParams(location.search).get('players'), 10) || 6));
+const MAX_PLAYERS = 10;
+const clampCount = (n) => {
+  const v = parseInt(n, 10);
+  return Number.isNaN(v) ? 6 : Math.max(1, Math.min(MAX_PLAYERS, v));
+};
+
+// How many players the grid shows; the Players box changes it.
+let count = clampCount(new URLSearchParams(location.search).get('players'));
 
 // ── Name pool ────────────────────────────────────────────────────────────────
 const NAME_POOL = [
@@ -174,9 +198,9 @@ const NAME_POOL = [
 
 let playerNames = [];
 let connecting  = [];
-// Each frame is a pretend phone with its own id, so the server sees COUNT
-// different players. A new set of ids on every Reload All (the old ones are
-// told to leave first).
+// Each frame is a pretend phone with its own id, so the server sees each one
+// as a different player. A new set of ids on every Reload All (the old ones
+// are told to leave first).
 let gridId = '';
 
 function shuffle(arr) {
@@ -189,7 +213,13 @@ function shuffle(arr) {
 }
 
 function pickNames() {
-  playerNames = shuffle(NAME_POOL).slice(0, COUNT);
+  playerNames = shuffle(NAME_POOL).slice(0, count);
+}
+
+// A name for a newly added player that no other frame is using.
+function freshName() {
+  const unused = NAME_POOL.filter(n => !playerNames.includes(n));
+  return shuffle(unused.length ? unused : NAME_POOL)[0];
 }
 
 function frameDoc(i) {
@@ -203,32 +233,74 @@ function frameWin(i) {
 // ── Grid builder ─────────────────────────────────────────────────────────────
 function buildGrid() {
   gridId = Math.random().toString(36).slice(2, 7);
-  connecting = Array(COUNT).fill(false);
-  const grid = document.getElementById('grid');
-  const cols = COUNT <= 3 ? COUNT : COUNT <= 8 ? Math.ceil(COUNT / 2) : Math.ceil(COUNT / 3);
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  grid.style.gridTemplateRows = `repeat(${Math.ceil(COUNT / cols)}, 1fr)`;
-  grid.innerHTML = '';
-
-  for (let i = 0; i < COUNT; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cell';
-    cell.innerHTML = `
-      <div class="cell-header">
-        <div class="status-dot" id="dot-${i}"></div>
-        <span class="player-num">P${i + 1}</span>
-        <span class="player-name" id="name-label-${i}"></span>
-        <span class="player-where" id="where-${i}"></span>
-        <button class="conn-btn" type="button" id="conn-btn-${i}" onclick="connectPlayer(${i})">Connect</button>
-      </div>
-      <iframe id="frame-${i}" title="Player ${i + 1}" src="/?device=grid-${gridId}-${i + 1}#join"></iframe>`;
-    cell.querySelector('.player-name').textContent = playerNames[i];
-    grid.appendChild(cell);
-    wireFrameLoad(i);
-  }
-  document.getElementById('toolbar-right').textContent =
-    `${COUNT} players · each frame is its own phone · ?players=N for more or fewer`;
+  connecting = [];
+  document.getElementById('grid').innerHTML = '';
+  for (let i = 0; i < count; i++) addCell(i);
+  layout();
 }
+
+// Columns and rows for the current number of players.
+function layout() {
+  const grid = document.getElementById('grid');
+  const cols = count <= 3 ? count : count <= 8 ? Math.ceil(count / 2) : Math.ceil(count / 3);
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  grid.style.gridTemplateRows = `repeat(${Math.ceil(count / cols)}, 1fr)`;
+  document.getElementById('toolbar-right').textContent =
+    `${count} player${count === 1 ? '' : 's'} · each frame is its own phone`;
+  document.getElementById('count').value = count;
+}
+
+function addCell(i) {
+  connecting[i] = false;
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.id = 'cell-' + i;
+  cell.innerHTML = `
+    <div class="cell-header">
+      <div class="status-dot" id="dot-${i}"></div>
+      <span class="player-num">P${i + 1}</span>
+      <span class="player-name" id="name-label-${i}"></span>
+      <span class="player-where" id="where-${i}"></span>
+      <button class="conn-btn" type="button" id="conn-btn-${i}" onclick="connectPlayer(${i})">Connect</button>
+    </div>
+    <iframe id="frame-${i}" title="Player ${i + 1}" src="/?device=grid-${gridId}-${i + 1}#join"></iframe>`;
+  cell.querySelector('.player-name').textContent = playerNames[i];
+  document.getElementById('grid').appendChild(cell);
+  wireFrameLoad(i);
+}
+
+// Players box: add players at the end, or remove the last ones (they leave
+// the game first). The players that stay keep their frames, so nobody else
+// is reloaded or loses their place.
+function setCount(n) {
+  const want = clampCount(n);
+  if (want === count) { layout(); return; }
+  for (let i = count - 1; i >= want; i--) {
+    leave(i);
+    // Hide it now, remove it a moment later so the leave message gets out
+    // first. Its ids go at once, so a player re-added in the meantime gets
+    // a frame of its own.
+    const cell = document.getElementById('cell-' + i);
+    cell.style.display = 'none';
+    cell.removeAttribute('id');
+    cell.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+    setTimeout(() => cell.remove(), 300);
+  }
+  playerNames.length = Math.min(playerNames.length, want);
+  connecting.length = Math.min(connecting.length, want);
+  for (let i = count; i < want; i++) {
+    playerNames[i] = freshName();
+    addCell(i);
+  }
+  count = want;
+  layout();
+  // Keep the number if the page is reloaded.
+  const url = new URL(location.href);
+  url.searchParams.set('players', count);
+  history.replaceState(null, '', url);
+}
+
+document.getElementById('count').addEventListener('change', (e) => setCount(e.target.value));
 
 // Pre-fill the name as soon as the frame has loaded.
 function wireFrameLoad(i) {
@@ -257,16 +329,35 @@ function joined(i) {
   return w !== '' && w !== 'Name Entry';
 }
 
-// Keep each header up to date.
+// Keep each header up to date, and with Join teams ticked, put one player
+// a tick into a team (one at a time, so two don't race for the same tank).
+const lastTeamTry = [];
 setInterval(() => {
-  for (let i = 0; i < COUNT; i++) {
+  const autoTeams = document.getElementById('auto-teams').checked;
+  let picked = false;
+  for (let i = 0; i < count; i++) {
     const where = document.getElementById('where-' + i);
     if (!where) continue;
     where.textContent = whereIs(i);
     if (joined(i)) markJoined(i);
     else if (!connecting[i]) markIdle(i);
+    if (autoTeams && !picked && Date.now() - (lastTeamTry[i] || 0) > 1500 && joinTeam(i)) {
+      lastTeamTry[i] = Date.now();
+      picked = true;
+    }
   }
 }, 500);
+
+// Join teams box: remembered in the address (?teams=1) like the player count.
+{
+  const box = document.getElementById('auto-teams');
+  box.checked = new URLSearchParams(location.search).get('teams') === '1';
+  box.addEventListener('change', () => {
+    const url = new URL(location.href);
+    if (box.checked) url.searchParams.set('teams', '1'); else url.searchParams.delete('teams');
+    history.replaceState(null, '', url);
+  });
+}
 
 // ── Per-player connect ────────────────────────────────────────────────────────
 function connectPlayer(i) {
@@ -280,6 +371,7 @@ function connectPlayer(i) {
 
   let tries = 0;
   function tryJoin() {
+    if (!document.getElementById('frame-' + i)) return; // removed meanwhile
     if (joined(i)) { connecting[i] = false; markJoined(i); return; }
     if (++tries > 40) { connecting[i] = false; markIdle(i); return; } // gave up (~12 s)
     const doc = frameDoc(i);
@@ -312,41 +404,52 @@ function markIdle(i) {
 
 // ── Toolbar actions ───────────────────────────────────────────────────────────
 function connectAll() {
-  for (let i = 0; i < COUNT; i++) setTimeout(() => connectPlayer(i), i * 150);
+  for (let i = 0; i < count; i++) setTimeout(() => connectPlayer(i), i * 150);
 }
 
-// Choose Tanks: each player in the Client Lobby without a tank chooses an
-// alliance (taking turns between them) and is given one of its free tanks.
+// joinTeam: if player i is in the Client Lobby without a team, it chooses
+// an alliance and is given one of its free tanks. Players take turns between
+// the alliances (P1 the first, P2 the second, ...); if that one has no free
+// tank, the first that does. True if it chose.
+function joinTeam(i) {
+  const doc = frameDoc(i);
+  if (!doc || !doc.querySelector('#screen-lobby.active') || doc.querySelector('.alliance-pick.mine')) return false;
+  const cards = [...doc.querySelectorAll('.alliance-grid .alliance-pick')];
+  if (!cards.length) return false;
+  let card = cards[i % cards.length];
+  if (card.disabled) card = cards.find(c => !c.disabled);
+  if (!card) return false;
+  card.click();
+  return true;
+}
+
+// Choose Tanks: every lobby player without a team joins one, once.
 function chooseTanks() {
   let i = 0;
   function next() {
-    if (i >= COUNT) return;
-    const n = i;
-    const doc = frameDoc(i++);
-    let card = null;
-    if (doc && doc.querySelector('#screen-lobby.active') && !doc.querySelector('.alliance-pick.mine')) {
-      const cards = [...doc.querySelectorAll('.alliance-pick[data-action="pick-alliance"]:not([disabled])')];
-      card = cards.length ? cards[n % cards.length] : null;
-    }
-    if (card) card.click();
-    setTimeout(next, card ? 400 : 0);
+    if (i >= count) return;
+    const chose = joinTeam(i++);
+    setTimeout(next, chose ? 400 : 0);
   }
   next();
 }
 
 function rerollNames() {
   pickNames();
-  for (let i = 0; i < COUNT; i++) {
+  for (let i = 0; i < count; i++) {
     document.getElementById('name-label-' + i).textContent = playerNames[i];
     fillName(i);
   }
 }
 
+// Tell one frame's player to leave the game.
+function leave(i) {
+  const w = frameWin(i);
+  try { if (w && typeof w.send === 'function') w.send({ t: 'leave' }); } catch (_) {}
+}
+
 function leaveAll() {
-  for (let i = 0; i < COUNT; i++) {
-    const w = frameWin(i);
-    try { if (w && typeof w.send === 'function') w.send({ t: 'leave' }); } catch (_) {}
-  }
+  for (let i = 0; i < count; i++) leave(i);
 }
 
 function reloadAll() {
