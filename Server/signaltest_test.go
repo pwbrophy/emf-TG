@@ -234,7 +234,9 @@ func TestSavedRunLoadsTheSame(t *testing.T) {
 	r := &sigRun{started: t0, ended: at(220), phase: "done", cfg: SignalTestSettings{Speed: 0.2, Turns: 3, Reverse: true, MaxTurnS: 90},
 		order: []string{"A1", "B6"}, tanks: map[string]*sigTank{"A1": tk, "B6": partner}, routerOK: true}
 
-	st := newSignalTest(nil, nil, "", t.TempDir())
+	dir := t.TempDir()
+	st := newSignalTest(nil, nil, "", dir)
+	r.name = sigRunName(t0)
 	st.mu.Lock()
 	r.file = st.save(r)
 	want := st.snapshotLocked(r)
@@ -260,5 +262,26 @@ func TestSavedRunLoadsTheSame(t *testing.T) {
 	}
 	if _, ok := st.savedSnapshot("../settings.json"); ok {
 		t.Error("loaded a file that isn't a run")
+	}
+
+	// A comment on it is kept (across a restart) and shown with it.
+	if err := st.setComment(r.file, "  bigger antennas  "); err != nil {
+		t.Fatal(err)
+	}
+	if st.setComment("../settings.json", "x") == nil {
+		t.Error("commented on a file that isn't a run")
+	}
+	st2 := newSignalTest(nil, nil, "", dir)
+	if v, _ := st2.savedSnapshot(r.file); v.Comment != "bigger antennas" {
+		t.Errorf("comment after a restart: %q", v.Comment)
+	}
+	if v := st2.snapshot(); v.Run != r.file || v.Comment != "bigger antennas" {
+		t.Errorf("last run after a restart: %q %q", v.Run, v.Comment)
+	}
+	st2.mu.Lock()
+	runs = st2.listRunsLocked()
+	st2.mu.Unlock()
+	if runs[0].Comment != "bigger antennas" {
+		t.Errorf("runs list comment: %q", runs[0].Comment)
 	}
 }

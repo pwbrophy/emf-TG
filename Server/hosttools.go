@@ -179,6 +179,10 @@ func (g *game) hostTool(c *client, m inMsg) {
 		g.syncCameras() // every camera streams during the test
 	case "host_sigtest_stop":
 		g.sigtest.stop()
+	case "host_sigtest_comment":
+		if err := g.sigtest.setComment(m.ID, m.Text); err != nil {
+			g.sendError(c, "Can't save the comment: "+err.Error()+".")
+		}
 	case "host_sigtest_align":
 		// The Signal Quality Test page is open (it says so every few seconds):
 		// every camera streams so the turrets can be lined up by eye.

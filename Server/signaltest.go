@@ -98,6 +98,7 @@ type signalTest struct {
 	triedLatest bool                   // after a restart, the last saved run has been looked for
 	infos       map[string]sigRunInfo  // saved runs' headlines, by file name
 	views       map[string]sigSnapshot // saved runs, binned, by file name
+	comments    map[string]string      // the host's comment on each run, by file name (comments.json)
 }
 
 // newSignalTest keeps finished runs in dir. Runs saved by older versions in
@@ -105,7 +106,7 @@ type signalTest struct {
 // copied there.
 func newSignalTest(tanks tankControl, rl *relay, iface, dir string, oldDirs ...string) *signalTest {
 	st := &signalTest{tanks: tanks, rl: rl, iface: iface, dir: dir,
-		infos: map[string]sigRunInfo{}, views: map[string]sigSnapshot{}}
+		infos: map[string]sigRunInfo{}, views: map[string]sigSnapshot{}, comments: map[string]string{}}
 	if dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Printf("[SignalTest] can't keep runs in %s: %v", dir, err)
@@ -115,6 +116,9 @@ func newSignalTest(tanks tankControl, rl *relay, iface, dir string, oldDirs ...s
 	if st.dir != "" {
 		for _, od := range oldDirs {
 			st.adopt(od)
+		}
+		if b, err := os.ReadFile(filepath.Join(st.dir, sigCommentsFile)); err == nil {
+			_ = json.Unmarshal(b, &st.comments)
 		}
 	}
 	return st
@@ -131,6 +135,7 @@ type sigRun struct {
 	routerOK       bool
 	routerNote     string
 	listenAt       map[string]time.Time // listener → middle of its current window
+	name           string               // the file it's saved as (comments are kept by it)
 	file           string               // saved run, once finished
 }
 
@@ -203,7 +208,8 @@ func (st *signalTest) start(cfg SignalTestSettings, tanks []tankInfo) error {
 	}
 	cfg.clamp()
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &sigRun{started: time.Now(), phase: "warm-up", cfg: cfg, cancel: cancel,
+	now := time.Now()
+	r := &sigRun{started: now, phase: "warm-up", cfg: cfg, cancel: cancel, name: sigRunName(now),
 		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}}
 	byNum := map[int]string{}
 	for _, t := range tanks {
@@ -844,7 +850,9 @@ type sigSnapshot struct {
 	RouterNote string        `json:"routerNote,omitempty"`
 	Settings   any           `json:"settings,omitempty"`
 	Tanks      []sigTankView `json:"tanks"`
-	File       string        `json:"file,omitempty"`
+	Run        string        `json:"run,omitempty"`  // its file name, from the start (comments are kept by it)
+	File       string        `json:"file,omitempty"` // once saved
+	Comment    string        `json:"comment,omitempty"`
 }
 
 func (st *signalTest) snapshot() sigSnapshot {
@@ -862,7 +870,9 @@ func (st *signalTest) snapshot() sigSnapshot {
 	if st.run == nil {
 		return sigSnapshot{State: "none", Tanks: []sigTankView{}}
 	}
-	return st.snapshotLocked(st.run)
+	snap := st.snapshotLocked(st.run)
+	snap.Comment = st.comments[snap.Run]
+	return snap
 }
 
 func ptr(v float64) *float64 { return &v }
@@ -875,7 +885,7 @@ func (st *signalTest) snapshotLocked(r *sigRun) sigSnapshot {
 	}
 	snap := sigSnapshot{State: r.phase, Running: r.ended.IsZero(), StartedAt: r.started.UnixMilli(),
 		ElapsedS: end.Sub(r.started).Seconds(), Note: r.note, RouterOK: r.routerOK, RouterNote: r.routerNote,
-		Settings: r.cfg, File: r.file, Tanks: []sigTankView{}}
+		Settings: r.cfg, Run: r.name, File: r.file, Tanks: []sigTankView{}}
 
 	// The fleet's typical turn time, for tanks without a pace of their own.
 	var paces []float64
@@ -1157,6 +1167,51 @@ type sigRunInfo struct {
 	Started int64    `json:"started"` // unix ms
 	Phase   string   `json:"phase"`
 	Tanks   []string `json:"tanks"`
+	Comment string   `json:"comment,omitempty"`
+}
+
+// sigCommentsFile holds the host's comments on runs ("bigger antennas",
+// "tanks swapped places"...), by run file name.
+const sigCommentsFile = "comments.json"
+
+const sigMaxComment = 300
+
+func sigRunName(started time.Time) string {
+	return "thundergeddon-sigtest-" + started.Format("20060102-150405") + ".json"
+}
+
+// setComment keeps the host's comment on a run ("" removes it).
+func (st *signalTest) setComment(run, text string) error {
+	if st == nil || !sigRunFileRe.MatchString(run) {
+		return fmt.Errorf("no such run")
+	}
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > sigMaxComment {
+		text = string(r[:sigMaxComment])
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if text == "" {
+		delete(st.comments, run)
+	} else {
+		st.comments[run] = text
+	}
+	return st.saveCommentsLocked()
+}
+
+func (st *signalTest) saveCommentsLocked() error {
+	if st.dir == "" {
+		return nil
+	}
+	b, err := json.MarshalIndent(st.comments, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(st.dir, sigCommentsFile)
+	if err := os.WriteFile(path+".tmp", b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
 }
 
 // save writes the run's raw data as JSON and drops the oldest runs beyond
@@ -1192,7 +1247,7 @@ func (st *signalTest) save(r *sigRun) string {
 	if err != nil {
 		return ""
 	}
-	name := "thundergeddon-sigtest-" + r.started.Format("20060102-150405") + ".json"
+	name := r.name
 	path := filepath.Join(st.dir, name)
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		log.Printf("[SignalTest] can't save %s: %v", path, err)
@@ -1204,6 +1259,10 @@ func (st *signalTest) save(r *sigRun) string {
 		_ = os.Remove(filepath.Join(st.dir, old.File))
 		delete(st.infos, old.File)
 		delete(st.views, old.File)
+		if _, ok := st.comments[old.File]; ok {
+			delete(st.comments, old.File)
+			_ = st.saveCommentsLocked()
+		}
 	}
 	return name
 }
@@ -1260,6 +1319,7 @@ func (st *signalTest) listRunsLocked() []sigRunInfo {
 			sort.Slice(info.Tanks, func(i, j int) bool { return naturalLess(info.Tanks[i], info.Tanks[j]) })
 			st.infos[name] = info
 		}
+		info.Comment = st.comments[name]
 		runs = append(runs, info)
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].File > runs[j].File })
@@ -1273,15 +1333,16 @@ func (st *signalTest) savedSnapshot(file string) (sigSnapshot, bool) {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if v, ok := st.views[file]; ok {
-		return v, true
+	v, ok := st.views[file]
+	if !ok {
+		r, err := loadRunFile(filepath.Join(st.dir, file))
+		if err != nil {
+			return sigSnapshot{}, false
+		}
+		v = st.snapshotLocked(r)
+		st.views[file] = v
 	}
-	r, err := loadRunFile(filepath.Join(st.dir, file))
-	if err != nil {
-		return sigSnapshot{}, false
-	}
-	v := st.snapshotLocked(r)
-	st.views[file] = v
+	v.Comment = st.comments[file]
 	return v, true
 }
 
@@ -1306,7 +1367,7 @@ func loadRunFile(path string) (*sigRun, error) {
 	cfg := f.Settings
 	cfg.clamp()
 	r := &sigRun{started: time.UnixMilli(f.Started), ended: time.UnixMilli(f.Ended), phase: f.Phase, cfg: cfg,
-		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}, file: filepath.Base(path), routerOK: true}
+		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}, name: filepath.Base(path), file: filepath.Base(path), routerOK: true}
 	byName := map[string]string{}
 	partners := map[string]string{}
 	for _, tf := range f.Tanks {

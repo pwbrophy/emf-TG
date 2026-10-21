@@ -1249,6 +1249,7 @@ document.addEventListener('change', (e) => {
     case 'alliance-name': if (el.value.trim()) send({ t: 'host_alliance_edit', id: d.id, name: el.value.trim() }); break;
     case 'alliance-color': send({ t: 'host_alliance_edit', id: d.id, color: el.value }); break;
     case 'sig-compare': sigCompare = el.value; store('tg_sig_compare', sigCompare); sigRefresh(); break;
+    case 'sig-comment': sigCommentChanged(d.run, el.value); break;
     default: return;
   }
   if (el.tagName === 'SELECT' || el.type === 'text') el.blur();
@@ -1512,6 +1513,7 @@ function sigLiveHTML() {
   const words = { 'warm-up': 'Starting…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early' };
   let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s</h3>
     <p class="hint">Started ${esc(sigWhen(d.startedAt))}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
+    ${d.run ? sigCommentBox(d.run, d.comment, 'Comment on this run') : ''}
     ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
     ${d.running ? `<ul class="sig-progress">${d.tanks.map((t) => `<li><b>${esc(t.name)}</b> ${esc(t.progress || '')}</li>`).join('')}</ul>` : ''}</div>`;
 
@@ -1519,24 +1521,43 @@ function sigLiveHTML() {
   const others = (sigRuns || []).filter((r) => r.file !== d.file);
   const cmp = sigCompare && sigCompare !== d.file ? sigCompareData[sigCompare] : null;
   if (others.length) {
-    const label = (r) => `${sigWhen(r.started)} · ${r.tanks.length <= 4 ? r.tanks.join(', ') : r.tanks.length + ' tanks'}`;
+    const label = (r) => `${sigWhen(r.started)} · ${r.tanks.length <= 4 ? r.tanks.join(', ') : r.tanks.length + ' tanks'}${r.comment ? ' · ' + r.comment : ''}`;
     html += `<label class="sig-compare">Compare with
       <select data-action="sig-compare">
         <option value="">Nothing</option>
         ${others.map((r) => `<option value="${esc(r.file)}" ${r.file === sigCompare ? 'selected' : ''}>${esc(label(r))}</option>`).join('')}
       </select></label>`;
+    if (cmp) html += sigCommentBox(sigCompare, cmp.comment, 'Comment on the grey run');
   }
 
   const metric = segChoice('sigmetric', SIG_METRICS.map((m) => [m.id, m.label]));
   const m = SIG_METRICS.find((x) => x.id === metric);
   html += seg('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]), metric);
   html += `<p class="hint">Top = turret forward. Further out = better. <span class="sig-key fwd">&#9472;&#9472;</span> first way round
-    <span class="sig-key back">&#8211; &#8211;</span> back${cmp ? `. <span class="sig-key before">Grey</span>: ${esc(sigWhen(cmp.startedAt))}` : ''}.</p>`;
+    <span class="sig-key back">&#8211; &#8211;</span> back${cmp ? `. <span class="sig-key before">Grey</span>: ${esc(sigWhen(cmp.startedAt))}${cmp.comment ? ` (${esc(cmp.comment)})` : ''}` : ''}.</p>`;
   const before = (t) => cmp && (cmp.tanks.find((b) => b.id === t.id) || cmp.tanks.find((b) => b.name === t.name));
   html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m, before(t))).join('')}</div>`;
   html += sigTable(d.tanks, before);
   if (!d.running) html += '<a class="btn small secondary" href="/api/sigtest.csv" download style="margin-top:10px">Download CSV</a>';
   return html;
+}
+
+// sigCommentBox: the host's comment on a run, saved when it changes.
+function sigCommentBox(run, comment, label) {
+  return `<label class="sig-comment-label">${esc(label)}<input class="sig-comment" type="text" maxlength="300"
+    data-action="sig-comment" data-run="${esc(run)}" placeholder="What changed? e.g. bigger antennas" value="${esc(comment || '')}"></label>`;
+}
+
+// A comment was changed: saved on the hub; shown straight away here.
+function sigCommentChanged(run, text) {
+  text = text.trim();
+  send({ t: 'host_sigtest_comment', id: run, text });
+  if (sigData && sigData.run === run) sigData.comment = text;
+  if (sigCompareData[run]) sigCompareData[run].comment = text;
+  const r = (sigRuns || []).find((x) => x.file === run);
+  if (r) r.comment = text;
+  toast(text ? 'Comment saved' : 'Comment removed');
+  sigRefresh();
 }
 
 function sigWhen(ms) {

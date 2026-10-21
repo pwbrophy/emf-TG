@@ -238,6 +238,7 @@ type inMsg struct {
 	Alliance string           `json:"alliance"` // an alliance id ("" = from the tank's name)
 	ID       string           `json:"id"`       // an alliance or capture point id
 	Color    string           `json:"color"`
+	Text     string           `json:"text"` // a comment (signal test runs)
 	UID      string           `json:"uid"`    // an RFID tag
 	Use      string           `json:"use"`    // what a tag is for: "base:<id>", "point:<id>", ""
 	Beacon   int              `json:"beacon"` // a capture point's LED beacon, 0 = none
