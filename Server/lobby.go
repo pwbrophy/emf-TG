@@ -125,11 +125,14 @@ func (g *game) pickAlliance(c *client, allianceID string) {
 // cameraWanted: should this tank's camera be streaming now? Every tank's
 // camera runs in the lobby too, so the check on Start (health.go) has fresh
 // video figures for each one; in a game only the tanks playing stream.
+// During the signal test, and while its page is open (lining up turrets),
+// every camera streams.
 func (g *game) cameraWanted(id string) bool {
-	if g.settings.CamerasAlwaysOn || g.phase == phaseLobby || g.sigtest.active() {
+	inGame := g.phase == phaseCountdown || g.phase == phasePlaying
+	if g.settings.CamerasAlwaysOn || g.phase == phaseLobby || g.sigtest.active() || (!g.alignUntil.IsZero() && !inGame) {
 		return true
 	}
-	if g.paused || g.match == nil || (g.phase != phaseCountdown && g.phase != phasePlaying) {
+	if g.paused || g.match == nil || !inGame {
 		return false
 	}
 	return g.match.fighters[id] != nil

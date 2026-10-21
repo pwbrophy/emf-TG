@@ -152,6 +152,9 @@ func (g *game) hostTool(c *client, m inMsg) {
 		if g.match != nil && (g.phase == phasePlaying || g.phase == phaseCountdown) && g.match.fighters[m.Tank] != nil {
 			return
 		}
+		if g.sigtest.active() {
+			return // the test is turning it
+		}
 		// Outside a game the tank's motors are switched off: on while the
 		// button is held, off again when it's let go (as Unity did).
 		s := clampUnit(m.S)
@@ -176,6 +179,18 @@ func (g *game) hostTool(c *client, m inMsg) {
 		g.syncCameras() // every camera streams during the test
 	case "host_sigtest_stop":
 		g.sigtest.stop()
+	case "host_sigtest_align":
+		// The Signal Quality Test page is open (it says so every few seconds):
+		// every camera streams so the turrets can be lined up by eye.
+		was := !g.alignUntil.IsZero()
+		if m.On {
+			g.alignUntil = time.Now().Add(15 * time.Second)
+		} else {
+			g.alignUntil = time.Time{}
+		}
+		if was != m.On {
+			g.syncCameras()
+		}
 	case "host_tank_restart":
 		// The tank restarts itself (firmware's reboot command) and comes back
 		// through discovery about 10 s later; older firmware ignores it.

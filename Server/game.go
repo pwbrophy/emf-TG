@@ -121,6 +121,7 @@ type game struct {
 	camSince   map[string]time.Time
 
 	sigtest      *signalTest // Server Config → Signal Quality Test; nil in tests that don't set it
+	alignUntil   time.Time   // the Signal Quality Test page is open: cameras on to line the turrets up
 	settingsPath string
 	settings     Settings
 	presetsPath  string
@@ -1119,6 +1120,11 @@ func (g *game) tick(dt time.Duration) {
 		changed = true
 	case g.phase == phasePlaying:
 		changed = g.tickCombat(now, dt)
+	}
+
+	if !g.alignUntil.IsZero() && !now.Before(g.alignUntil) {
+		g.alignUntil = time.Time{} // the page was closed without saying
+		g.syncCameras()
 	}
 
 	for _, p := range g.players {

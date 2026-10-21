@@ -47,6 +47,7 @@ func main() {
 	wifiIface := flag.String("wifi-iface", "ra0", "the router's 2.4 GHz Wi-Fi interface, for the signal test's view of each tank (iwinfo); empty = off")
 	videoLogFile := flag.String("video-log", filepath.Join(os.TempDir(), "thundergeddon-video.csv"),
 		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); empty = off")
+	sigtestDir := flag.String("sigtest-dir", "", "where finished signal test runs are kept (default: a sigtest folder next to the settings file)")
 	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
 	flag.Parse()
 
@@ -79,7 +80,11 @@ func main() {
 	g := newGame(tanks, *settingsFile)
 	g.vlog = vlog
 	g.checkTanks = stats.check
-	g.sigtest = newSignalTest(tanks, rl, *wifiIface, filepath.Dir(*videoLogFile))
+	if *sigtestDir == "" {
+		*sigtestDir = filepath.Join(filepath.Dir(*settingsFile), "sigtest")
+	}
+	// Runs used to be saved next to the video log (the router's RAM): keep them.
+	g.sigtest = newSignalTest(tanks, rl, *wifiIface, *sigtestDir, filepath.Dir(*videoLogFile))
 	g.sigtest.onDone = func() {
 		g.mu.Lock()
 		g.syncCameras() // back to the phase's cameras
@@ -112,6 +117,7 @@ func main() {
 	mux.HandleFunc("GET /api/video-log", vlog.handle)
 	mux.HandleFunc("GET /api/sigtest", g.sigtest.handle)
 	mux.HandleFunc("GET /api/sigtest.csv", g.sigtest.handleCSV)
+	mux.HandleFunc("GET /api/sigtest/runs", g.sigtest.handleRuns)
 	mux.HandleFunc("GET /api/tanks", tanks.handleList)
 	mux.HandleFunc("GET /esp32", tanks.handleControl)
 	mux.HandleFunc("GET /beacon", g.beacons.handle) // capture-point beacons (any path works for them; this is what discovery tells them)

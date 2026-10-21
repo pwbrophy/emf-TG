@@ -90,15 +90,34 @@ type signalTest struct {
 	tanks  tankControl
 	rl     *relay
 	iface  string // the router's Wi-Fi interface for its view of the tanks; "" = none
-	dir    string // where finished runs are saved
+	dir    string // where finished runs are kept (on the router: flash, next to the settings)
 	onDone func() // called (without st.mu) when a run ends: cameras back to normal
 
-	mu  sync.Mutex
-	run *sigRun // the current or last run
+	mu          sync.Mutex
+	run         *sigRun                // the current or last run
+	triedLatest bool                   // after a restart, the last saved run has been looked for
+	infos       map[string]sigRunInfo  // saved runs' headlines, by file name
+	views       map[string]sigSnapshot // saved runs, binned, by file name
 }
 
-func newSignalTest(tanks tankControl, rl *relay, iface, dir string) *signalTest {
-	return &signalTest{tanks: tanks, rl: rl, iface: iface, dir: dir}
+// newSignalTest keeps finished runs in dir. Runs saved by older versions in
+// oldDirs (the temp folder, which the router loses when it restarts) are
+// copied there.
+func newSignalTest(tanks tankControl, rl *relay, iface, dir string, oldDirs ...string) *signalTest {
+	st := &signalTest{tanks: tanks, rl: rl, iface: iface, dir: dir,
+		infos: map[string]sigRunInfo{}, views: map[string]sigSnapshot{}}
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Printf("[SignalTest] can't keep runs in %s: %v", dir, err)
+			st.dir = ""
+		}
+	}
+	if st.dir != "" {
+		for _, od := range oldDirs {
+			st.adopt(od)
+		}
+	}
+	return st
 }
 
 type sigRun struct {
@@ -831,6 +850,15 @@ type sigSnapshot struct {
 func (st *signalTest) snapshot() sigSnapshot {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.run == nil && !st.triedLatest {
+		// After a restart the last run is the newest saved one.
+		st.triedLatest = true
+		if runs := st.listRunsLocked(); len(runs) > 0 {
+			if r, err := loadRunFile(filepath.Join(st.dir, runs[0].File)); err == nil {
+				st.run = r
+			}
+		}
+	}
 	if st.run == nil {
 		return sigSnapshot{State: "none", Tanks: []sigTankView{}}
 	}
@@ -1018,18 +1046,51 @@ func summarise(v *sigTankView) {
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 
-// handle: GET /api/sigtest — the current or last run, binned by angle.
-func (st *signalTest) handle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(st.snapshot())
+// snapshotFor: the run a request asks for: ?run=<saved file>, else the
+// current or last run.
+func (st *signalTest) snapshotFor(r *http.Request) (sigSnapshot, bool) {
+	if file := r.URL.Query().Get("run"); file != "" {
+		return st.savedSnapshot(file)
+	}
+	return st.snapshot(), true
 }
 
-// handleCSV: GET /api/sigtest.csv — the same, one row per tank, pass and 10°.
+// handle: GET /api/sigtest[?run=<file>] — a run, binned by angle.
+func (st *signalTest) handle(w http.ResponseWriter, r *http.Request) {
+	snap, ok := st.snapshotFor(r)
+	if !ok {
+		http.Error(w, "no such run", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(snap)
+}
+
+// handleRuns: GET /api/sigtest/runs — the saved runs, newest first.
+func (st *signalTest) handleRuns(w http.ResponseWriter, r *http.Request) {
+	st.mu.Lock()
+	runs := st.listRunsLocked()
+	st.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(runs)
+}
+
+// handleCSV: GET /api/sigtest.csv[?run=<file>] — the same, one row per
+// tank, pass and 10°.
 func (st *signalTest) handleCSV(w http.ResponseWriter, r *http.Request) {
-	snap := st.snapshot()
+	snap, ok := st.snapshotFor(r)
+	if !ok {
+		http.Error(w, "no such run", http.StatusNotFound)
+		return
+	}
+	name := "signal-test.csv"
+	if snap.StartedAt > 0 {
+		name = "signal-test-" + time.UnixMilli(snap.StartedAt).Format("20060102-150405") + ".csv"
+	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="signal-test.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
@@ -1054,9 +1115,52 @@ func (st *signalTest) handleCSV(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// save writes the run's raw data (marks, hits, router readings, frame
-// times) as JSON next to the video log, for later comparison. Caller holds
-// st.mu.
+// ── Saved runs ───────────────────────────────────────────────────────────────
+
+// sigKeepRuns: saved runs kept; older ones are deleted (each is about 1 MB
+// for ten tanks).
+const sigKeepRuns = 30
+
+var sigRunFileRe = regexp.MustCompile(`^thundergeddon-sigtest-\d{8}-\d{6}\.json$`)
+
+// sigRunFile is a finished run's raw data (marks, hits, router readings,
+// frame times), so its charts can be worked out again later.
+type sigRunFile struct {
+	Started  int64              `json:"started"`
+	Ended    int64              `json:"ended"`
+	Phase    string             `json:"phase"`
+	Settings SignalTestSettings `json:"settings"`
+	Tanks    []sigTankFile      `json:"tanks"`
+}
+
+type sigTankFile struct {
+	ID      string        `json:"id"`
+	Name    string        `json:"name"`
+	Partner string        `json:"partner"`
+	Passes  []sigPassFile `json:"passes"`
+	Hits    []int64       `json:"hits"`
+	Router  [][3]float64  `json:"router"` // unix ms, dBm, rx Mbit/s
+	Frames  []int64       `json:"frames"`
+}
+
+type sigPassFile struct {
+	Dir      int     `json:"dir"`
+	StartMs  int64   `json:"start"`
+	EndMs    int64   `json:"end"`
+	TimedOut bool    `json:"timedOut"`
+	Marks    []int64 `json:"marks"` // as shown when it ran (for reading by hand)
+}
+
+// sigRunInfo is a saved run's headline, for the page's list.
+type sigRunInfo struct {
+	File    string   `json:"file"`
+	Started int64    `json:"started"` // unix ms
+	Phase   string   `json:"phase"`
+	Tanks   []string `json:"tanks"`
+}
+
+// save writes the run's raw data as JSON and drops the oldest runs beyond
+// sigKeepRuns. Returns the file's name. Caller holds st.mu.
 func (st *signalTest) save(r *sigRun) string {
 	if st.dir == "" {
 		return ""
@@ -1068,37 +1172,15 @@ func (st *signalTest) save(r *sigRun) string {
 		}
 		return out
 	}
-	type passOut struct {
-		Dir      int     `json:"dir"`
-		StartMs  int64   `json:"start"`
-		EndMs    int64   `json:"end"`
-		TimedOut bool    `json:"timedOut"`
-		Marks    []int64 `json:"marks"`
-	}
-	type tankOut struct {
-		ID      string       `json:"id"`
-		Name    string       `json:"name"`
-		Partner string       `json:"partner"`
-		Passes  []passOut    `json:"passes"`
-		Hits    []int64      `json:"hits"`
-		Router  [][3]float64 `json:"router"` // unix ms, dBm, rx Mbit/s
-		Frames  []int64      `json:"frames"`
-	}
-	out := struct {
-		Started  int64              `json:"started"`
-		Ended    int64              `json:"ended"`
-		Phase    string             `json:"phase"`
-		Settings SignalTestSettings `json:"settings"`
-		Tanks    []tankOut          `json:"tanks"`
-	}{r.started.UnixMilli(), r.ended.UnixMilli(), r.phase, r.cfg, nil}
+	out := sigRunFile{Started: r.started.UnixMilli(), Ended: r.ended.UnixMilli(), Phase: r.phase, Settings: r.cfg}
 	for _, id := range r.order {
 		t := r.tanks[id]
-		to := tankOut{ID: t.id, Name: t.name, Hits: ms(t.hits), Frames: ms(t.frames)}
+		to := sigTankFile{ID: t.id, Name: t.name, Hits: ms(t.hits), Frames: ms(t.frames)}
 		if p := r.tanks[t.partner]; p != nil {
 			to.Partner = p.name
 		}
 		for _, p := range t.passes {
-			to.Passes = append(to.Passes, passOut{Dir: p.dir, StartMs: p.start.UnixMilli(), EndMs: p.end.UnixMilli(),
+			to.Passes = append(to.Passes, sigPassFile{Dir: p.dir, StartMs: p.start.UnixMilli(), EndMs: p.end.UnixMilli(),
 				TimedOut: p.timedOut, Marks: ms(t.marks(p, r.ended))})
 		}
 		for _, s := range t.router {
@@ -1110,10 +1192,148 @@ func (st *signalTest) save(r *sigRun) string {
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(st.dir, "thundergeddon-sigtest-"+r.started.Format("20060102-150405")+".json")
+	name := "thundergeddon-sigtest-" + r.started.Format("20060102-150405") + ".json"
+	path := filepath.Join(st.dir, name)
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		log.Printf("[SignalTest] can't save %s: %v", path, err)
 		return ""
 	}
-	return path
+	log.Printf("[SignalTest] saved %s", path)
+	runs := st.listRunsLocked()
+	for _, old := range runs[min(len(runs), sigKeepRuns):] {
+		_ = os.Remove(filepath.Join(st.dir, old.File))
+		delete(st.infos, old.File)
+		delete(st.views, old.File)
+	}
+	return name
+}
+
+// adopt copies saved runs from an older folder into st.dir.
+func (st *signalTest) adopt(dir string) {
+	if dir == "" || filepath.Clean(dir) == filepath.Clean(st.dir) {
+		return
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !sigRunFileRe.MatchString(e.Name()) {
+			continue
+		}
+		dst := filepath.Join(st.dir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, e.Name())); err == nil && os.WriteFile(dst, b, 0o644) == nil {
+			log.Printf("[SignalTest] kept %s in %s", e.Name(), st.dir)
+		}
+	}
+}
+
+// listRunsLocked: the saved runs, newest first. Caller holds st.mu.
+func (st *signalTest) listRunsLocked() []sigRunInfo {
+	runs := []sigRunInfo{}
+	if st.dir == "" {
+		return runs
+	}
+	entries, _ := os.ReadDir(st.dir)
+	for _, e := range entries {
+		name := e.Name()
+		if !sigRunFileRe.MatchString(name) {
+			continue
+		}
+		info, ok := st.infos[name]
+		if !ok {
+			var head struct {
+				Started int64  `json:"started"`
+				Phase   string `json:"phase"`
+				Tanks   []struct {
+					Name string `json:"name"`
+				} `json:"tanks"`
+			}
+			b, err := os.ReadFile(filepath.Join(st.dir, name))
+			if err != nil || json.Unmarshal(b, &head) != nil {
+				continue
+			}
+			info = sigRunInfo{File: name, Started: head.Started, Phase: head.Phase, Tanks: []string{}}
+			for _, t := range head.Tanks {
+				info.Tanks = append(info.Tanks, t.Name)
+			}
+			sort.Slice(info.Tanks, func(i, j int) bool { return naturalLess(info.Tanks[i], info.Tanks[j]) })
+			st.infos[name] = info
+		}
+		runs = append(runs, info)
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].File > runs[j].File })
+	return runs
+}
+
+// savedSnapshot: a saved run, binned as it was shown.
+func (st *signalTest) savedSnapshot(file string) (sigSnapshot, bool) {
+	if !sigRunFileRe.MatchString(file) || st.dir == "" {
+		return sigSnapshot{}, false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if v, ok := st.views[file]; ok {
+		return v, true
+	}
+	r, err := loadRunFile(filepath.Join(st.dir, file))
+	if err != nil {
+		return sigSnapshot{}, false
+	}
+	v := st.snapshotLocked(r)
+	st.views[file] = v
+	return v, true
+}
+
+// loadRunFile reads a saved run back. Each pass's last beam (where the
+// turret stopped) is found again from the hits, as it was while it ran.
+func loadRunFile(path string) (*sigRun, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var f sigRunFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return nil, err
+	}
+	times := func(ms []int64) []time.Time {
+		out := make([]time.Time, len(ms))
+		for i, v := range ms {
+			out[i] = time.UnixMilli(v)
+		}
+		return out
+	}
+	cfg := f.Settings
+	cfg.clamp()
+	r := &sigRun{started: time.UnixMilli(f.Started), ended: time.UnixMilli(f.Ended), phase: f.Phase, cfg: cfg,
+		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}, file: filepath.Base(path), routerOK: true}
+	byName := map[string]string{}
+	partners := map[string]string{}
+	for _, tf := range f.Tanks {
+		t := &sigTank{id: tf.ID, name: tf.Name, num: tankNumber(tf.Name), hits: times(tf.Hits), frames: times(tf.Frames), finished: true}
+		for _, p := range tf.Passes {
+			t.passes = append(t.passes, &sigPass{dir: p.Dir, start: time.UnixMilli(p.StartMs), end: time.UnixMilli(p.EndMs), timedOut: p.TimedOut})
+		}
+		for _, s := range tf.Router {
+			t.router = append(t.router, sigRouter{at: time.UnixMilli(int64(s[0])), dbm: int(s[1]), rxMbit: s[2]})
+		}
+		r.tanks[t.id] = t
+		r.order = append(r.order, t.id)
+		byName[t.name] = t.id
+		partners[t.id] = tf.Partner
+	}
+	for _, t := range r.tanks {
+		t.partner = byName[partners[t.id]]
+		for _, p := range t.passes {
+			if first, ok := t.finalBeamStart(p, cfg.Turns); ok && !p.timedOut {
+				p.finalFirst = first
+			}
+		}
+		for _, p := range t.passes {
+			if !p.finalFirst.IsZero() {
+				p.stopAt = p.finalFirst.Add(t.halfBeam())
+			}
+		}
+	}
+	return r, nil
 }

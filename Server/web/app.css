@@ -977,3 +977,19 @@ input[type="color"] {
 .sig-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
 .sig-table th, .sig-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
 .sig-table th { color: var(--muted); font-weight: 600; }
+
+/* Signal Quality Test: lining up, and comparing with an earlier run */
+.sig-cams { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 8px; }
+.sig-cam { display: flex; flex-direction: column; gap: 4px; }
+.sig-cam-video { position: relative; aspect-ratio: 4 / 3; background: #000; border-radius: 8px; overflow: hidden; }
+.sig-cam-video canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sig-cam-video::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, 0.6); pointer-events: none; }
+.sig-cam-name { font-size: 0.8rem; font-weight: 600; text-align: center; }
+.sig-cam-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.sig-cam-btns .btn { padding: 8px 0; min-width: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+.sig-compare { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 0.85rem; color: var(--muted); }
+.sig-compare select { flex: 1; min-width: 0; padding: 6px 8px; font-size: 0.85rem; border-radius: 10px; }
+.sig-line.before { stroke: var(--muted); stroke-width: 1.5; opacity: 0.75; }
+.sig-line.before.back { stroke-dasharray: 4 3; }
+.sig-key.before { color: var(--muted); font-weight: 700; }
+.sig-was { color: var(--muted); font-size: 0.72rem; }

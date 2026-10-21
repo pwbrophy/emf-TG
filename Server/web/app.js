@@ -802,6 +802,7 @@ function renderHostConfig() {
   }
   if (!tabs.length) renderTabs($('host-tabs'), 'none', [], '');
   setHTML($('host-body'), html);
+  if (hostPage === 'config-signal') sigCamsMount();
   const back = hostPage === 'config'
     ? '<button class="nav-btn back" type="button" data-action="host-page" data-page="">Back</button>'
     : '<button class="nav-btn back" type="button" data-action="host-page" data-page="config">Back</button>';
@@ -1247,6 +1248,7 @@ document.addEventListener('change', (e) => {
     case 'point-name': if (el.value.trim()) send({ t: 'host_point_edit', id: d.id, name: el.value.trim(), beacon: -1 }); break;
     case 'alliance-name': if (el.value.trim()) send({ t: 'host_alliance_edit', id: d.id, name: el.value.trim() }); break;
     case 'alliance-color': send({ t: 'host_alliance_edit', id: d.id, color: el.value }); break;
+    case 'sig-compare': sigCompare = el.value; store('tg_sig_compare', sigCompare); sigRefresh(); break;
     default: return;
   }
   if (el.tagName === 'SELECT' || el.type === 'text') el.blur();
@@ -1261,7 +1263,7 @@ function stopHold() {
 }
 document.addEventListener('pointerdown', (e) => {
   const el = e.target.closest('[data-hold="turret"]');
-  if (!el) return;
+  if (!el || el.disabled) return;
   e.preventDefault();
   holding = el.dataset.tank;
   send({ t: 'host_tank_turret', tank: holding, s: +el.dataset.s });
@@ -1321,20 +1323,55 @@ connect();
 
 // ── Signal Quality Test (Server/signaltest.go) ───────────────────────────────
 // Turns every connected turret slowly round and charts the radio by angle.
-// The page polls /api/sigtest once a second while it's open.
+// The page polls /api/sigtest once a second while it's open, and tells the
+// hub every few seconds that it's open, so every camera streams for lining
+// the turrets up (the hub switches them off ~15 s after it stops hearing).
 
 let sigData = null;
+let sigRuns = null;      // saved runs, newest first (/api/sigtest/runs)
+let sigRunsFor = null;   // the last run's file when sigRuns was fetched
+let sigCompare = store('tg_sig_compare') || ''; // saved run drawn underneath, '' = none
+const sigCompareData = {}; // file → that run, binned
+let sigAlignSent = 0;    // when the hub was last told the page is open
 
 setInterval(async () => {
-  if (hostPage !== 'config-signal' || !state || !state.me || !state.me.isHost) return;
+  const open = hostPage === 'config-signal' && shownScreen === 'host' && !document.hidden &&
+    state && state.me && state.me.isHost;
+  if (!open) {
+    if (sigAlignSent) { send({ t: 'host_sigtest_align', on: false }); sigAlignSent = 0; }
+    if (sigCams.size) sigCamsMount(); // no tiles on screen: closes the feeds
+    return;
+  }
+  if (Date.now() - sigAlignSent > 5000) {
+    send({ t: 'host_sigtest_align', on: true });
+    sigAlignSent = Date.now();
+  }
   try {
     sigData = await (await fetch('/api/sigtest', { cache: 'no-store' })).json();
+    const file = sigData.file || '';
+    if (!sigRuns || sigRunsFor !== file) {
+      sigRuns = await (await fetch('/api/sigtest/runs', { cache: 'no-store' })).json();
+      sigRunsFor = file;
+    }
   } catch (_) {
     return;
   }
+  sigRefresh();
+}, 1000);
+
+// sigRefresh redraws the results, fetching the run to compare with first.
+async function sigRefresh() {
+  await null; // after the picker that called this has been let go of
+  if (sigCompare && !sigCompareData[sigCompare]) {
+    try {
+      const r = await fetch('/api/sigtest?run=' + encodeURIComponent(sigCompare), { cache: 'no-store' });
+      if (r.ok) sigCompareData[sigCompare] = await r.json();
+      else sigCompare = '';
+    } catch (_) { /* tried again next second */ }
+  }
   const el = $('sig-live');
   if (el) setHTML(el, sigLiveHTML());
-}, 1000);
+}
 
 const SIG_METRICS = [
   // Further out on the chart is always better.
@@ -1355,10 +1392,11 @@ function signalTestPage() {
   return `<div class="card"><h3>Set up</h3>
     <ol class="hint sig-steps">
       <li>Stand the tanks in pairs, hull front to hull front, about 1.5&nbsp;m apart. Leave a good gap between pairs, so each tank's partner is the only one straight ahead.</li>
-      <li>Point every turret exactly forward.</li>
-      <li>Start: the cameras come on, every turret turns slowly round, then back, and stops facing forward again. Each time a turret points at its partner, the partner's IR sensors mark 0&deg;.</li>
+      <li>Point every turret exactly forward: use the cameras below.</li>
+      <li>Start: every turret turns slowly round, then back, and stops facing forward again. Each time a turret points at its partner, the partner's IR sensors mark 0&deg;.</li>
     </ol>
     ${pairs ? `<ul class="sig-pairs">${pairs}</ul>` : emptyNote('No tanks are connected.')}</div>
+    ${sigCamsHTML()}
     <div class="settings-grid">
       ${field('Turret speed (slower = finer detail)', 'signalTest.speed', 'num', 'min="0.05" max="1" step="0.05"')}
       ${field('Turns each way', 'signalTest.turns', 'int', 'min="1" max="10"')}
@@ -1373,6 +1411,95 @@ function tankNum(name) {
   return m ? +m[1] : 0;
 }
 
+// ── Lining up: a camera per tank, with turn buttons ──
+
+const SIG_FAST = 0.6; // turret speed for the fast buttons
+
+// sigCamsHTML: a tile per connected tank, partners side by side. The
+// pictures are canvases kept in sigCams and put back into their tiles after
+// each redraw (sigCamsMount), so a redraw doesn't restart the feeds.
+function sigCamsHTML() {
+  const order = (t) => {
+    const n = tankNum(t.name);
+    return n >= 1 && n <= 10 ? ((n - 1) % 5) * 2 + (n > 5 ? 1 : 0) : 100 + n;
+  };
+  const tanks = state.tanks.filter((t) => t.online).sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (!tanks.length) return '';
+  const busy = !!(sigData && sigData.running);
+  const slow = Math.max(0.05, +(state.settings.signalTest && state.settings.signalTest.speed) || 0.2);
+  // A positive turret speed turns the turret left (the test's first way round).
+  const btn = (t, s, label, title) => `<button class="btn small secondary" type="button" data-hold="turret"
+      data-tank="${esc(t.id)}" data-s="${s}" title="${title}" aria-label="${title}" ${busy ? 'disabled' : ''}>${label}</button>`;
+  const tiles = tanks.map((t) => `<div class="sig-cam">
+      <div class="sig-cam-video" data-cam="${esc(t.id)}"></div>
+      <div class="sig-cam-name">${esc(t.name)}</div>
+      <div class="sig-cam-btns">
+        ${btn(t, SIG_FAST, '&#9664;&#9664;', 'Turn left fast')}${btn(t, slow, '&#9664;', 'Turn left slowly')}
+        ${btn(t, -slow, '&#9654;', 'Turn right slowly')}${btn(t, -SIG_FAST, '&#9654;&#9654;', 'Turn right fast')}
+      </div></div>`).join('');
+  return `<div class="card"><h3>Line up the turrets</h3>
+    <p class="hint">Cameras stay on while this page is open. Hold a button to turn (a tap nudges) until the partner tank sits on the centre line.</p>
+    <div class="sig-cams">${tiles}</div></div>`;
+}
+
+const sigCams = new Map(); // tank id → { canvas, ws, closed }
+
+function sigCamsMount() {
+  const seen = new Set();
+  document.querySelectorAll('.sig-cam-video[data-cam]').forEach((el) => {
+    const id = el.dataset.cam;
+    seen.add(id);
+    let cam = sigCams.get(id);
+    if (!cam) {
+      cam = sigCamOpen(id);
+      sigCams.set(id, cam);
+    }
+    if (cam.canvas.parentNode !== el) el.appendChild(cam.canvas);
+  });
+  for (const [id, cam] of sigCams) {
+    if (seen.has(id)) continue;
+    cam.closed = true;
+    if (cam.ws) cam.ws.close();
+    sigCams.delete(id);
+  }
+}
+
+// sigCamOpen: a tank's feed from the hub, one JPEG per WebSocket message
+// (works on iPhones too), drawn on a canvas. Reconnects until closed.
+function sigCamOpen(id) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 240;
+  const cam = { canvas, ws: null, closed: false };
+  let drawing = false;
+  const connect = () => {
+    if (cam.closed) return;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/api/video-ws?url=${encodeURIComponent(id)}&who=line-up&maxfps=10`);
+    ws.binaryType = 'blob';
+    ws.onmessage = async (e) => {
+      if (drawing) return; // still drawing the last one: skip
+      drawing = true;
+      try {
+        const bmp = await createImageBitmap(e.data);
+        if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+          canvas.width = bmp.width;
+          canvas.height = bmp.height;
+        }
+        canvas.getContext('2d').drawImage(bmp, 0, 0);
+        bmp.close();
+      } catch (_) { /* a broken frame */ }
+      drawing = false;
+    };
+    ws.onclose = () => { if (!cam.closed) setTimeout(connect, 2000); };
+    cam.ws = ws;
+  };
+  connect();
+  return cam;
+}
+
+// ── Results ──
+
 // The Start/Stop button and everything below it: refreshed by the poll.
 function sigLiveHTML() {
   const d = sigData;
@@ -1382,25 +1509,46 @@ function sigLiveHTML() {
     : `<button class="btn primary" type="button" data-action="sigtest-start" ${inGame ? 'disabled' : ''}>Start Test</button>`}</div>`;
   if (!d) return button + emptyNote('Loading…');
   if (d.state === 'none') return button + emptyNote('No test run yet.');
-  const words = { 'warm-up': 'Starting cameras…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early' };
-  const when = d.startedAt ? new Date(d.startedAt).toLocaleTimeString() : '';
+  const words = { 'warm-up': 'Starting…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early' };
   let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s</h3>
-    <p class="hint">Started ${esc(when)}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
+    <p class="hint">Started ${esc(sigWhen(d.startedAt))}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
     ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
     ${d.running ? `<ul class="sig-progress">${d.tanks.map((t) => `<li><b>${esc(t.name)}</b> ${esc(t.progress || '')}</li>`).join('')}</ul>` : ''}</div>`;
+
+  // Compare: an earlier run drawn underneath, in grey.
+  const others = (sigRuns || []).filter((r) => r.file !== d.file);
+  const cmp = sigCompare && sigCompare !== d.file ? sigCompareData[sigCompare] : null;
+  if (others.length) {
+    const label = (r) => `${sigWhen(r.started)} · ${r.tanks.length <= 4 ? r.tanks.join(', ') : r.tanks.length + ' tanks'}`;
+    html += `<label class="sig-compare">Compare with
+      <select data-action="sig-compare">
+        <option value="">Nothing</option>
+        ${others.map((r) => `<option value="${esc(r.file)}" ${r.file === sigCompare ? 'selected' : ''}>${esc(label(r))}</option>`).join('')}
+      </select></label>`;
+  }
+
   const metric = segChoice('sigmetric', SIG_METRICS.map((m) => [m.id, m.label]));
   const m = SIG_METRICS.find((x) => x.id === metric);
   html += seg('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]), metric);
   html += `<p class="hint">Top = turret forward. Further out = better. <span class="sig-key fwd">&#9472;&#9472;</span> first way round
-    <span class="sig-key back">&#8211; &#8211;</span> back.</p>`;
-  html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m)).join('')}</div>`;
-  html += sigTable(d.tanks);
+    <span class="sig-key back">&#8211; &#8211;</span> back${cmp ? `. <span class="sig-key before">Grey</span>: ${esc(sigWhen(cmp.startedAt))}` : ''}.</p>`;
+  const before = (t) => cmp && (cmp.tanks.find((b) => b.id === t.id) || cmp.tanks.find((b) => b.name === t.name));
+  html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m, before(t))).join('')}</div>`;
+  html += sigTable(d.tanks, before);
   if (!d.running) html += '<a class="btn small secondary" href="/api/sigtest.csv" download style="margin-top:10px">Download CSV</a>';
   return html;
 }
 
-// sigChart: one tank's metric round the turret, 10° bins.
-function sigChart(t, m) {
+function sigWhen(ms) {
+  if (!ms) return '';
+  const t = new Date(ms);
+  const day = t.toDateString() === new Date().toDateString() ? '' : t.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ';
+  return day + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// sigChart: one tank's metric round the turret, 10° bins; before = the same
+// tank in the run being compared with, drawn underneath.
+function sigChart(t, m, before) {
   const S = 180, c = S / 2, R = 72;
   const radius = (v) => {
     let f = (v - m.lo) / (m.hi - m.lo);
@@ -1421,7 +1569,7 @@ function sigChart(t, m) {
     const [x, y] = pt(deg, R);
     grid += `<line x1="${c}" y1="${c}" x2="${x}" y2="${y}" class="sig-spoke"/>`;
   }
-  const lines = (t.passes || []).map((p) => {
+  const lines = (passes, extra) => (passes || []).map((p) => {
     const bins = p.bins || [];
     let d = '', open = false, all = true;
     bins.forEach((b, i) => {
@@ -1432,22 +1580,27 @@ function sigChart(t, m) {
       open = true;
     });
     if (all && d) d += 'Z';
-    return d ? `<path d="${d}" class="sig-line ${p.dir < 0 ? 'back' : 'fwd'}"/>` : '';
+    return d ? `<path d="${d}" class="sig-line ${extra}${p.dir < 0 ? 'back' : 'fwd'}"/>` : '';
   }).join('');
   const ref = t.ref === 'ok' ? '' : ` <span class="sig-warn">${t.ref === 'estimated' ? 'angles estimated' : 'no angles'}</span>`;
   return `<figure class="sig-chart"><svg viewBox="0 0 ${S} ${S}" role="img" aria-label="${esc(t.name)}: ${esc(m.label)} by turret angle">
-      ${grid}<text x="${c}" y="10" class="sig-fwd">FWD</text>${lines}</svg>
+      ${grid}<text x="${c}" y="10" class="sig-fwd">FWD</text>${before ? lines(before.passes, 'before ') : ''}${lines(t.passes, '')}</svg>
     <figcaption><b>${esc(t.name)}</b>${t.partner ? ` &harr; ${esc(t.partner)}` : ''}${ref}</figcaption></figure>`;
 }
 
-function sigTable(tanks) {
+function sigTable(tanks, before) {
   const n = (v, dp = 0) => (v == null ? '&ndash;' : (+v).toFixed(dp));
-  const rows = tanks.map((t) => `<tr><td>${esc(t.name)}</td>
-    <td>${n(t.medFps)}</td>
-    <td>${t.worstFps == null ? '&ndash;' : `${n(t.worstFps, 1)} at ${t.worstAt}&ndash;${t.worstAt + 10}&deg;`}</td>
+  const worst = (t) => t.worstFps == null ? '&ndash;' : `${n(t.worstFps, 1)} at ${t.worstAt}&ndash;${t.worstAt + 10}&deg;`;
+  const was = (b, html) => b ? ` <span class="sig-was">was ${html}</span>` : '';
+  const rows = tanks.map((t) => {
+    const b = before(t);
+    return `<tr><td>${esc(t.name)}</td>
+    <td>${n(t.medFps)}${was(b, b && n(b.medFps))}</td>
+    <td>${worst(t)}${was(b, b && worst(b))}</td>
     <td>${t.dbmMin == null ? '&ndash;' : `${n(t.dbmMin)} to ${n(t.dbmMax)}`}</td>
     <td>${(t.passes || []).filter((p) => p.turnS > 0).map((p) => n(p.turnS, 1)).join(' / ') || '&ndash;'}</td>
-    <td>${esc({ ok: 'IR marks', estimated: 'estimated', none: 'none' }[t.ref] || t.ref)}</td></tr>`).join('');
+    <td>${esc({ ok: 'IR marks', estimated: 'estimated', none: 'none' }[t.ref] || t.ref)}</td></tr>`;
+  }).join('');
   return `<div class="sig-table-wrap"><table class="sig-table">
     <thead><tr><th>Tank</th><th>Typical fps</th><th>Worst fps</th><th>Router dBm</th><th>s per turn (each way)</th><th>Angles</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;

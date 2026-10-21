@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 	"time"
@@ -205,5 +206,59 @@ func TestEachPassHasItsOwnPace(t *testing.T) {
 	}
 	if n, _ := tk.turnCount(fwd, end); n != 3 {
 		t.Errorf("first way: %d turns counted, want 3", n)
+	}
+}
+
+// A saved run read back charts the same as it did when it finished, and
+// shows up in the list of runs.
+func TestSavedRunLoadsTheSame(t *testing.T) {
+	t0 := time.Date(2026, 10, 20, 21, 48, 20, 0, time.Local)
+	// Whole milliseconds, as runs are saved.
+	at := func(s float64) time.Time { return t0.Add(time.Duration(math.Round(s*1000)) * time.Millisecond) }
+	tk := &sigTank{id: "A1", name: "Desert-01", num: 1, partner: "B6", hits: []time.Time{at(4.6), at(41.7), at(43.4), at(83.0), at(84.7), at(126.0),
+		at(128.6), at(156.4), at(158.1), at(185.9), at(186.8), at(216.3)}}
+	tk.passes = []*sigPass{
+		{dir: 1, start: at(4), end: at(127.6), finalFirst: at(126.0), stopAt: at(127.6)},
+		{dir: -1, start: at(127.6), end: at(217.6), finalFirst: at(216.3), stopAt: at(217.6)},
+	}
+	for s := 4.0; s < 217; s += 0.04 {
+		if a := math.Mod((s-4)/42*360, 360); a > 90 && a < 120 && math.Mod(s, 0.5) > 0.04 {
+			continue
+		}
+		tk.frames = append(tk.frames, at(s))
+	}
+	for s := 4.0; s < 217; s += 0.25 {
+		tk.router = append(tk.router, sigRouter{at: at(s), dbm: -30 - int(s)%7, rxMbit: 72})
+	}
+	partner := &sigTank{id: "B6", name: "Jungle-06", num: 6, partner: "A1"}
+	r := &sigRun{started: t0, ended: at(220), phase: "done", cfg: SignalTestSettings{Speed: 0.2, Turns: 3, Reverse: true, MaxTurnS: 90},
+		order: []string{"A1", "B6"}, tanks: map[string]*sigTank{"A1": tk, "B6": partner}, routerOK: true}
+
+	st := newSignalTest(nil, nil, "", t.TempDir())
+	st.mu.Lock()
+	r.file = st.save(r)
+	want := st.snapshotLocked(r)
+	st.mu.Unlock()
+	if r.file == "" {
+		t.Fatal("not saved")
+	}
+
+	got, ok := st.savedSnapshot(r.file)
+	if !ok {
+		t.Fatal("can't load it back")
+	}
+	g, _ := json.Marshal(got.Tanks)
+	w, _ := json.Marshal(want.Tanks)
+	if string(g) != string(w) {
+		t.Errorf("loaded run differs:\n got %s\nwant %s", g, w)
+	}
+	st.mu.Lock()
+	runs := st.listRunsLocked()
+	st.mu.Unlock()
+	if len(runs) != 1 || runs[0].File != r.file || len(runs[0].Tanks) != 2 || runs[0].Tanks[0] != "Desert-01" {
+		t.Errorf("runs: %+v", runs)
+	}
+	if _, ok := st.savedSnapshot("../settings.json"); ok {
+		t.Error("loaded a file that isn't a run")
 	}
 }
