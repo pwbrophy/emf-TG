@@ -1446,9 +1446,9 @@ function sigTable(tanks) {
     <td>${n(t.medFps)}</td>
     <td>${t.worstFps == null ? '&ndash;' : `${n(t.worstFps, 1)} at ${t.worstAt}&ndash;${t.worstAt + 10}&deg;`}</td>
     <td>${t.dbmMin == null ? '&ndash;' : `${n(t.dbmMin)} to ${n(t.dbmMax)}`}</td>
-    <td>${t.turnS ? n(t.turnS, 1) : '&ndash;'}</td>
+    <td>${(t.passes || []).filter((p) => p.turnS > 0).map((p) => n(p.turnS, 1)).join(' / ') || '&ndash;'}</td>
     <td>${esc({ ok: 'IR marks', estimated: 'estimated', none: 'none' }[t.ref] || t.ref)}</td></tr>`).join('');
   return `<div class="sig-table-wrap"><table class="sig-table">
-    <thead><tr><th>Tank</th><th>Typical fps</th><th>Worst fps</th><th>Router dBm</th><th>s / turn</th><th>Angles</th></tr></thead>
+    <thead><tr><th>Tank</th><th>Typical fps</th><th>Worst fps</th><th>Router dBm</th><th>s per turn (each way)</th><th>Angles</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }

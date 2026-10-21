@@ -181,3 +181,29 @@ func TestBeamWithAMissedWindowIsOneBeam(t *testing.T) {
 		t.Fatalf("final beam %v %v, want at 42.6 s", ok, first.Sub(t0))
 	}
 }
+
+// Jungle-06 turned at 42 s a turn one way and 30 s back: each pass's angles
+// use its own pace, and the slow pass's 42 s gaps aren't taken as missed
+// beams (1.4 of the faster pace).
+func TestEachPassHasItsOwnPace(t *testing.T) {
+	t0 := time.Date(2026, 10, 20, 21, 48, 20, 0, time.UTC)
+	at := func(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Second))) }
+	tk := &sigTank{hits: []time.Time{at(4.6), at(41.7), at(43.4), at(83.0), at(84.7), at(126.0),
+		at(128.6), at(156.4), at(158.1), at(185.9), at(186.8), at(216.3)}}
+	fwd := &sigPass{dir: 1, start: at(4), end: at(127.6), finalFirst: at(126.0), stopAt: at(127.6)}
+	back := &sigPass{dir: -1, start: at(127.6), end: at(217.6), finalFirst: at(216.3), stopAt: at(217.6)}
+	tk.passes = []*sigPass{fwd, back}
+	end := at(220)
+	if p := tk.passPeriod(fwd, end); math.Abs(p-42) > 1.5 {
+		t.Errorf("first way: %.1f s a turn, want about 42", p)
+	}
+	if p := tk.passPeriod(back, end); math.Abs(p-30) > 1.5 {
+		t.Errorf("back: %.1f s a turn, want about 30", p)
+	}
+	if m := tk.marks(fwd, end); len(m) != 2 {
+		t.Errorf("first way: %d marks, want 2 (no made-up ones)", len(m))
+	}
+	if n, _ := tk.turnCount(fwd, end); n != 3 {
+		t.Errorf("first way: %d turns counted, want 3", n)
+	}
+}

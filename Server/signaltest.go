@@ -576,7 +576,7 @@ func (t *sigTank) turnBeams(p *sigPass, until time.Time) []sigBeam {
 // gap of about two turns, and counts as two. at is when the last counted
 // beam was first seen.
 func (t *sigTank) turnCount(p *sigPass, until time.Time) (count int, at time.Time) {
-	per := t.period()
+	per := t.passPeriod(p, until)
 	prev := p.start
 	for _, b := range t.turnBeams(p, until) {
 		gap := b.first.Sub(prev).Seconds()
@@ -591,7 +591,7 @@ func (t *sigTank) turnCount(p *sigPass, until time.Time) (count int, at time.Tim
 
 // finalBeamStart: when the beam of the pass's last turn was first seen.
 func (t *sigTank) finalBeamStart(p *sigPass, turns int) (time.Time, bool) {
-	per := t.period()
+	per := t.passPeriod(p, time.Now())
 	prev, count := p.start, 0
 	for _, b := range t.turnBeams(p, time.Now()) {
 		gap := b.first.Sub(prev).Seconds()
@@ -648,6 +648,35 @@ func (t *sigTank) period() float64 {
 	return 0
 }
 
+// passPeriod: the pace of one pass. A turret can turn at different speeds
+// each way (Jungle-06, 21 October 2026: 42 s a turn one way, 30 s back), so
+// each pass uses its own beam gaps when it has any, else the tank's pace.
+func (t *sigTank) passPeriod(p *sigPass, until time.Time) float64 {
+	bs := t.turnBeams(p, until)
+	var gaps []float64
+	for i := 1; i < len(bs); i++ {
+		if d := bs[i].first.Sub(bs[i-1].first).Seconds(); d >= sigMinTurn {
+			gaps = append(gaps, d)
+		}
+	}
+	if len(gaps) == 0 {
+		return t.period()
+	}
+	typical, best := median(gaps), 0.0
+	for _, g := range gaps {
+		if g >= 0.6*typical && (best == 0 || g < best) {
+			best = g
+		}
+	}
+	var single []float64
+	for _, g := range gaps {
+		if g >= best && g <= 1.4*best {
+			single = append(single, g)
+		}
+	}
+	return median(single)
+}
+
 // halfBeam: half the time a beam takes to sweep past, from the complete
 // beams seen so far.
 func (t *sigTank) halfBeam() time.Duration {
@@ -693,7 +722,7 @@ func (t *sigTank) rawMarks(p *sigPass, until time.Time) []time.Time {
 
 // marks: rawMarks with any missed beam filled in, so every gap is one turn.
 func (t *sigTank) marks(p *sigPass, until time.Time) []time.Time {
-	return fillMissed(t.rawMarks(p, until), t.period())
+	return fillMissed(t.rawMarks(p, until), t.passPeriod(p, until))
 }
 
 // fillMissed puts a mark into each gap of about n turns (n ≥ 2), evenly.
@@ -764,8 +793,9 @@ type sigBin struct {
 }
 
 type sigPassView struct {
-	Dir  int      `json:"dir"`
-	Bins []sigBin `json:"bins"`
+	Dir   int      `json:"dir"`
+	TurnS float64  `json:"turnS"` // this pass's seconds per turn
+	Bins  []sigBin `json:"bins"`
 }
 
 type sigTankView struct {
@@ -852,7 +882,12 @@ func (st *signalTest) snapshotLocked(r *sigRun) sigSnapshot {
 				m = []time.Time{p.start}
 				v.Ref = "estimated"
 			}
-			v.Passes = append(v.Passes, sigPassView{Dir: p.dir, Bins: binPass(p, end, angleFunc(p.dir, m, pace), frames, t.router)})
+			passPace := t.passPeriod(p, end)
+			if passPace <= 0 {
+				passPace = pace
+			}
+			v.Passes = append(v.Passes, sigPassView{Dir: p.dir, TurnS: passPace,
+				Bins: binPass(p, end, angleFunc(p.dir, m, passPace), frames, t.router)})
 		}
 		if len(t.passes) == 0 || pace <= 0 {
 			v.Ref = "none"
@@ -963,8 +998,14 @@ func summarise(v *sigTankView) {
 		v.DbmMin, v.DbmMax = ptr(dbm[0]), ptr(dbm[len(dbm)-1])
 		parts = append(parts, fmt.Sprintf("router hears it at %.0f to %.0f dBm", dbm[0], dbm[len(dbm)-1]))
 	}
-	if v.TurnS > 0 {
-		parts = append(parts, fmt.Sprintf("%.1f s per turn", v.TurnS))
+	var paces []string
+	for _, p := range v.Passes {
+		if p.TurnS > 0 {
+			paces = append(paces, fmt.Sprintf("%.1f", p.TurnS))
+		}
+	}
+	if len(paces) > 0 {
+		parts = append(parts, strings.Join(paces, " / ")+" s per turn")
 	}
 	switch v.Ref {
 	case "estimated":
