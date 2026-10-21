@@ -164,6 +164,18 @@ func (g *game) hostTool(c *client, m inMsg) {
 		}
 	case "host_tank_resync":
 		g.sendTuning(m.Tank, false)
+	case "host_sigtest_start":
+		if g.phase == phaseCountdown || g.phase == phasePlaying {
+			g.sendError(c, "The signal test can't run during a game.")
+			return
+		}
+		if err := g.sigtest.start(g.settings.SignalTest, g.tanks.list()); err != nil {
+			g.sendError(c, "Signal test: "+err.Error()+".")
+			return
+		}
+		g.syncCameras() // every camera streams during the test
+	case "host_sigtest_stop":
+		g.sigtest.stop()
 	case "host_tank_restart":
 		// The tank restarts itself (firmware's reboot command) and comes back
 		// through discovery about 10 s later; older firmware ignores it.

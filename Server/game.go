@@ -117,8 +117,10 @@ type game struct {
 
 	// The check on Start (health.go): checkTanks is nil in tests that don't
 	// set it; camSince is when each tank's camera last came on.
-	checkTanks   func(ids []string, fpsCap map[string]int, camSince map[string]time.Time) []tankWarning
-	camSince     map[string]time.Time
+	checkTanks func(ids []string, fpsCap map[string]int, camSince map[string]time.Time) []tankWarning
+	camSince   map[string]time.Time
+
+	sigtest      *signalTest // Server Config → Signal Quality Test; nil in tests that don't set it
 	settingsPath string
 	settings     Settings
 	presetsPath  string
@@ -182,11 +184,17 @@ func newGame(tanks tankControl, settingsPath string) *game {
 func (g *game) tankMessage(id string, m tankReport) {
 	switch m.Cmd {
 	case "ir_emit_ack":
+		if g.sigtest.active() {
+			return // the signal test lights barrels; there's no shot
+		}
 		g.ir.reply(irReply{tank: id, ack: true, mask: -1})
 	case "ir_window_result":
 		mask := 0
 		if m.Mask != nil {
 			mask = *m.Mask
+		}
+		if g.sigtest.irResult(id, mask) {
+			return
 		}
 		g.ir.reply(irReply{tank: id, mask: mask})
 	case "rfid":
@@ -870,6 +878,10 @@ func (g *game) start(c *client, force bool) {
 	}
 	if len(ready) == 0 {
 		g.sendError(c, "Nobody has chosen a tank yet.")
+		return
+	}
+	if g.sigtest.active() {
+		g.sendError(c, "The signal test is running: stop it first (Server Config → Signal Quality Test).")
 		return
 	}
 	if !force {

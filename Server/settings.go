@@ -59,6 +59,8 @@ type Settings struct {
 	DebugConsole    bool `json:"debugConsole"` // the "DBG" log button on players' phones
 
 	Tuning Tuning `json:"tuning"` // Advanced: how tanks and controls behave
+
+	SignalTest SignalTestSettings `json:"signalTest"` // Server Config → Signal Quality Test (signaltest.go)
 }
 
 // Alliance is one side in a realtime game. (In the planned turn-based mode
@@ -178,6 +180,7 @@ func defaultSettings() Settings {
 
 		DebugConsole: true,
 		Tuning:       defaultTuning(),
+		SignalTest:   defaultSignalTest(),
 	}
 	// The tags in the Unity scene.
 	add := func(use string, uids ...string) {
@@ -219,6 +222,7 @@ func (s *Settings) clamp() {
 	s.clampAlliances()
 	s.clampPoints()
 	s.clampTags()
+	s.SignalTest.clamp()
 
 	t := &s.Tuning
 	unit := func(v float64) float64 { return max(0, min(v, 1)) }

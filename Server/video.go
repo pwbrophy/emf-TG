@@ -71,6 +71,10 @@ type stream struct {
 	// Longest wait between two frames arriving (a freeze); guarded by mu.
 	lastFrameAt time.Time
 	maxGap      time.Duration
+
+	// Every frame's arrival time while the signal test records; guarded by mu.
+	recording bool
+	rec       []time.Time
 }
 
 type viewer struct {
@@ -126,6 +130,9 @@ func (s *stream) publish(f mjpeg.Frame) {
 		s.maxGap = max(s.maxGap, now.Sub(s.lastFrameAt))
 	}
 	s.lastFrameAt = now
+	if s.recording {
+		s.rec = append(s.rec, now)
+	}
 	for v := range s.viewers {
 		if v.maxFPS > 0 {
 			v.credit = min(v.credit+now.Sub(v.lastSeen).Seconds()*v.maxFPS, 2)
@@ -190,6 +197,29 @@ func (s *stream) noteCommand(msg string, now time.Time) {
 		s.motors.turret.set(running, now)
 	}
 	s.mu.Unlock()
+}
+
+// startRecording starts keeping every frame's arrival time (signal test).
+func (s *stream) startRecording() {
+	s.mu.Lock()
+	s.recording, s.rec = true, nil
+	s.mu.Unlock()
+}
+
+// recorded is a copy of the arrival times so far.
+func (s *stream) recorded() []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]time.Time(nil), s.rec...)
+}
+
+// stopRecording stops and hands over the arrival times.
+func (s *stream) stopRecording() []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.rec
+	s.recording, s.rec = false, nil
+	return out
 }
 
 // startGapTiming forgets the last frame: called when a new connection to the

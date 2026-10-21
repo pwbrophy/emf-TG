@@ -44,6 +44,7 @@ func main() {
 	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
 	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
 	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")
+	wifiIface := flag.String("wifi-iface", "ra0", "the router's 2.4 GHz Wi-Fi interface, for the signal test's view of each tank (iwinfo); empty = off")
 	videoLogFile := flag.String("video-log", filepath.Join(os.TempDir(), "thundergeddon-video.csv"),
 		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); empty = off")
 	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
@@ -78,6 +79,13 @@ func main() {
 	g := newGame(tanks, *settingsFile)
 	g.vlog = vlog
 	g.checkTanks = stats.check
+	g.sigtest = newSignalTest(tanks, rl, *wifiIface, filepath.Dir(*videoLogFile))
+	g.sigtest.onDone = func() {
+		g.mu.Lock()
+		g.syncCameras() // back to the phase's cameras
+		g.broadcast()
+		g.mu.Unlock()
+	}
 	g.beacons = newBeaconManager()
 	g.beacons.onHello = g.beaconConnected
 	tanks.onChange = g.tanksChanged
@@ -102,6 +110,8 @@ func main() {
 	mux.HandleFunc("/api/info", handleInfo)
 	mux.HandleFunc("GET /api/stats", stats.handle)
 	mux.HandleFunc("GET /api/video-log", vlog.handle)
+	mux.HandleFunc("GET /api/sigtest", g.sigtest.handle)
+	mux.HandleFunc("GET /api/sigtest.csv", g.sigtest.handleCSV)
 	mux.HandleFunc("GET /api/tanks", tanks.handleList)
 	mux.HandleFunc("GET /esp32", tanks.handleControl)
 	mux.HandleFunc("GET /beacon", g.beacons.handle) // capture-point beacons (any path works for them; this is what discovery tells them)

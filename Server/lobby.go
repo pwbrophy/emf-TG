@@ -126,7 +126,7 @@ func (g *game) pickAlliance(c *client, allianceID string) {
 // camera runs in the lobby too, so the check on Start (health.go) has fresh
 // video figures for each one; in a game only the tanks playing stream.
 func (g *game) cameraWanted(id string) bool {
-	if g.settings.CamerasAlwaysOn || g.phase == phaseLobby {
+	if g.settings.CamerasAlwaysOn || g.phase == phaseLobby || g.sigtest.active() {
 		return true
 	}
 	if g.paused || g.match == nil || (g.phase != phaseCountdown && g.phase != phasePlaying) {

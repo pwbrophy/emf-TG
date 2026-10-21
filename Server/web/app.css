@@ -953,3 +953,27 @@ input[type="color"] {
 
 .urgent { color: var(--bad); animation: urgent-flash 0.5s infinite alternate; }
 @keyframes urgent-flash { to { opacity: 0.45; } }
+
+/* ── Signal Quality Test (Server Config) ── */
+.sig-steps { padding-left: 18px; }
+.sig-steps li { margin: 4px 0; }
+.sig-pairs, .sig-progress { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; }
+.sig-missing { color: var(--bad); }
+.sig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.sig-chart { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
+.sig-chart svg { width: 100%; height: auto; display: block; }
+.sig-chart figcaption { font-size: 0.8rem; text-align: center; margin-top: 4px; }
+.sig-ring { fill: none; stroke: var(--border); stroke-width: 1; }
+.sig-spoke { stroke: var(--border); stroke-width: 1; }
+.sig-ring-label { fill: var(--muted); font-size: 7px; }
+.sig-fwd { fill: var(--muted); font-size: 8px; text-anchor: middle; font-weight: 700; }
+.sig-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.sig-line.fwd { stroke: var(--accent2); }
+.sig-line.back { stroke: #4aa8ff; stroke-dasharray: 4 3; }
+.sig-key.fwd { color: var(--accent2); font-weight: 700; }
+.sig-key.back { color: #4aa8ff; font-weight: 700; }
+.sig-warn { color: var(--bad); font-size: 0.72rem; }
+.sig-table-wrap { overflow-x: auto; }
+.sig-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.sig-table th, .sig-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.sig-table th { color: var(--muted); font-weight: 600; }

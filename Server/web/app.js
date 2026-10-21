@@ -519,6 +519,7 @@ const CONFIG_PAGES = [
   ['config-advanced', 'Advanced Settings', 'Motor, control and video tuning, shot timing, presets'],
   ['config-alliances', 'Alliances', 'Names, colours, add and remove'],
   ['config-tags', 'Tags and Capture Points', 'RFID tags for bases and capture points'],
+  ['config-signal', 'Signal Quality Test', 'Turn every turret round and chart the radio at each angle'],
 ];
 
 function renderHost() {
@@ -784,6 +785,7 @@ function renderHostConfig() {
     case 'config-gameplay': html = gameplaySettingsForm(); break;
     case 'config-advanced': html = advancedSettings(); break;
     case 'config-alliances': html = alliancesPage(); break;
+    case 'config-signal': html = signalTestPage(); break;
     case 'config-tags': {
       tabs = [{ id: 'tags', label: 'RFID Tags', count: (state.rfidTags || []).length },
         { id: 'points', label: 'Capture Points', count: state.capturePoints.length }];
@@ -1126,6 +1128,12 @@ document.addEventListener('click', (e) => {
     case 'host-drive': setHostView('drive'); render(); break;
     case 'host-open': send({ t: 'host_open' }); break;
     case 'host-start': send({ t: 'host_start' }); break;
+    case 'sigtest-start':
+      send({ t: 'host_sigtest_start' });
+      sigData = sigData ? { ...sigData, running: true, state: 'warm-up' } : sigData;
+      render();
+      break;
+    case 'sigtest-stop': send({ t: 'host_sigtest_stop' }); break;
     case 'host-end': if (confirm('End the game now?')) send({ t: 'host_end' }); break;
     case 'host-lobby': send({ t: 'host_lobby' }); break;
     case 'host-pause': send({ t: 'host_pause', on: el.dataset.on === 'true' }); break;
@@ -1310,3 +1318,137 @@ enterScreen(localView);
 
 loadInfo();
 connect();
+
+// ── Signal Quality Test (Server/signaltest.go) ───────────────────────────────
+// Turns every connected turret slowly round and charts the radio by angle.
+// The page polls /api/sigtest once a second while it's open.
+
+let sigData = null;
+
+setInterval(async () => {
+  if (hostPage !== 'config-signal' || !state || !state.me || !state.me.isHost) return;
+  try {
+    sigData = await (await fetch('/api/sigtest', { cache: 'no-store' })).json();
+  } catch (_) {
+    return;
+  }
+  const el = $('sig-live');
+  if (el) setHTML(el, sigLiveHTML());
+}, 1000);
+
+const SIG_METRICS = [
+  // Further out on the chart is always better.
+  { id: 'fps', label: 'Video fps', key: 'fps', lo: 0, hi: 25, unit: 'fps', rings: ['6', '12', '19', '25'] },
+  { id: 'gap', label: 'Frame waits', key: 'gapMs', lo: 0, hi: 1000, invert: true, unit: 'ms', rings: ['750', '500', '250', '0'] },
+  { id: 'dbm', label: 'Router signal', key: 'dbm', lo: -80, hi: -10, unit: 'dBm', rings: ['-63', '-45', '-28', '-10'] },
+  { id: 'rx', label: 'Router speed', key: 'rxMbit', lo: 0, hi: 72, unit: 'Mbit/s', rings: ['18', '36', '54', '72'] },
+];
+
+function signalTestPage() {
+  const online = new Map(state.tanks.filter((t) => t.online).map((t) => [tankNum(t.name), t]));
+  const pairs = [1, 2, 3, 4, 5].map((n) => {
+    const a = online.get(n), b = online.get(n + 5);
+    if (!a && !b) return '';
+    const name = (t, num) => t ? esc(t.name) : `<span class="sig-missing">no tank ${num}</span>`;
+    return `<li>${name(a, n)} &harr; ${name(b, n + 5)}</li>`;
+  }).join('');
+  return `<div class="card"><h3>Set up</h3>
+    <ol class="hint sig-steps">
+      <li>Stand the tanks in pairs, hull front to hull front, about 1.5&nbsp;m apart. Leave a good gap between pairs, so each tank's partner is the only one straight ahead.</li>
+      <li>Point every turret exactly forward.</li>
+      <li>Start: the cameras come on, every turret turns slowly round, then back, and stops facing forward again. Each time a turret points at its partner, the partner's IR sensors mark 0&deg;.</li>
+    </ol>
+    ${pairs ? `<ul class="sig-pairs">${pairs}</ul>` : emptyNote('No tanks are connected.')}</div>
+    <div class="settings-grid">
+      ${field('Turret speed (slower = finer detail)', 'signalTest.speed', 'num', 'min="0.05" max="1" step="0.05"')}
+      ${field('Turns each way', 'signalTest.turns', 'int', 'min="1" max="10"')}
+      ${field('Give up if a turn takes longer than (s)', 'signalTest.maxTurnS', 'num', 'min="10" max="600" step="5"')}
+      <div class="wide">${check('Then turn back the other way', 'signalTest.reverse')}</div>
+    </div>
+    <div id="sig-live">${sigLiveHTML()}</div>`;
+}
+
+function tankNum(name) {
+  const m = /(\d+)\s*$/.exec(name || '');
+  return m ? +m[1] : 0;
+}
+
+// The Start/Stop button and everything below it: refreshed by the poll.
+function sigLiveHTML() {
+  const d = sigData;
+  const inGame = state.phase === 'countdown' || state.phase === 'playing';
+  const button = `<div class="btn-row" style="margin:12px 0">${d && d.running
+    ? '<button class="btn danger" type="button" data-action="sigtest-stop">Stop Test</button>'
+    : `<button class="btn primary" type="button" data-action="sigtest-start" ${inGame ? 'disabled' : ''}>Start Test</button>`}</div>`;
+  if (!d) return button + emptyNote('Loading…');
+  if (d.state === 'none') return button + emptyNote('No test run yet.');
+  const words = { 'warm-up': 'Starting cameras…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early' };
+  const when = d.startedAt ? new Date(d.startedAt).toLocaleTimeString() : '';
+  let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s</h3>
+    <p class="hint">Started ${esc(when)}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
+    ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
+    ${d.running ? `<ul class="sig-progress">${d.tanks.map((t) => `<li><b>${esc(t.name)}</b> ${esc(t.progress || '')}</li>`).join('')}</ul>` : ''}</div>`;
+  const metric = segChoice('sigmetric', SIG_METRICS.map((m) => [m.id, m.label]));
+  const m = SIG_METRICS.find((x) => x.id === metric);
+  html += seg('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]), metric);
+  html += `<p class="hint">Top = turret forward. Further out = better. <span class="sig-key fwd">&#9472;&#9472;</span> first way round
+    <span class="sig-key back">&#8211; &#8211;</span> back.</p>`;
+  html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m)).join('')}</div>`;
+  html += sigTable(d.tanks);
+  if (!d.running) html += '<a class="btn small secondary" href="/api/sigtest.csv" download style="margin-top:10px">Download CSV</a>';
+  return html;
+}
+
+// sigChart: one tank's metric round the turret, 10° bins.
+function sigChart(t, m) {
+  const S = 180, c = S / 2, R = 72;
+  const radius = (v) => {
+    let f = (v - m.lo) / (m.hi - m.lo);
+    f = Math.max(0, Math.min(1, f));
+    return R * (m.invert ? 1 - f : f);
+  };
+  const pt = (deg, r) => {
+    const a = deg * Math.PI / 180;
+    return [(c + r * Math.sin(a)).toFixed(1), (c - r * Math.cos(a)).toFixed(1)];
+  };
+  let grid = '';
+  m.rings.forEach((label, i) => {
+    const r = R * (i + 1) / 4;
+    grid += `<circle cx="${c}" cy="${c}" r="${r}" class="sig-ring"/>`;
+    grid += `<text x="${c + 3}" y="${(c - r + 9).toFixed(1)}" class="sig-ring-label">${label}</text>`;
+  });
+  for (let deg = 0; deg < 360; deg += 90) {
+    const [x, y] = pt(deg, R);
+    grid += `<line x1="${c}" y1="${c}" x2="${x}" y2="${y}" class="sig-spoke"/>`;
+  }
+  const lines = (t.passes || []).map((p) => {
+    const bins = p.bins || [];
+    let d = '', open = false, all = true;
+    bins.forEach((b, i) => {
+      const v = b[m.key];
+      if (v == null) { open = false; all = false; return; }
+      const [x, y] = pt(i * 10 + 5, radius(v));
+      d += `${open ? 'L' : 'M'}${x},${y} `;
+      open = true;
+    });
+    if (all && d) d += 'Z';
+    return d ? `<path d="${d}" class="sig-line ${p.dir < 0 ? 'back' : 'fwd'}"/>` : '';
+  }).join('');
+  const ref = t.ref === 'ok' ? '' : ` <span class="sig-warn">${t.ref === 'estimated' ? 'angles estimated' : 'no angles'}</span>`;
+  return `<figure class="sig-chart"><svg viewBox="0 0 ${S} ${S}" role="img" aria-label="${esc(t.name)}: ${esc(m.label)} by turret angle">
+      ${grid}<text x="${c}" y="10" class="sig-fwd">FWD</text>${lines}</svg>
+    <figcaption><b>${esc(t.name)}</b>${t.partner ? ` &harr; ${esc(t.partner)}` : ''}${ref}</figcaption></figure>`;
+}
+
+function sigTable(tanks) {
+  const n = (v, dp = 0) => (v == null ? '&ndash;' : (+v).toFixed(dp));
+  const rows = tanks.map((t) => `<tr><td>${esc(t.name)}</td>
+    <td>${n(t.medFps)}</td>
+    <td>${t.worstFps == null ? '&ndash;' : `${n(t.worstFps, 1)} at ${t.worstAt}&ndash;${t.worstAt + 10}&deg;`}</td>
+    <td>${t.dbmMin == null ? '&ndash;' : `${n(t.dbmMin)} to ${n(t.dbmMax)}`}</td>
+    <td>${t.turnS ? n(t.turnS, 1) : '&ndash;'}</td>
+    <td>${esc({ ok: 'IR marks', estimated: 'estimated', none: 'none' }[t.ref] || t.ref)}</td></tr>`).join('');
+  return `<div class="sig-table-wrap"><table class="sig-table">
+    <thead><tr><th>Tank</th><th>Typical fps</th><th>Worst fps</th><th>Router dBm</th><th>s / turn</th><th>Angles</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
