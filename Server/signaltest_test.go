@@ -163,3 +163,21 @@ func TestBinPass(t *testing.T) {
 		t.Errorf("200-210° has no router reading but shows %v", *b.Dbm)
 	}
 }
+
+// The real Jungle-06 run: its partner's hits in one beam came 1.7 s apart
+// (a listening window missed between them). That's still one beam, so the
+// pass carries on to its third turn instead of stopping after one.
+func TestBeamWithAMissedWindowIsOneBeam(t *testing.T) {
+	t0 := time.Date(2026, 10, 20, 21, 39, 42, 0, time.UTC) // in the past: beams are read up to now
+	at := func(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Second))) }
+	tk := &sigTank{hits: []time.Time{at(0.6), at(15.8), at(17.5), at(29.3), at(42.6)}}
+	p := &sigPass{dir: 1, start: t0}
+	tk.passes = []*sigPass{p}
+	if bs := tk.turnBeams(p, at(50)); len(bs) != 3 {
+		t.Fatalf("%d turn beams, want 3", len(bs))
+	}
+	first, ok := tk.finalBeamStart(p, 3)
+	if !ok || !first.Equal(at(42.6)) {
+		t.Fatalf("final beam %v %v, want at 42.6 s", ok, first.Sub(t0))
+	}
+}

@@ -71,12 +71,17 @@ func (s *SignalTestSettings) clamp() {
 }
 
 const (
-	sigBins        = 36                      // 10° each
-	sigFrontMask   = 0x83                    // N, NE, NW sensors: the partner straight ahead
-	sigListenMs    = 250                     // each listening window
-	sigWarmup      = 4 * time.Second         // cameras start, motors on
-	sigRunGap      = 1500 * time.Millisecond // hits further apart start a new pass of the beam
-	sigStartIgnore = 2 * time.Second         // a beam already in view as a pass begins is the start, not a turn
+	sigBins      = 36              // 10° each
+	sigFrontMask = 0x83            // N, NE, NW sensors: the partner straight ahead
+	sigListenMs  = 250             // each listening window
+	sigWarmup    = 4 * time.Second // cameras start, motors on
+	// Hits further apart than this start a new pass of the beam. Each tank's
+	// partner listens about every 0.84 s and can miss a window at a beam's
+	// edge (Jungle-06, 21 October 2026: hits 1.7 s apart in one beam, which
+	// 1.5 s split into two "turns"). Beams a turn apart are much further.
+	sigRunGap      = 3 * time.Second
+	sigMinTurn     = 4.0             // seconds: no turret turns faster in this test
+	sigStartIgnore = 2 * time.Second // a beam already in view as a pass begins is the start, not a turn
 	sigRouterEvery = 250 * time.Millisecond
 	sigDefaultHalf = 400 * time.Millisecond // half a beam's width in time, before one is measured
 )
@@ -614,7 +619,7 @@ func (t *sigTank) period() float64 {
 	for _, p := range t.passes {
 		bs := t.turnBeams(p, now)
 		for i := 1; i < len(bs); i++ {
-			if d := bs[i].first.Sub(bs[i-1].first).Seconds(); d > 1 {
+			if d := bs[i].first.Sub(bs[i-1].first).Seconds(); d >= sigMinTurn {
 				gaps = append(gaps, d)
 			}
 		}
