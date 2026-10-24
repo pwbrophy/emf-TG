@@ -1002,3 +1002,10 @@ input[type="color"] {
 .sig-avg-dates { display: grid; gap: 4px; }
 .sig-avg-dates label { display: grid; grid-template-columns: 2.6em 1fr; align-items: center; gap: 4px; font-size: 0.72rem; color: var(--muted); }
 .sig-avg-dates input { min-width: 0; width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.75rem; border-radius: 8px; }
+.sig-edge { fill: none; stroke: #fff; stroke-width: 1.5; }
+.sig-line.avg { stroke: #ff9f1a; stroke-width: 2.2; }
+.sig-line.worst { stroke: #ff4d4d; stroke-width: 1.5; }
+.sig-line.best { stroke: #3ddc84; stroke-width: 1.5; }
+.sig-key.avg { color: #ff9f1a; font-weight: 700; }
+.sig-key.worst { color: #ff4d4d; font-weight: 700; }
+.sig-key.best { color: #3ddc84; font-weight: 700; }

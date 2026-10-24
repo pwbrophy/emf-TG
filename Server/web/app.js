@@ -1589,15 +1589,22 @@ function sigAvgChart(e, m) {
   const from = rg.from ? new Date(rg.from).getTime() : -Infinity;
   const to = rg.to ? new Date(rg.to).getTime() + 59999 : Infinity; // the whole minute
   const used = e.runs.filter((x) => x.started >= from && x.started <= to);
-  const bins = Array.from({ length: 36 }, (_, i) => {
-    const b = {};
-    for (const k of ['fps', 'gapMs', 'dbm', 'rxMbit']) {
-      const v = used.map((x) => x.bins[i] && x.bins[i][k]).filter((x) => x != null);
-      if (v.length) b[k] = v.reduce((a, c) => a + c, 0) / v.length;
+  // Per 10°, across the runs: average, worst and best (worst = nearest the
+  // middle of the chart, so the lowest fps but the longest frame wait).
+  const avg = [], worst = [], best = [];
+  for (let i = 0; i < 36; i++) {
+    avg.push({}); worst.push({}); best.push({});
+    for (const x of SIG_METRICS) {
+      const v = used.map((r) => r.bins[i] && r.bins[i][x.key]).filter((r) => r != null);
+      if (!v.length) continue;
+      const lo = Math.min(...v), hi = Math.max(...v);
+      avg[i][x.key] = v.reduce((a, c) => a + c, 0) / v.length;
+      worst[i][x.key] = x.invert ? hi : lo;
+      best[i][x.key] = x.invert ? lo : hi;
     }
-    return b;
-  });
-  const chart = sigChart({ name: e.name, ref: 'ok', passes: used.length ? [{ dir: 1, bins }] : [] }, m);
+  }
+  const passes = used.length ? [{ cls: 'worst', bins: worst }, { cls: 'best', bins: best }, { cls: 'avg', bins: avg }] : [];
+  const chart = sigChart({ name: e.name, ref: 'ok', passes }, m, null, { edge: true });
   return `${chart}<p class="hint sig-avg-count">${used.length} of ${e.runs.length} run${e.runs.length === 1 ? '' : 's'}${
     e.skipped ? ` (${e.skipped} without angles left out)` : ''}</p>`;
 }
@@ -1615,7 +1622,8 @@ function sigAveragesHTML(m) {
     </div>`;
   }).join('');
   return `<div class="card sig-avg-card"><h3>Average of saved runs</h3>
-    <p class="hint">One line per tank: both directions, averaged over its runs between the two dates under its chart.
+    <p class="hint">Each tank's runs between the two dates under its chart, both directions together:
+    <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
     Runs without IR angle marks are left out. Shows the measure chosen above.</p>
     <div class="sig-grid">${tiles}</div></div>`;
 }
@@ -1661,8 +1669,10 @@ function sigWhen(ms) {
 }
 
 // sigChart: one tank's metric round the turret, 10° bins; before = the same
-// tank in the run being compared with, drawn underneath.
-function sigChart(t, m, before) {
+// tank in the run being compared with, drawn underneath. A pass with cls is
+// drawn in that style (the averages' worst, best, avg); opts.edge outlines
+// the chart.
+function sigChart(t, m, before, opts = {}) {
   const S = 180, c = S / 2, R = 72;
   const radius = (v) => {
     let f = (v - m.lo) / (m.hi - m.lo);
@@ -1694,11 +1704,11 @@ function sigChart(t, m, before) {
       open = true;
     });
     if (all && d) d += 'Z';
-    return d ? `<path d="${d}" class="sig-line ${extra}${p.dir < 0 ? 'back' : 'fwd'}"/>` : '';
+    return d ? `<path d="${d}" class="sig-line ${extra}${p.cls || (p.dir < 0 ? 'back' : 'fwd')}"/>` : '';
   }).join('');
   const ref = t.ref === 'ok' ? '' : ` <span class="sig-warn">${t.ref === 'estimated' ? 'angles estimated' : 'no angles'}</span>`;
   return `<figure class="sig-chart"><svg viewBox="0 0 ${S} ${S}" role="img" aria-label="${esc(t.name)}: ${esc(m.label)} by turret angle">
-      ${grid}<text x="${c}" y="10" class="sig-fwd">FWD</text>${before ? lines(before.passes, 'before ') : ''}${lines(t.passes, '')}</svg>
+      ${grid}${opts.edge ? `<circle cx="${c}" cy="${c}" r="${R}" class="sig-edge"/>` : ''}<text x="${c}" y="10" class="sig-fwd">FWD</text>${before ? lines(before.passes, 'before ') : ''}${lines(t.passes, '')}</svg>
     <figcaption><b>${esc(t.name)}</b>${t.partner ? ` &harr; ${esc(t.partner)}` : ''}${ref}</figcaption></figure>`;
 }
 
