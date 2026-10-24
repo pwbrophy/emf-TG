@@ -1377,12 +1377,16 @@ async function sigRefresh() {
   if (el) setHTML(el, sigLiveHTML());
 }
 
+const SIG_CURVE = 2; // radius = R × (how good)², so the edge gets twice the room
+
 const SIG_METRICS = [
   // Further out on the chart is always better.
-  { id: 'fps', label: 'Video fps', key: 'fps', lo: 0, hi: 25, unit: 'fps', rings: ['6', '12', '19', '25'] },
-  { id: 'gap', label: 'Frame waits', key: 'gapMs', lo: 0, hi: 1000, invert: true, unit: 'ms', rings: ['750', '500', '250', '0'] },
-  { id: 'dbm', label: 'Router signal', key: 'dbm', lo: -80, hi: -10, unit: 'dBm', rings: ['-63', '-45', '-28', '-10'] },
-  { id: 'rx', label: 'Router speed', key: 'rxMbit', lo: 0, hi: 72, unit: 'Mbit/s', rings: ['18', '36', '54', '72'] },
+  // The scale is curved (SIG_CURVE): the good end, near the edge, gets
+  // more room, so the rings crowd outwards.
+  { id: 'fps', label: 'Video fps', key: 'fps', lo: 0, hi: 25, unit: 'fps', rings: [10, 15, 20, 25] },
+  { id: 'gap', label: 'Frame waits', key: 'gapMs', lo: 0, hi: 1000, invert: true, unit: 'ms', rings: [500, 250, 100, 0] },
+  { id: 'dbm', label: 'Router signal', key: 'dbm', lo: -80, hi: -10, unit: 'dBm', rings: [-50, -35, -20, -10] },
+  { id: 'rx', label: 'Router speed', key: 'rxMbit', lo: 0, hi: 72, unit: 'Mbit/s', rings: [36, 48, 60, 72] },
 ];
 
 function signalTestPage() {
@@ -1536,7 +1540,7 @@ function sigLiveHTML() {
   const metric = segChoice('sigmetric', SIG_METRICS.map((m) => [m.id, m.label]));
   const m = SIG_METRICS.find((x) => x.id === metric);
   html += seg('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]), metric);
-  html += `<p class="hint">Top = turret forward. Further out = better. <span class="sig-key fwd">&#9472;&#9472;</span> first way round
+  html += `<p class="hint">Top = turret forward. Further out = better (the scale stretches towards the edge). <span class="sig-key fwd">&#9472;&#9472;</span> first way round
     <span class="sig-key back">&#8211; &#8211;</span> back${cmp ? `. <span class="sig-key before">Grey</span>: ${esc(sigWhen(cmp.startedAt))}${cmp.comment ? ` (${esc(cmp.comment)})` : ''}` : ''}.</p>`;
   const before = (t) => cmp && (cmp.tanks.find((b) => b.id === t.id) || cmp.tanks.find((b) => b.name === t.name));
   html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m, before(t))).join('')}</div>`;
@@ -1677,15 +1681,15 @@ function sigChart(t, m, before, opts = {}) {
   const radius = (v) => {
     let f = (v - m.lo) / (m.hi - m.lo);
     f = Math.max(0, Math.min(1, f));
-    return R * (m.invert ? 1 - f : f);
+    return R * Math.pow(m.invert ? 1 - f : f, SIG_CURVE);
   };
   const pt = (deg, r) => {
     const a = deg * Math.PI / 180;
     return [(c + r * Math.sin(a)).toFixed(1), (c - r * Math.cos(a)).toFixed(1)];
   };
   let grid = '';
-  m.rings.forEach((label, i) => {
-    const r = R * (i + 1) / 4;
+  m.rings.forEach((label) => {
+    const r = radius(label);
     grid += `<circle cx="${c}" cy="${c}" r="${r}" class="sig-ring"/>`;
     grid += `<text x="${c + 3}" y="${(c - r + 9).toFixed(1)}" class="sig-ring-label">${label}</text>`;
   });
