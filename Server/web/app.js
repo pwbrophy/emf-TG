@@ -1653,6 +1653,28 @@ function sigAngleRanges(flags) {
   return out.join(', ') || 'none';
 }
 
+// sigAvgQuality: one number for how good a tank's video is all round, 0-100.
+// Each 10° scores from 0 at 10 fps or less to 1 at 24 fps or more, half
+// from the average of its runs and half from the worst; the score is the
+// mean over the angles. null without video figures.
+function sigAvgQuality(d) {
+  const q = (fps) => Math.max(0, Math.min(1, (fps - 10) / 14));
+  const s = [];
+  d.avg.forEach((b, i) => {
+    if (b.fps != null) s.push((q(b.fps) + q(d.worst[i].fps)) / 2);
+  });
+  return s.length ? Math.round(s.reduce((a, c) => a + c, 0) / s.length * 100) : null;
+}
+
+function sigQualityBar(pct) {
+  if (pct == null) return '';
+  // A healthy tank scores 98-100; a short weak spot costs a few percent.
+  const cls = pct >= 95 ? 'good' : pct >= 85 ? 'fair' : 'poor';
+  return `<div class="sig-quality ${cls}" title="Video quality all the way round">
+    <div class="sig-quality-label"><span>Quality</span><b>${pct}%</b></div>
+    <div class="sig-quality-track"><div class="sig-quality-fill" style="width:${pct}%"></div></div></div>`;
+}
+
 // sigAvgStats: figures for one tank's chosen runs, beside its chart.
 function sigAvgStats(e, d) {
   const n = (v, dp = 0) => (+v).toFixed(dp);
@@ -1682,7 +1704,8 @@ function sigAvgStats(e, d) {
     const dbm = d.avg.map((b) => b.dbm).filter((v) => v != null);
     if (dbm.length) rows.push(['Router signal', `${n(Math.min(...dbm))} to ${n(Math.max(...dbm))} dBm`]);
   }
-  return `<dl class="sig-stats">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
+  return `${sigQualityBar(d.used.length ? sigAvgQuality(d) : null)}
+    <dl class="sig-stats">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
 }
 
 function sigAveragesHTML(m) {
@@ -1711,7 +1734,9 @@ function sigAveragesHTML(m) {
     ${seg('sigavgkind', SIG_KINDS, kind)}
     <p class="hint">Each tank's ${kind === 'drive' ? 'driving' : 'turret-only'} runs between the two dates beside its chart, both directions together:
     <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
-    Runs without IR angle marks are left out. Shows the measure chosen above.</p>
+    Runs without IR angle marks are left out. Shows the measure chosen above.
+    <b>Quality</b>: video all the way round, half from the average and half from the worst run at each angle:
+    100% = 24&nbsp;fps or more everywhere, 0% = 10&nbsp;fps or less. Green from 95%, amber from 85%.</p>
     ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote(kind === 'drive' ? 'No runs with driving yet.' : 'No turret-only runs yet.')}</div>`;
 }
 

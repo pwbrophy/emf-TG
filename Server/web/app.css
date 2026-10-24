@@ -1021,3 +1021,15 @@ input[type="color"] {
   .sig-stats dd { margin-bottom: 3px; }
   .sig-avg-dates select { font-size: 0.72rem; padding: 4px 3px; }
 }
+/* Signal Quality Test: quality bar on each average */
+.sig-quality { display: grid; gap: 4px; }
+.sig-quality-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.8rem; color: var(--muted); }
+.sig-quality-label b { font-size: 1.15rem; color: var(--text); }
+.sig-quality-track { height: 10px; border-radius: 5px; background: var(--border); overflow: hidden; }
+.sig-quality-fill { height: 100%; border-radius: 5px; }
+.sig-quality.good .sig-quality-fill { background: #3ddc84; }
+.sig-quality.fair .sig-quality-fill { background: #ff9f1a; }
+.sig-quality.poor .sig-quality-fill { background: #ff4d4d; }
+.sig-quality.good b { color: #3ddc84; }
+.sig-quality.fair b { color: #ff9f1a; }
+.sig-quality.poor b { color: #ff4d4d; }
