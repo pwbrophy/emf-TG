@@ -997,11 +997,14 @@ input[type="color"] {
 .sig-comment-label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; }
 /* Signal Quality Test: averages over saved runs */
 .sig-avg-card { margin-top: 16px; }
-.sig-avg { display: flex; flex-direction: column; gap: 4px; }
-.sig-avg-count { margin: 2px 0 0; text-align: center; font-size: 0.75rem; }
-.sig-avg-dates { display: grid; gap: 4px; }
-.sig-avg-dates label { display: grid; grid-template-columns: 2.6em 1fr; align-items: center; gap: 4px; font-size: 0.72rem; color: var(--muted); }
-.sig-avg-dates input { min-width: 0; width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.75rem; border-radius: 8px; }
+/* One tank per line: a large chart, its dates on the right */
+.sig-avg-list { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+.sig-avg { display: flex; align-items: center; gap: 12px; }
+.sig-avg-chart { flex: 1 1 auto; min-width: 0; max-width: 480px; }
+.sig-avg-count { margin: 2px 0 0; text-align: center; font-size: 0.8rem; }
+.sig-avg-dates { display: grid; gap: 8px; flex: 0 0 clamp(150px, 35%, 240px); }
+.sig-avg-dates label { display: grid; gap: 3px; font-size: 0.8rem; color: var(--muted); }
+.sig-avg-dates input { min-width: 0; width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 0.85rem; border-radius: 8px; }
 .sig-edge { fill: none; stroke: #fff; stroke-width: 1.5; }
 .sig-line.avg { stroke: #ff9f1a; stroke-width: 2.2; }
 .sig-line.worst { stroke: #ff4d4d; stroke-width: 1.5; }
@@ -1009,3 +1012,7 @@ input[type="color"] {
 .sig-key.avg { color: #ff9f1a; font-weight: 700; }
 .sig-key.worst { color: #ff4d4d; font-weight: 700; }
 .sig-key.best { color: #3ddc84; font-weight: 700; }
+@media (max-width: 480px) {
+  .sig-avg { gap: 6px; }
+  .sig-avg-dates input { font-size: 0.68rem; padding: 4px 3px; }
+}

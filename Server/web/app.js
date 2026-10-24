@@ -1629,7 +1629,7 @@ function sigAveragesHTML(m) {
     <p class="hint">Each tank's runs between the two dates under its chart, both directions together:
     <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
     Runs without IR angle marks are left out. Shows the measure chosen above.</p>
-    <div class="sig-grid">${tiles}</div></div>`;
+    <div class="sig-avg-list">${tiles}</div></div>`;
 }
 
 // A date was changed: redraw that tank's chart now (the rest of the page
