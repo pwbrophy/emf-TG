@@ -1410,9 +1410,10 @@ function signalTestPage() {
       ${field('Turns each way', 'signalTest.turns', 'int', 'min="1" max="10"')}
       ${field('Give up if a turn takes longer than (s)', 'signalTest.maxTurnS', 'num', 'min="10" max="600" step="5"')}
       <div class="wide">${check('Then turn back the other way', 'signalTest.reverse')}</div>
-      <div class="wide">${check('Drive back and forth while the turrets turn (motors test)', 'signalTest.drive')}
-        <p class="hint">Over and over: forwards for &frac12;&nbsp;s speeding up, stop &frac12;&nbsp;s, the same backwards, stop &frac12;&nbsp;s.
-        Each tank finishes where it started; leave a little room in front and behind. Saved as a separate kind of run (&ldquo;driving&rdquo;).</p></div>
+      <div class="wide">${check('Run the tracks while the turrets turn (motors test)', 'signalTest.drive')}
+        <p class="hint">Lift each tank so its tracks are off the ground. The tracks then run a game-like pattern: full speed and creeping,
+        turning, spinning, reversing and stopping. It looks random but is the same on every tank and in every run, so runs compare fairly.
+        Saved as a separate kind of run (&ldquo;driving&rdquo;).</p></div>
     </div>
     <div id="sig-live">${sigLiveHTML()}</div>`;
 }
@@ -1520,10 +1521,10 @@ function sigLiveHTML() {
     : `<button class="btn primary" type="button" data-action="sigtest-start" ${inGame ? 'disabled' : ''}>Start Test</button>`}</div>`;
   if (!d) return button + emptyNote('Loading…');
   if (d.state === 'none') return button + emptyNote('No test run yet.');
-  const words = { 'warm-up': 'Starting…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early' };
+  const words = { 'warm-up': 'Starting…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early: not saved' };
   let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s${d.drive ? ' &middot; with driving' : ''}</h3>
     <p class="hint">Started ${esc(sigWhen(d.startedAt))}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
-    ${d.run ? sigCommentBox(d.run, d.comment, 'Comment on this run') : ''}
+    ${d.run && d.state !== 'stopped' ? sigCommentBox(d.run, d.comment, 'Comment on this run') : ''}
     ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
     ${d.running ? `<ul class="sig-progress">${d.tanks.map((t) => `<li><b>${esc(t.name)}</b> ${esc(t.progress || '')}</li>`).join('')}</ul>` : ''}</div>`;
 

@@ -55,9 +55,12 @@ type SignalTestSettings struct {
 	Turns    int     `json:"turns"`    // full turns each way
 	Reverse  bool    `json:"reverse"`  // then the same number back the other way
 	MaxTurnS float64 `json:"maxTurnS"` // give up on a tank if a turn takes longer than this
-	// Drive: the tanks also drive back and forth while their turrets turn,
-	// so the drive motors run as in a game (a separate kind of run).
+	// Drive: the tanks stand lifted and their tracks run a fixed game-like
+	// pattern while the turrets turn, so the drive motors run as in a game
+	// (a separate kind of run; signaltest_drive.go).
 	Drive bool `json:"drive"`
+	// DrivePattern: which pattern a run used (set when it starts).
+	DrivePattern string `json:"drivePattern,omitempty"`
 }
 
 func defaultSignalTest() SignalTestSettings {
@@ -87,15 +90,6 @@ const (
 	sigStartIgnore = 2 * time.Second // a beam already in view as a pass begins is the start, not a turn
 	sigRouterEvery = 250 * time.Millisecond
 	sigDefaultHalf = 400 * time.Millisecond // half a beam's width in time, before one is measured
-
-	// Driving (Settings.Drive): forward for sigDriveLeg speeding up from
-	// sigDriveSlow to full, stop for sigDrivePause, the same backwards, stop.
-	// Drive commands go every sigDriveStep (the tanks stop 500 ms after the
-	// last one).
-	sigDriveLeg   = 500 * time.Millisecond
-	sigDrivePause = 500 * time.Millisecond
-	sigDriveStep  = 50 * time.Millisecond
-	sigDriveSlow  = 0.2
 )
 
 type signalTest struct {
@@ -220,6 +214,10 @@ func (st *signalTest) start(cfg SignalTestSettings, tanks []tankInfo) error {
 		return fmt.Errorf("no tanks are connected")
 	}
 	cfg.clamp()
+	cfg.DrivePattern = ""
+	if cfg.Drive {
+		cfg.DrivePattern = sigDrivePatternName
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	now := time.Now()
 	r := &sigRun{started: now, phase: "warm-up", cfg: cfg, cancel: cancel, name: sigRunName(now),
@@ -372,14 +370,14 @@ func (st *signalTest) runTest(ctx context.Context, r *sigRun) {
 
 // finish stops everything and keeps the results.
 func (st *signalTest) finish(r *sigRun) {
-	r.cancel() // ends the IR and router loops, and the driving after its current cycle
+	r.cancel() // ends the IR and router loops, and the driving
 	for _, id := range r.order {
 		st.send(id, `{"cmd":"turret","speed":0}`)
 		st.send(id, `{"cmd":"ir_emit_stop"}`)
 	}
 	if r.driveDone != nil {
 		select {
-		case <-r.driveDone: // back where they started
+		case <-r.driveDone: // tracks stopped
 		case <-time.After(5 * time.Second):
 		}
 	}
@@ -410,33 +408,6 @@ func (st *signalTest) finish(r *sigRun) {
 	}
 	if st.onDone != nil {
 		st.onDone()
-	}
-}
-
-// driveLoop drives every tank forward, stops, drives it back the same way
-// and stops, over and over, until ctx ends. A cycle that has started always
-// finishes, so each tank ends where it started (as far as its two tracks
-// match going forwards and backwards).
-func (st *signalTest) driveLoop(ctx context.Context, ids []string, done chan struct{}) {
-	defer close(done)
-	drive := func(v float64) {
-		for _, id := range ids {
-			st.send(id, fmt.Sprintf(`{"cmd":"drive","l":%.3f,"r":%.3f}`, v, v))
-		}
-	}
-	leg := func(dir float64) {
-		steps := int(sigDriveLeg / sigDriveStep)
-		for i := 1; i <= steps; i++ {
-			drive(dir * (sigDriveSlow + (1-sigDriveSlow)*float64(i)/float64(steps)))
-			time.Sleep(sigDriveStep)
-		}
-		drive(0)
-	}
-	for ctx.Err() == nil {
-		leg(1)
-		time.Sleep(sigDrivePause)
-		leg(-1)
-		time.Sleep(sigDrivePause)
 	}
 }
 
@@ -1341,10 +1312,11 @@ func (st *signalTest) saveCommentsLocked() error {
 	return os.Rename(path+".tmp", path)
 }
 
-// save writes the run's raw data as JSON and drops the oldest runs beyond
-// sigKeepRuns. Returns the file's name. Caller holds st.mu.
+// save writes a finished run's raw data as JSON and drops the oldest runs
+// beyond sigKeepRuns. A run stopped early isn't kept. Returns the file's
+// name. Caller holds st.mu.
 func (st *signalTest) save(r *sigRun) string {
-	if st.dir == "" {
+	if st.dir == "" || r.phase != "done" {
 		return ""
 	}
 	ms := func(ts []time.Time) []int64 {
@@ -1434,12 +1406,17 @@ func (st *signalTest) listRunsLocked() []sigRunInfo {
 				Settings struct {
 					Drive bool `json:"drive"`
 				} `json:"settings"`
-				Tanks   []struct {
+				Tanks []struct {
 					Name string `json:"name"`
 				} `json:"tanks"`
 			}
 			b, err := os.ReadFile(filepath.Join(st.dir, name))
 			if err != nil || json.Unmarshal(b, &head) != nil {
+				continue
+			}
+			if head.Phase != "done" {
+				// Stopped early (kept by older versions): only finished runs count.
+				_ = os.Remove(filepath.Join(st.dir, name))
 				continue
 			}
 			info = sigRunInfo{File: name, Started: head.Started, Phase: head.Phase, Drive: head.Settings.Drive, Tanks: []string{}}

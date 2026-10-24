@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -302,45 +304,78 @@ func TestMergePasses(t *testing.T) {
 	}
 }
 
-// Stopped part-way through driving forwards, every tank still drives back
-// the same way, so it ends where it started.
-func TestDrivingEndsWhereItStarted(t *testing.T) {
+// The drive pattern is the same every time, stays within the tracks'
+// range, has every kind of move, and every tank gets the same commands.
+func TestDrivePatternRepeats(t *testing.T) {
+	a := makeDrivePattern(sigDriveSeed, sigDriveLength)
+	b := makeDrivePattern(sigDriveSeed, sigDriveLength)
+	if fmt.Sprint(a) != fmt.Sprint(b) || fmt.Sprint(a) != fmt.Sprint(sigDrivePattern) {
+		t.Fatal("the pattern differs between runs")
+	}
+	var spin, back, stop, ahead bool
+	for at := time.Duration(0); at < sigDriveLength; at += sigDriveStep {
+		l, r := drivePatternAt(a, at)
+		if l < -1 || l > 1 || r < -1 || r > 1 {
+			t.Fatalf("at %v: l %.2f r %.2f out of range", at, l, r)
+		}
+		spin = spin || (l > 0.9 && r < -0.9) || (l < -0.9 && r > 0.9)
+		back = back || (l < -0.4 && r < -0.4)
+		stop = stop || (l == 0 && r == 0 && at > 0)
+		ahead = ahead || (l == 1 && r == 1)
+	}
+	if !spin || !back || !stop || !ahead {
+		t.Errorf("missing moves: spin %v reverse %v stop %v full ahead %v", spin, back, stop, ahead)
+	}
+	if l, r := drivePatternAt(a, 0); l != 0 || r != 0 {
+		t.Errorf("starts moving straight away: %.2f %.2f", l, r)
+	}
+
 	ft := &fakeTanks{}
 	st := newSignalTest(ft, nil, "", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go st.driveLoop(ctx, []string{"A", "B"}, done)
-	time.Sleep(sigDriveLeg / 2)
+	time.Sleep(300 * time.Millisecond)
 	cancel()
 	<-done
-	for _, id := range []string{"A", "B"} {
-		var fwd, back []float64
-		ft.mu.Lock()
-		for _, m := range ft.sent {
-			var c struct {
-				Cmd string  `json:"cmd"`
-				L   float64 `json:"l"`
-				R   float64 `json:"r"`
-			}
-			if !strings.HasPrefix(m, id+" ") || json.Unmarshal([]byte(m[len(id)+1:]), &c) != nil || c.Cmd != "drive" {
-				continue
-			}
-			if c.L != c.R {
-				t.Errorf("%s: tracks differ: %s", id, m)
-			}
-			switch {
-			case c.L > 0:
-				fwd = append(fwd, c.L)
-			case c.L < 0:
-				back = append(back, -c.L)
-			}
-		}
-		ft.mu.Unlock()
-		if len(fwd) == 0 || fmt.Sprint(fwd) != fmt.Sprint(back) {
-			t.Fatalf("%s: forwards %v, backwards %v", id, fwd, back)
-		}
-		if fwd[0] >= fwd[len(fwd)-1] {
-			t.Errorf("%s: doesn't speed up: %v", id, fwd)
-		}
+	got := map[string][]string{}
+	ft.mu.Lock()
+	for _, m := range ft.sent {
+		id, msg, _ := strings.Cut(m, " ")
+		got[id] = append(got[id], msg)
+	}
+	ft.mu.Unlock()
+	if len(got["A"]) < 3 || fmt.Sprint(got["A"]) != fmt.Sprint(got["B"]) {
+		t.Errorf("tanks got different commands:\n%v\n%v", got["A"], got["B"])
+	}
+	if last := got["A"][len(got["A"])-1]; last != `{"cmd":"drive","l":0.000,"r":0.000}` {
+		t.Errorf("tracks not stopped at the end: %s", last)
+	}
+}
+
+// Only finished runs are kept: a run stopped early isn't saved, and one an
+// older version saved is removed.
+func TestStoppedRunsAreNotKept(t *testing.T) {
+	dir := t.TempDir()
+	st := newSignalTest(nil, nil, "", dir)
+	t0 := time.Date(2026, 10, 24, 16, 12, 5, 0, time.Local)
+	r := &sigRun{started: t0, ended: t0.Add(time.Minute), phase: "stopped", name: sigRunName(t0), tanks: map[string]*sigTank{}}
+	st.mu.Lock()
+	if f := st.save(r); f != "" {
+		t.Errorf("stopped run saved as %s", f)
+	}
+	r.phase = "done"
+	if f := st.save(r); f == "" {
+		t.Error("finished run not saved")
+	}
+	old := filepath.Join(dir, sigRunName(t0.Add(-time.Hour)))
+	_ = os.WriteFile(old, []byte(`{"started":1,"phase":"stopped","tanks":[]}`), 0o644)
+	runs := st.listRunsLocked()
+	st.mu.Unlock()
+	if len(runs) != 1 || runs[0].Phase != "done" {
+		t.Errorf("runs: %+v", runs)
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Error("the stopped run an older version saved is still there")
 	}
 }
