@@ -1087,6 +1087,74 @@ func (st *signalTest) handleRuns(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(runs)
 }
 
+// sigHistRun is one saved run for the page's averages: each tank's bins
+// with both directions merged.
+type sigHistRun struct {
+	File    string        `json:"file"`
+	Started int64         `json:"started"` // unix ms
+	Comment string        `json:"comment,omitempty"`
+	Tanks   []sigHistTank `json:"tanks"`
+}
+
+type sigHistTank struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Ref  string   `json:"ref"` // ok, estimated, none: only "ok" runs have trustworthy angles
+	Bins []sigBin `json:"bins"`
+}
+
+// handleHistory: GET /api/sigtest/history — every saved run, oldest first,
+// each tank's passes merged, for averaging over a span of dates.
+func (st *signalTest) handleHistory(w http.ResponseWriter, r *http.Request) {
+	st.mu.Lock()
+	runs := st.listRunsLocked()
+	st.mu.Unlock()
+	out := []sigHistRun{}
+	for i := len(runs) - 1; i >= 0; i-- {
+		snap, ok := st.savedSnapshot(runs[i].File)
+		if !ok {
+			continue
+		}
+		h := sigHistRun{File: runs[i].File, Started: snap.StartedAt, Comment: snap.Comment, Tanks: []sigHistTank{}}
+		for _, t := range snap.Tanks {
+			h.Tanks = append(h.Tanks, sigHistTank{ID: t.ID, Name: t.Name, Ref: t.Ref, Bins: mergePasses(t.Passes)})
+		}
+		out = append(out, h)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// mergePasses averages a tank's passes (both directions) bin by bin.
+func mergePasses(passes []sigPassView) []sigBin {
+	out := make([]sigBin, sigBins)
+	avg := func(get func(sigBin) *float64, i int) *float64 {
+		sum, n := 0.0, 0
+		for _, p := range passes {
+			if i < len(p.Bins) {
+				if v := get(p.Bins[i]); v != nil {
+					sum += *v
+					n++
+				}
+			}
+		}
+		if n == 0 {
+			return nil
+		}
+		return ptr(math.Round(sum/float64(n)*10) / 10)
+	}
+	for i := range out {
+		out[i] = sigBin{
+			Fps:    avg(func(b sigBin) *float64 { return b.Fps }, i),
+			GapMs:  avg(func(b sigBin) *float64 { return b.GapMs }, i),
+			Dbm:    avg(func(b sigBin) *float64 { return b.Dbm }, i),
+			RxMbit: avg(func(b sigBin) *float64 { return b.RxMbit }, i),
+		}
+	}
+	return out
+}
+
 // handleCSV: GET /api/sigtest.csv[?run=<file>] — the same, one row per
 // tank, pass and 10°.
 func (st *signalTest) handleCSV(w http.ResponseWriter, r *http.Request) {

@@ -1250,6 +1250,7 @@ document.addEventListener('change', (e) => {
     case 'alliance-color': send({ t: 'host_alliance_edit', id: d.id, color: el.value }); break;
     case 'sig-compare': sigCompare = el.value; store('tg_sig_compare', sigCompare); sigRefresh(); break;
     case 'sig-comment': sigCommentChanged(d.run, el.value); break;
+    case 'sig-avg': sigAvgChanged(d.tank, d.end, el.value); break;
     default: return;
   }
   if (el.tagName === 'SELECT' || el.type === 'text') el.blur();
@@ -1334,6 +1335,7 @@ let sigRunsFor = null;   // the last run's file when sigRuns was fetched
 let sigCompare = store('tg_sig_compare') || ''; // saved run drawn underneath, '' = none
 const sigCompareData = {}; // file → that run, binned
 let sigAlignSent = 0;    // when the hub was last told the page is open
+let sigHistory = null;   // every saved run, each tank's directions merged (/api/sigtest/history)
 
 setInterval(async () => {
   const open = hostPage === 'config-signal' && shownScreen === 'host' && !document.hidden &&
@@ -1352,6 +1354,7 @@ setInterval(async () => {
     const file = sigData.file || '';
     if (!sigRuns || sigRunsFor !== file) {
       sigRuns = await (await fetch('/api/sigtest/runs', { cache: 'no-store' })).json();
+      sigHistory = await (await fetch('/api/sigtest/history', { cache: 'no-store' })).json();
       sigRunsFor = file;
     }
   } catch (_) {
@@ -1539,7 +1542,97 @@ function sigLiveHTML() {
   html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m, before(t))).join('')}</div>`;
   html += sigTable(d.tanks, before);
   if (!d.running) html += '<a class="btn small secondary" href="/api/sigtest.csv" download style="margin-top:10px">Download CSV</a>';
+  html += sigAveragesHTML(m);
   return html;
+}
+
+// ── Averages over saved runs ──
+// A chart per tank: both directions, averaged over its runs between two
+// dates the host picks per tank (remembered in this browser).
+
+function sigAvgRange(id) {
+  try {
+    return JSON.parse(store('tg_sig_avg_' + id) || '{}');
+  } catch (_) {
+    return {};
+  }
+}
+
+// sigAvgTanks: each tank in the saved runs, oldest run first. Runs without
+// IR angle marks are left out (their angles are guesses).
+function sigAvgTanks() {
+  const tanks = new Map();
+  for (const r of sigHistory || []) {
+    for (const t of r.tanks) {
+      // By name: that's the tank, even if its board has been swapped.
+      if (!tanks.has(t.name)) tanks.set(t.name, { id: t.name, name: t.name, runs: [], skipped: 0 });
+      const e = tanks.get(t.name);
+      if (t.ref === 'ok') e.runs.push({ started: r.started, bins: t.bins });
+      else e.skipped++;
+    }
+  }
+  const order = (e) => {
+    const n = tankNum(e.name);
+    return n >= 1 && n <= 10 ? ((n - 1) % 5) * 2 + (n > 5 ? 1 : 0) : 100 + n;
+  };
+  return [...tanks.values()].filter((e) => e.runs.length).sort((a, b) => order(a) - order(b));
+}
+
+// A time as a datetime-local input's value (local time, to the minute).
+function sigLocalInput(ms) {
+  return new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+// sigAvgChart: one tank's average chart and how many runs went into it.
+function sigAvgChart(e, m) {
+  const rg = sigAvgRange(e.id);
+  const from = rg.from ? new Date(rg.from).getTime() : -Infinity;
+  const to = rg.to ? new Date(rg.to).getTime() + 59999 : Infinity; // the whole minute
+  const used = e.runs.filter((x) => x.started >= from && x.started <= to);
+  const bins = Array.from({ length: 36 }, (_, i) => {
+    const b = {};
+    for (const k of ['fps', 'gapMs', 'dbm', 'rxMbit']) {
+      const v = used.map((x) => x.bins[i] && x.bins[i][k]).filter((x) => x != null);
+      if (v.length) b[k] = v.reduce((a, c) => a + c, 0) / v.length;
+    }
+    return b;
+  });
+  const chart = sigChart({ name: e.name, ref: 'ok', passes: used.length ? [{ dir: 1, bins }] : [] }, m);
+  return `${chart}<p class="hint sig-avg-count">${used.length} of ${e.runs.length} run${e.runs.length === 1 ? '' : 's'}${
+    e.skipped ? ` (${e.skipped} without angles left out)` : ''}</p>`;
+}
+
+function sigAveragesHTML(m) {
+  const tanks = sigAvgTanks();
+  if (!tanks.length) return '';
+  const tiles = tanks.map((e) => {
+    const rg = sigAvgRange(e.id);
+    const date = (end, label, dflt) => `<label>${label}<input type="datetime-local" data-action="sig-avg"
+        data-tank="${esc(e.id)}" data-end="${end}" value="${esc(rg[end] || sigLocalInput(dflt))}"></label>`;
+    return `<div class="sig-avg" data-tank="${esc(e.id)}">
+      <div class="sig-avg-chart">${sigAvgChart(e, m)}</div>
+      <div class="sig-avg-dates">${date('from', 'From', e.runs[0].started)}${date('to', 'To', e.runs[e.runs.length - 1].started)}</div>
+    </div>`;
+  }).join('');
+  return `<div class="card sig-avg-card"><h3>Average of saved runs</h3>
+    <p class="hint">One line per tank: both directions, averaged over its runs between the two dates under its chart.
+    Runs without IR angle marks are left out. Shows the measure chosen above.</p>
+    <div class="sig-grid">${tiles}</div></div>`;
+}
+
+// A date was changed: redraw that tank's chart now (the rest of the page
+// waits while the date box has focus).
+function sigAvgChanged(id, end, value) {
+  const rg = sigAvgRange(id);
+  if (value) rg[end] = value;
+  else delete rg[end]; // cleared: back to its first or last run
+  store('tg_sig_avg_' + id, JSON.stringify(rg));
+  const e = sigAvgTanks().find((x) => x.id === id);
+  const el = document.querySelector(`.sig-avg[data-tank="${CSS.escape(id)}"] .sig-avg-chart`);
+  if (e && el) {
+    const metric = segChoice('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]));
+    el.innerHTML = sigAvgChart(e, SIG_METRICS.find((x) => x.id === metric));
+  }
 }
 
 // sigCommentBox: the host's comment on a run, saved when it changes.

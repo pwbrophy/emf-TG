@@ -995,3 +995,10 @@ input[type="color"] {
 .sig-was { color: var(--muted); font-size: 0.72rem; }
 .sig-comment { width: 100%; box-sizing: border-box; margin: 6px 0 4px; padding: 8px 10px; font-size: 0.9rem; border-radius: 10px; }
 .sig-comment-label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; }
+/* Signal Quality Test: averages over saved runs */
+.sig-avg-card { margin-top: 16px; }
+.sig-avg { display: flex; flex-direction: column; gap: 4px; }
+.sig-avg-count { margin: 2px 0 0; text-align: center; font-size: 0.75rem; }
+.sig-avg-dates { display: grid; gap: 4px; }
+.sig-avg-dates label { display: grid; grid-template-columns: 2.6em 1fr; align-items: center; gap: 4px; font-size: 0.72rem; color: var(--muted); }
+.sig-avg-dates input { min-width: 0; width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.75rem; border-radius: 8px; }

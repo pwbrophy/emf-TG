@@ -118,6 +118,7 @@ func main() {
 	mux.HandleFunc("GET /api/sigtest", g.sigtest.handle)
 	mux.HandleFunc("GET /api/sigtest.csv", g.sigtest.handleCSV)
 	mux.HandleFunc("GET /api/sigtest/runs", g.sigtest.handleRuns)
+	mux.HandleFunc("GET /api/sigtest/history", g.sigtest.handleHistory)
 	mux.HandleFunc("GET /api/tanks", tanks.handleList)
 	mux.HandleFunc("GET /esp32", tanks.handleControl)
 	mux.HandleFunc("GET /beacon", g.beacons.handle) // capture-point beacons (any path works for them; this is what discovery tells them)

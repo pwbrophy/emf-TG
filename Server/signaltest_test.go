@@ -285,3 +285,16 @@ func TestSavedRunLoadsTheSame(t *testing.T) {
 		t.Errorf("runs list comment: %q", runs[0].Comment)
 	}
 }
+
+// Both directions are averaged bin by bin; a bin only one pass has keeps
+// that pass's value.
+func TestMergePasses(t *testing.T) {
+	a := make([]sigBin, sigBins)
+	b := make([]sigBin, sigBins)
+	a[3].Fps, b[3].Fps = ptr(10), ptr(20)
+	a[4].Fps = ptr(7)
+	m := mergePasses([]sigPassView{{Dir: 1, Bins: a}, {Dir: -1, Bins: b}})
+	if m[3].Fps == nil || *m[3].Fps != 15 || m[4].Fps == nil || *m[4].Fps != 7 || m[5].Fps != nil {
+		t.Errorf("merged: %v %v %v", m[3].Fps, m[4].Fps, m[5].Fps)
+	}
+}
