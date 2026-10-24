@@ -1410,6 +1410,9 @@ function signalTestPage() {
       ${field('Turns each way', 'signalTest.turns', 'int', 'min="1" max="10"')}
       ${field('Give up if a turn takes longer than (s)', 'signalTest.maxTurnS', 'num', 'min="10" max="600" step="5"')}
       <div class="wide">${check('Then turn back the other way', 'signalTest.reverse')}</div>
+      <div class="wide">${check('Drive back and forth while the turrets turn (motors test)', 'signalTest.drive')}
+        <p class="hint">Over and over: forwards for &frac12;&nbsp;s speeding up, stop &frac12;&nbsp;s, the same backwards, stop &frac12;&nbsp;s.
+        Each tank finishes where it started; leave a little room in front and behind. Saved as a separate kind of run (&ldquo;driving&rdquo;).</p></div>
     </div>
     <div id="sig-live">${sigLiveHTML()}</div>`;
 }
@@ -1518,7 +1521,7 @@ function sigLiveHTML() {
   if (!d) return button + emptyNote('Loading…');
   if (d.state === 'none') return button + emptyNote('No test run yet.');
   const words = { 'warm-up': 'Starting…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early' };
-  let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s</h3>
+  let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s${d.drive ? ' &middot; with driving' : ''}</h3>
     <p class="hint">Started ${esc(sigWhen(d.startedAt))}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
     ${d.run ? sigCommentBox(d.run, d.comment, 'Comment on this run') : ''}
     ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
@@ -1528,7 +1531,8 @@ function sigLiveHTML() {
   const others = (sigRuns || []).filter((r) => r.file !== d.file);
   const cmp = sigCompare && sigCompare !== d.file ? sigCompareData[sigCompare] : null;
   if (others.length) {
-    const label = (r) => `${sigWhen(r.started)} · ${r.tanks.length <= 4 ? r.tanks.join(', ') : r.tanks.length + ' tanks'}${r.comment ? ' · ' + r.comment : ''}`;
+    const label = (r) => `${sigWhen(r.started)} · ${r.tanks.length <= 4 ? r.tanks.join(', ') : r.tanks.length + ' tanks'}${
+      r.drive ? ' · driving' : ''}${r.comment ? ' · ' + r.comment : ''}`;
     html += `<label class="sig-compare">Compare with
       <select data-action="sig-compare">
         <option value="">Nothing</option>
@@ -1541,7 +1545,7 @@ function sigLiveHTML() {
   const m = SIG_METRICS.find((x) => x.id === metric);
   html += seg('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]), metric);
   html += `<p class="hint">Top = turret forward. Further out = better (the scale stretches towards the edge). <span class="sig-key fwd">&#9472;&#9472;</span> first way round
-    <span class="sig-key back">&#8211; &#8211;</span> back${cmp ? `. <span class="sig-key before">Grey</span>: ${esc(sigWhen(cmp.startedAt))}${cmp.comment ? ` (${esc(cmp.comment)})` : ''}` : ''}.</p>`;
+    <span class="sig-key back">&#8211; &#8211;</span> back${cmp ? `. <span class="sig-key before">Grey</span>: ${esc(sigWhen(cmp.startedAt))}${cmp.drive ? ', driving' : ''}${cmp.comment ? ` (${esc(cmp.comment)})` : ''}` : ''}.</p>`;
   const before = (t) => cmp && (cmp.tanks.find((b) => b.id === t.id) || cmp.tanks.find((b) => b.name === t.name));
   html += `<div class="sig-grid">${d.tanks.map((t) => sigChart(t, m, before(t))).join('')}</div>`;
   html += sigTable(d.tanks, before);
@@ -1564,9 +1568,18 @@ function sigAvgRange(id) {
 
 // sigAvgTanks: each tank in the saved runs, oldest run first. Runs without
 // IR angle marks are left out (their angles are guesses).
+// SIG_KINDS: the kinds of run the averages keep apart.
+const SIG_KINDS = [['turret', 'Turret only'], ['drive', 'With driving']];
+
+function sigAvgKind() {
+  return segChoice('sigavgkind', SIG_KINDS);
+}
+
 function sigAvgTanks() {
   const tanks = new Map();
+  const driving = sigAvgKind() === 'drive';
   for (const r of sigHistory || []) {
+    if (!!r.drive !== driving) continue;
     for (const t of r.tanks) {
       // By name: that's the tank, even if its board has been swapped.
       if (!tanks.has(t.name)) tanks.set(t.name, { id: t.name, name: t.name, runs: [], skipped: 0 });
@@ -1613,8 +1626,8 @@ function sigAvgChart(e, m) {
 }
 
 function sigAveragesHTML(m) {
+  if (!(sigHistory || []).length) return '';
   const tanks = sigAvgTanks();
-  if (!tanks.length) return '';
   const tiles = tanks.map((e) => {
     const rg = sigAvgRange(e.id);
     const date = (end, label, dflt) => `<label>${label}<input type="datetime-local" data-action="sig-avg"
@@ -1624,11 +1637,13 @@ function sigAveragesHTML(m) {
       <div class="sig-avg-dates">${date('from', 'From', e.runs[0].started)}${date('to', 'To', e.runs[e.runs.length - 1].started)}</div>
     </div>`;
   }).join('');
+  const kind = sigAvgKind();
   return `<div class="card sig-avg-card"><h3>Average of saved runs</h3>
-    <p class="hint">Each tank's runs between the two dates under its chart, both directions together:
+    ${seg('sigavgkind', SIG_KINDS, kind)}
+    <p class="hint">Each tank's ${kind === 'drive' ? 'driving' : 'turret-only'} runs between the two dates beside its chart, both directions together:
     <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
     Runs without IR angle marks are left out. Shows the measure chosen above.</p>
-    <div class="sig-avg-list">${tiles}</div></div>`;
+    ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote(kind === 'drive' ? 'No runs with driving yet.' : 'No turret-only runs yet.')}</div>`;
 }
 
 // A date was changed: redraw that tank's chart now (the rest of the page

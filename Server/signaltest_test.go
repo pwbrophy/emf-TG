@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -296,5 +299,48 @@ func TestMergePasses(t *testing.T) {
 	m := mergePasses([]sigPassView{{Dir: 1, Bins: a}, {Dir: -1, Bins: b}})
 	if m[3].Fps == nil || *m[3].Fps != 15 || m[4].Fps == nil || *m[4].Fps != 7 || m[5].Fps != nil {
 		t.Errorf("merged: %v %v %v", m[3].Fps, m[4].Fps, m[5].Fps)
+	}
+}
+
+// Stopped part-way through driving forwards, every tank still drives back
+// the same way, so it ends where it started.
+func TestDrivingEndsWhereItStarted(t *testing.T) {
+	ft := &fakeTanks{}
+	st := newSignalTest(ft, nil, "", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go st.driveLoop(ctx, []string{"A", "B"}, done)
+	time.Sleep(sigDriveLeg / 2)
+	cancel()
+	<-done
+	for _, id := range []string{"A", "B"} {
+		var fwd, back []float64
+		ft.mu.Lock()
+		for _, m := range ft.sent {
+			var c struct {
+				Cmd string  `json:"cmd"`
+				L   float64 `json:"l"`
+				R   float64 `json:"r"`
+			}
+			if !strings.HasPrefix(m, id+" ") || json.Unmarshal([]byte(m[len(id)+1:]), &c) != nil || c.Cmd != "drive" {
+				continue
+			}
+			if c.L != c.R {
+				t.Errorf("%s: tracks differ: %s", id, m)
+			}
+			switch {
+			case c.L > 0:
+				fwd = append(fwd, c.L)
+			case c.L < 0:
+				back = append(back, -c.L)
+			}
+		}
+		ft.mu.Unlock()
+		if len(fwd) == 0 || fmt.Sprint(fwd) != fmt.Sprint(back) {
+			t.Fatalf("%s: forwards %v, backwards %v", id, fwd, back)
+		}
+		if fwd[0] >= fwd[len(fwd)-1] {
+			t.Errorf("%s: doesn't speed up: %v", id, fwd)
+		}
 	}
 }

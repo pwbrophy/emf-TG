@@ -55,6 +55,9 @@ type SignalTestSettings struct {
 	Turns    int     `json:"turns"`    // full turns each way
 	Reverse  bool    `json:"reverse"`  // then the same number back the other way
 	MaxTurnS float64 `json:"maxTurnS"` // give up on a tank if a turn takes longer than this
+	// Drive: the tanks also drive back and forth while their turrets turn,
+	// so the drive motors run as in a game (a separate kind of run).
+	Drive bool `json:"drive"`
 }
 
 func defaultSignalTest() SignalTestSettings {
@@ -84,6 +87,15 @@ const (
 	sigStartIgnore = 2 * time.Second // a beam already in view as a pass begins is the start, not a turn
 	sigRouterEvery = 250 * time.Millisecond
 	sigDefaultHalf = 400 * time.Millisecond // half a beam's width in time, before one is measured
+
+	// Driving (Settings.Drive): forward for sigDriveLeg speeding up from
+	// sigDriveSlow to full, stop for sigDrivePause, the same backwards, stop.
+	// Drive commands go every sigDriveStep (the tanks stop 500 ms after the
+	// last one).
+	sigDriveLeg   = 500 * time.Millisecond
+	sigDrivePause = 500 * time.Millisecond
+	sigDriveStep  = 50 * time.Millisecond
+	sigDriveSlow  = 0.2
 )
 
 type signalTest struct {
@@ -135,6 +147,7 @@ type sigRun struct {
 	routerOK       bool
 	routerNote     string
 	listenAt       map[string]time.Time // listener → middle of its current window
+	driveDone      chan struct{}        // closed when the driving has stopped (Settings.Drive)
 	name           string               // the file it's saved as (comments are kept by it)
 	file           string               // saved run, once finished
 }
@@ -239,7 +252,7 @@ func (st *signalTest) start(cfg SignalTestSettings, tanks []tankInfo) error {
 	for _, id := range r.order {
 		st.rl.get(id).startRecording()
 	}
-	log.Printf("[SignalTest] starting with %d tanks: speed %.2f, %d turns, reverse %v", len(r.order), cfg.Speed, cfg.Turns, cfg.Reverse)
+	log.Printf("[SignalTest] starting with %d tanks: speed %.2f, %d turns, reverse %v, driving %v", len(r.order), cfg.Speed, cfg.Turns, cfg.Reverse, cfg.Drive)
 	go st.runTest(ctx, r)
 	return nil
 }
@@ -283,6 +296,10 @@ func (st *signalTest) runTest(ctx context.Context, r *sigRun) {
 	}
 	go st.irLoop(ctx, r)
 	go st.routerLoop(ctx, r)
+	if r.cfg.Drive {
+		r.driveDone = make(chan struct{})
+		go st.driveLoop(ctx, r.order, r.driveDone)
+	}
 
 	st.mu.Lock()
 	r.phase = "turning"
@@ -355,10 +372,18 @@ func (st *signalTest) runTest(ctx context.Context, r *sigRun) {
 
 // finish stops everything and keeps the results.
 func (st *signalTest) finish(r *sigRun) {
-	r.cancel() // ends the IR and router loops
+	r.cancel() // ends the IR and router loops, and the driving after its current cycle
 	for _, id := range r.order {
 		st.send(id, `{"cmd":"turret","speed":0}`)
 		st.send(id, `{"cmd":"ir_emit_stop"}`)
+	}
+	if r.driveDone != nil {
+		select {
+		case <-r.driveDone: // back where they started
+		case <-time.After(5 * time.Second):
+		}
+	}
+	for _, id := range r.order {
 		st.send(id, `{"cmd":"motors_off"}`)
 	}
 	st.mu.Lock()
@@ -385,6 +410,33 @@ func (st *signalTest) finish(r *sigRun) {
 	}
 	if st.onDone != nil {
 		st.onDone()
+	}
+}
+
+// driveLoop drives every tank forward, stops, drives it back the same way
+// and stops, over and over, until ctx ends. A cycle that has started always
+// finishes, so each tank ends where it started (as far as its two tracks
+// match going forwards and backwards).
+func (st *signalTest) driveLoop(ctx context.Context, ids []string, done chan struct{}) {
+	defer close(done)
+	drive := func(v float64) {
+		for _, id := range ids {
+			st.send(id, fmt.Sprintf(`{"cmd":"drive","l":%.3f,"r":%.3f}`, v, v))
+		}
+	}
+	leg := func(dir float64) {
+		steps := int(sigDriveLeg / sigDriveStep)
+		for i := 1; i <= steps; i++ {
+			drive(dir * (sigDriveSlow + (1-sigDriveSlow)*float64(i)/float64(steps)))
+			time.Sleep(sigDriveStep)
+		}
+		drive(0)
+	}
+	for ctx.Err() == nil {
+		leg(1)
+		time.Sleep(sigDrivePause)
+		leg(-1)
+		time.Sleep(sigDrivePause)
 	}
 }
 
@@ -850,6 +902,7 @@ type sigSnapshot struct {
 	RouterNote string        `json:"routerNote,omitempty"`
 	Settings   any           `json:"settings,omitempty"`
 	Tanks      []sigTankView `json:"tanks"`
+	Drive      bool          `json:"drive"`          // the tanks drove back and forth too (Settings.Drive)
 	Run        string        `json:"run,omitempty"`  // its file name, from the start (comments are kept by it)
 	File       string        `json:"file,omitempty"` // once saved
 	Comment    string        `json:"comment,omitempty"`
@@ -885,7 +938,7 @@ func (st *signalTest) snapshotLocked(r *sigRun) sigSnapshot {
 	}
 	snap := sigSnapshot{State: r.phase, Running: r.ended.IsZero(), StartedAt: r.started.UnixMilli(),
 		ElapsedS: end.Sub(r.started).Seconds(), Note: r.note, RouterOK: r.routerOK, RouterNote: r.routerNote,
-		Settings: r.cfg, Run: r.name, File: r.file, Tanks: []sigTankView{}}
+		Settings: r.cfg, Drive: r.cfg.Drive, Run: r.name, File: r.file, Tanks: []sigTankView{}}
 
 	// The fleet's typical turn time, for tanks without a pace of their own.
 	var paces []float64
@@ -1092,6 +1145,7 @@ func (st *signalTest) handleRuns(w http.ResponseWriter, r *http.Request) {
 type sigHistRun struct {
 	File    string        `json:"file"`
 	Started int64         `json:"started"` // unix ms
+	Drive   bool          `json:"drive"`   // the tanks drove back and forth too
 	Comment string        `json:"comment,omitempty"`
 	Tanks   []sigHistTank `json:"tanks"`
 }
@@ -1115,7 +1169,7 @@ func (st *signalTest) handleHistory(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		h := sigHistRun{File: runs[i].File, Started: snap.StartedAt, Comment: snap.Comment, Tanks: []sigHistTank{}}
+		h := sigHistRun{File: runs[i].File, Started: snap.StartedAt, Drive: snap.Drive, Comment: snap.Comment, Tanks: []sigHistTank{}}
 		for _, t := range snap.Tanks {
 			h.Tanks = append(h.Tanks, sigHistTank{ID: t.ID, Name: t.Name, Ref: t.Ref, Bins: mergePasses(t.Passes)})
 		}
@@ -1172,7 +1226,11 @@ func (st *signalTest) handleCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
-	fmt.Fprintln(bw, "tank,partner,reference,pass,angle_from,angle_to,video_fps,worst_gap_ms,router_dbm,router_rx_mbit")
+	fmt.Fprintln(bw, "tank,partner,reference,pass,angle_from,angle_to,video_fps,worst_gap_ms,router_dbm,router_rx_mbit,driving")
+	driving := "no"
+	if snap.Drive {
+		driving = "yes"
+	}
 	f := func(p *float64) string {
 		if p == nil {
 			return ""
@@ -1186,8 +1244,8 @@ func (st *signalTest) handleCSV(w http.ResponseWriter, r *http.Request) {
 				pass = "back"
 			}
 			for i, b := range p.Bins {
-				fmt.Fprintf(bw, "%s,%s,%s,%s,%d,%d,%s,%s,%s,%s\n", csvField(t.Name), csvField(t.Partner), t.Ref, pass,
-					i*10, i*10+10, f(b.Fps), f(b.GapMs), f(b.Dbm), f(b.RxMbit))
+				fmt.Fprintf(bw, "%s,%s,%s,%s,%d,%d,%s,%s,%s,%s,%s\n", csvField(t.Name), csvField(t.Partner), t.Ref, pass,
+					i*10, i*10+10, f(b.Fps), f(b.GapMs), f(b.Dbm), f(b.RxMbit), driving)
 			}
 		}
 	}
@@ -1235,6 +1293,7 @@ type sigRunInfo struct {
 	Started int64    `json:"started"` // unix ms
 	Phase   string   `json:"phase"`
 	Tanks   []string `json:"tanks"`
+	Drive   bool     `json:"drive"` // the tanks drove back and forth too
 	Comment string   `json:"comment,omitempty"`
 }
 
@@ -1370,8 +1429,11 @@ func (st *signalTest) listRunsLocked() []sigRunInfo {
 		info, ok := st.infos[name]
 		if !ok {
 			var head struct {
-				Started int64  `json:"started"`
-				Phase   string `json:"phase"`
+				Started  int64  `json:"started"`
+				Phase    string `json:"phase"`
+				Settings struct {
+					Drive bool `json:"drive"`
+				} `json:"settings"`
 				Tanks   []struct {
 					Name string `json:"name"`
 				} `json:"tanks"`
@@ -1380,7 +1442,7 @@ func (st *signalTest) listRunsLocked() []sigRunInfo {
 			if err != nil || json.Unmarshal(b, &head) != nil {
 				continue
 			}
-			info = sigRunInfo{File: name, Started: head.Started, Phase: head.Phase, Tanks: []string{}}
+			info = sigRunInfo{File: name, Started: head.Started, Phase: head.Phase, Drive: head.Settings.Drive, Tanks: []string{}}
 			for _, t := range head.Tanks {
 				info.Tanks = append(info.Tanks, t.Name)
 			}
