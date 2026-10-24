@@ -1600,14 +1600,14 @@ function sigLocalInput(ms) {
   return new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-// sigAvgChart: one tank's average chart and how many runs went into it.
-function sigAvgChart(e, m) {
+// sigAvgData: one tank's runs between its dates, and per 10° across them
+// the average, worst and best (worst = nearest the middle of the chart, so
+// the lowest fps but the longest frame wait).
+function sigAvgData(e) {
   const rg = sigAvgRange(e.id);
   const from = rg.from ? new Date(rg.from).getTime() : -Infinity;
   const to = rg.to ? new Date(rg.to).getTime() + 59999 : Infinity; // the whole minute
   const used = e.runs.filter((x) => x.started >= from && x.started <= to);
-  // Per 10°, across the runs: average, worst and best (worst = nearest the
-  // middle of the chart, so the lowest fps but the longest frame wait).
   const avg = [], worst = [], best = [];
   for (let i = 0; i < 36; i++) {
     avg.push({}); worst.push({}); best.push({});
@@ -1620,10 +1620,63 @@ function sigAvgChart(e, m) {
       best[i][x.key] = x.invert ? lo : hi;
     }
   }
-  const passes = used.length ? [{ cls: 'worst', bins: worst }, { cls: 'best', bins: best }, { cls: 'avg', bins: avg }] : [];
-  const chart = sigChart({ name: e.name, ref: 'ok', passes }, m, null, { edge: true });
-  return `${chart}<p class="hint sig-avg-count">${used.length} of ${e.runs.length} run${e.runs.length === 1 ? '' : 's'}${
-    e.skipped ? ` (${e.skipped} without angles left out)` : ''}</p>`;
+  return { used, avg, worst, best };
+}
+
+function sigAvgChart(e, m, d) {
+  const passes = d.used.length ? [{ cls: 'worst', bins: d.worst }, { cls: 'best', bins: d.best }, { cls: 'avg', bins: d.avg }] : [];
+  return sigChart({ name: e.name, ref: 'ok', passes }, m, null, { edge: true });
+}
+
+// sigAngleRanges: the angles where flags (one per 10°) are set, as
+// "90–190°, 340–20°" (a range can run past forward).
+function sigAngleRanges(flags) {
+  const n = flags.length;
+  if (flags.every(Boolean)) return 'all round';
+  const startAt = flags.findIndex((f) => !f); // begin outside a range, so none is split at 0°
+  const out = [];
+  let open = -1;
+  for (let k = 1; k <= n; k++) {
+    const i = (startAt + k) % n;
+    if (flags[i] && open < 0) open = i;
+    if (!flags[i] && open >= 0) {
+      out.push(`${open * 10}&ndash;${i * 10 || 360}&deg;`);
+      open = -1;
+    }
+  }
+  return out.join(', ') || 'none';
+}
+
+// sigAvgStats: figures for one tank's chosen runs, beside its chart.
+function sigAvgStats(e, d) {
+  const n = (v, dp = 0) => (+v).toFixed(dp);
+  const median = (v) => {
+    const s = [...v].sort((a, b) => a - b);
+    return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  };
+  const rows = [['Runs', `${d.used.length} of ${e.runs.length}${e.skipped ? ` (${e.skipped} more without angles)` : ''}`]];
+  if (d.used.length) {
+    const first = d.used[0].started, last = d.used[d.used.length - 1].started;
+    rows.push([d.used.length > 1 ? 'Dates' : 'Date', esc(d.used.length > 1 ? `${sigWhen(first)} – ${sigWhen(last)}` : sigWhen(first))]);
+    const fps = d.avg.map((b) => b.fps).filter((v) => v != null);
+    if (fps.length) {
+      let wi = -1;
+      d.worst.forEach((b, i) => { if (b.fps != null && (wi < 0 || b.fps < d.worst[wi].fps)) wi = i; });
+      rows.push(['Typical video', `${n(median(fps), 1)} fps`]);
+      rows.push(['Worst', `${n(d.worst[wi].fps, 1)} fps at ${wi * 10}&ndash;${wi * 10 + 10}&deg;`]);
+      rows.push(['Under 20 fps', sigAngleRanges(d.avg.map((b) => b.fps != null && b.fps < 20))]);
+      if (d.used.length > 1) {
+        const spread = d.avg.map((b, i) => (b.fps == null ? null : (d.best[i].fps - d.worst[i].fps) / 2)).filter((v) => v != null);
+        rows.push(['Run to run', `&plusmn;${n(spread.reduce((a, c) => a + c, 0) / spread.length, 1)} fps`]);
+      }
+    }
+    const gaps = d.avg.map((b) => b.gapMs).filter((v) => v != null);
+    const longest = Math.max(...d.worst.map((b) => b.gapMs).filter((v) => v != null));
+    if (gaps.length) rows.push(['Frame waits', `${n(median(gaps))} ms typical, ${n(longest)} ms longest`]);
+    const dbm = d.avg.map((b) => b.dbm).filter((v) => v != null);
+    if (dbm.length) rows.push(['Router signal', `${n(Math.min(...dbm))} to ${n(Math.max(...dbm))} dBm`]);
+  }
+  return `<dl class="sig-stats">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
 }
 
 function sigAveragesHTML(m) {
@@ -1633,9 +1686,13 @@ function sigAveragesHTML(m) {
     const rg = sigAvgRange(e.id);
     const date = (end, label, dflt) => `<label>${label}<input type="datetime-local" data-action="sig-avg"
         data-tank="${esc(e.id)}" data-end="${end}" value="${esc(rg[end] || sigLocalInput(dflt))}"></label>`;
+    const d = sigAvgData(e);
     return `<div class="sig-avg" data-tank="${esc(e.id)}">
-      <div class="sig-avg-chart">${sigAvgChart(e, m)}</div>
-      <div class="sig-avg-dates">${date('from', 'From', e.runs[0].started)}${date('to', 'To', e.runs[e.runs.length - 1].started)}</div>
+      <div class="sig-avg-chart">${sigAvgChart(e, m, d)}</div>
+      <div class="sig-avg-side">
+        <div class="sig-avg-stats">${sigAvgStats(e, d)}</div>
+        <div class="sig-avg-dates">${date('from', 'From', e.runs[0].started)}${date('to', 'To', e.runs[e.runs.length - 1].started)}</div>
+      </div>
     </div>`;
   }).join('');
   const kind = sigAvgKind();
@@ -1647,7 +1704,7 @@ function sigAveragesHTML(m) {
     ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote(kind === 'drive' ? 'No runs with driving yet.' : 'No turret-only runs yet.')}</div>`;
 }
 
-// A date was changed: redraw that tank's chart now (the rest of the page
+// A date was changed: redraw that tank's chart and figures now (the rest of the page
 // waits while the date box has focus).
 function sigAvgChanged(id, end, value) {
   const rg = sigAvgRange(id);
@@ -1655,10 +1712,12 @@ function sigAvgChanged(id, end, value) {
   else delete rg[end]; // cleared: back to its first or last run
   store('tg_sig_avg_' + id, JSON.stringify(rg));
   const e = sigAvgTanks().find((x) => x.id === id);
-  const el = document.querySelector(`.sig-avg[data-tank="${CSS.escape(id)}"] .sig-avg-chart`);
-  if (e && el) {
+  const tile = document.querySelector(`.sig-avg[data-tank="${CSS.escape(id)}"]`);
+  if (e && tile) {
     const metric = segChoice('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]));
-    el.innerHTML = sigAvgChart(e, SIG_METRICS.find((x) => x.id === metric));
+    const d = sigAvgData(e);
+    tile.querySelector('.sig-avg-chart').innerHTML = sigAvgChart(e, SIG_METRICS.find((x) => x.id === metric), d);
+    tile.querySelector('.sig-avg-stats').innerHTML = sigAvgStats(e, d);
   }
 }
 

@@ -1001,8 +1001,11 @@ input[type="color"] {
 .sig-avg-list { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
 .sig-avg { display: flex; align-items: center; gap: 12px; }
 .sig-avg-chart { flex: 1 1 auto; min-width: 0; max-width: 480px; }
-.sig-avg-count { margin: 2px 0 0; text-align: center; font-size: 0.8rem; }
-.sig-avg-dates { display: grid; gap: 8px; flex: 0 0 clamp(150px, 35%, 240px); }
+.sig-avg-side { display: grid; gap: 10px; flex: 0 0 clamp(150px, 38%, 280px); align-content: center; }
+.sig-avg-dates { display: grid; gap: 8px; }
+.sig-stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; margin: 0; font-size: 0.78rem; }
+.sig-stats dt { color: var(--muted); }
+.sig-stats dd { margin: 0; }
 .sig-avg-dates label { display: grid; gap: 3px; font-size: 0.8rem; color: var(--muted); }
 .sig-avg-dates input { min-width: 0; width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 0.85rem; border-radius: 8px; }
 .sig-edge { fill: none; stroke: #fff; stroke-width: 1.5; }
@@ -1014,5 +1017,7 @@ input[type="color"] {
 .sig-key.best { color: #3ddc84; font-weight: 700; }
 @media (max-width: 480px) {
   .sig-avg { gap: 6px; }
+  .sig-stats { grid-template-columns: 1fr; gap: 0; font-size: 0.72rem; }
+  .sig-stats dd { margin-bottom: 3px; }
   .sig-avg-dates input { font-size: 0.68rem; padding: 4px 3px; }
 }
