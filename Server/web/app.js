@@ -1575,11 +1575,10 @@ function sigAvgTanks() {
       else e.skipped++;
     }
   }
-  const order = (e) => {
-    const n = tankNum(e.name);
-    return n >= 1 && n <= 10 ? ((n - 1) % 5) * 2 + (n > 5 ? 1 : 0) : 100 + n;
-  };
-  return [...tanks.values()].filter((e) => e.runs.length).sort((a, b) => order(a) - order(b));
+  // By the number the name ends with (Desert-01 … Jungle-10); unnumbered last.
+  const order = (e) => tankNum(e.name) || 1000;
+  return [...tanks.values()].filter((e) => e.runs.length)
+    .sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
 // A time as a datetime-local input's value (local time, to the minute).
