@@ -1653,26 +1653,72 @@ function sigAngleRanges(flags) {
   return out.join(', ') || 'none';
 }
 
-// sigAvgQuality: one number for how good a tank's video is all round, 0-100.
-// Each 10° scores from 0 at 10 fps or less to 1 at 24 fps or more, half
-// from the average of its runs and half from the worst; the score is the
-// mean over the angles. null without video figures.
-function sigAvgQuality(d) {
-  const q = (fps) => Math.max(0, Math.min(1, (fps - 10) / 14));
-  const s = [];
-  d.avg.forEach((b, i) => {
-    if (b.fps != null) s.push((q(b.fps) + q(d.worst[i].fps)) / 2);
-  });
-  return s.length ? Math.round(s.reduce((a, c) => a + c, 0) / s.length * 100) : null;
+// sigAvgQuality: how playable a tank's video is, 0-100, from its chosen runs.
+// Each 10° of each run scores 0-1 by the worse of its video rate (12 fps
+// or less = 0, 24 or more = 1) and its longest wait between frames (400 ms
+// or more = 0, 100 ms or less = 1): either one spoils play. Half the score
+// is the average all the way round; half is the tank's weakest 40° (where a
+// turret can sit), so a bad spot counts even when it's a small part of the
+// circle. Both are averaged over the runs. null without video figures.
+const SIG_SECTOR = 4; // bins: 40°
+
+function sigCellScore(b) {
+  if (!b || b.fps == null) return null;
+  const c = (x) => Math.max(0, Math.min(1, x));
+  const fps = c((b.fps - 12) / 12);
+  const wait = b.gapMs == null ? 1 : c((400 - b.gapMs) / 300);
+  return Math.min(fps, wait);
 }
 
-function sigQualityBar(pct) {
-  if (pct == null) return '';
-  // A healthy tank scores 98-100; a short weak spot costs a few percent.
-  const cls = pct >= 95 ? 'good' : pct >= 85 ? 'fair' : 'poor';
-  return `<div class="sig-quality ${cls}" title="Video quality all the way round">
-    <div class="sig-quality-label"><span>Quality</span><b>${pct}%</b></div>
-    <div class="sig-quality-track"><div class="sig-quality-fill" style="width:${pct}%"></div></div></div>`;
+// sigWeakest: the lowest average over SIG_SECTOR neighbouring bins (round
+// past forward too), and where it starts.
+function sigWeakest(cells) {
+  let worst = null, at = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const v = [];
+    for (let k = 0; k < SIG_SECTOR; k++) {
+      const c = cells[(i + k) % cells.length];
+      if (c != null) v.push(c);
+    }
+    if (!v.length) continue;
+    const m = v.reduce((a, x) => a + x, 0) / v.length;
+    if (worst == null || m < worst) { worst = m; at = i; }
+  }
+  return { score: worst, at };
+}
+
+function sigAvgQuality(d) {
+  const all = [], weak = [];
+  for (const r of d.used) {
+    const cells = Array.from({ length: 36 }, (_, i) => sigCellScore(r.bins[i]));
+    const have = cells.filter((x) => x != null);
+    if (!have.length) continue;
+    all.push(have.reduce((a, x) => a + x, 0) / have.length);
+    weak.push(sigWeakest(cells).score);
+  }
+  if (!all.length) return null;
+  const mean = (v) => v.reduce((a, x) => a + x, 0) / v.length;
+  // Where the weak spot is, from the runs together.
+  const together = Array.from({ length: 36 }, (_, i) => {
+    const v = d.used.map((r) => sigCellScore(r.bins[i])).filter((x) => x != null);
+    return v.length ? mean(v) : null;
+  });
+  const at = sigWeakest(together).at * 10;
+  return {
+    pct: Math.round((mean(all) + mean(weak)) / 2 * 100),
+    allRound: Math.round(mean(all) * 100),
+    weakest: Math.round(mean(weak) * 100),
+    weakAt: `${at}&ndash;${(at + SIG_SECTOR * 10) % 360 || 360}&deg;`,
+  };
+}
+
+function sigQualityBar(q) {
+  if (!q) return '';
+  const cls = q.pct >= 90 ? 'good' : q.pct >= 60 ? 'fair' : 'poor';
+  return `<div class="sig-quality ${cls}" title="Half all round, half the weakest 40°">
+    <div class="sig-quality-label"><span>Quality</span><b>${q.pct}%</b></div>
+    <div class="sig-quality-track"><div class="sig-quality-fill" style="width:${q.pct}%"></div></div>
+    <div class="sig-quality-parts">All round ${q.allRound}% &middot; weakest 40&deg; ${q.weakest}%${q.weakest < 90 ? ` (${q.weakAt})` : ''}</div></div>`;
 }
 
 // sigAvgStats: figures for one tank's chosen runs, beside its chart.
@@ -1735,8 +1781,9 @@ function sigAveragesHTML(m) {
     <p class="hint">Each tank's ${kind === 'drive' ? 'driving' : 'turret-only'} runs between the two dates beside its chart, both directions together:
     <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
     Runs without IR angle marks are left out. Shows the measure chosen above.
-    <b>Quality</b>: video all the way round, half from the average and half from the worst run at each angle:
-    100% = 24&nbsp;fps or more everywhere, 0% = 10&nbsp;fps or less. Green from 95%, amber from 85%.</p>
+    <b>Quality</b>: how playable the video is. Each 10&deg; of each run scores by the worse of its frame rate (24&nbsp;fps and up = full marks, 12 or less = none)
+    and its longest wait between frames (100&nbsp;ms or less = full, 400&nbsp;ms or more = none). Half the score is all round the circle, half is the
+    weakest 40&deg;, where a turret can sit for a whole game. Green from 90%, amber from 60%.</p>
     ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote(kind === 'drive' ? 'No runs with driving yet.' : 'No turret-only runs yet.')}</div>`;
 }
 

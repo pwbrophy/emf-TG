@@ -1033,3 +1033,4 @@ input[type="color"] {
 .sig-quality.good b { color: #3ddc84; }
 .sig-quality.fair b { color: #ff9f1a; }
 .sig-quality.poor b { color: #ff4d4d; }
+.sig-quality-parts { font-size: 0.72rem; color: var(--muted); }
