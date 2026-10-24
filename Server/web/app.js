@@ -1585,7 +1585,7 @@ function sigAvgTanks() {
       // By name: that's the tank, even if its board has been swapped.
       if (!tanks.has(t.name)) tanks.set(t.name, { id: t.name, name: t.name, runs: [], skipped: 0 });
       const e = tanks.get(t.name);
-      if (t.ref === 'ok') e.runs.push({ started: r.started, bins: t.bins });
+      if (t.ref === 'ok') e.runs.push({ started: r.started, bins: t.bins, comment: r.comment || '' });
       else e.skipped++;
     }
   }
@@ -1595,18 +1595,24 @@ function sigAvgTanks() {
     .sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
-// A time as a datetime-local input's value (local time, to the minute).
-function sigLocalInput(ms) {
-  return new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+// sigAvgSpan: the first and last run a tank's chart uses (start times).
+// Unset ends are its first and last runs, so new runs join in. Ranges saved
+// as dates by older versions still work.
+function sigAvgSpan(e) {
+  const rg = sigAvgRange(e.id);
+  const at = (v) => (v == null || v === '' ? null : /^\d+$/.test(String(v)) ? +v : new Date(v).getTime());
+  let from = at(rg.from) ?? -Infinity;
+  let to = at(rg.to) ?? Infinity;
+  if (rg.to && !/^\d+$/.test(String(rg.to))) to += 59999; // a date: its whole minute
+  if (from > to) [from, to] = [to, from];
+  return { from, to };
 }
 
 // sigAvgData: one tank's runs between its dates, and per 10° across them
 // the average, worst and best (worst = nearest the middle of the chart, so
 // the lowest fps but the longest frame wait).
 function sigAvgData(e) {
-  const rg = sigAvgRange(e.id);
-  const from = rg.from ? new Date(rg.from).getTime() : -Infinity;
-  const to = rg.to ? new Date(rg.to).getTime() + 59999 : Infinity; // the whole minute
+  const { from, to } = sigAvgSpan(e);
   const used = e.runs.filter((x) => x.started >= from && x.started <= to);
   const avg = [], worst = [], best = [];
   for (let i = 0; i < 36; i++) {
@@ -1683,15 +1689,20 @@ function sigAveragesHTML(m) {
   if (!(sigHistory || []).length) return '';
   const tanks = sigAvgTanks();
   const tiles = tanks.map((e) => {
-    const rg = sigAvgRange(e.id);
-    const date = (end, label, dflt) => `<label>${label}<input type="datetime-local" data-action="sig-avg"
-        data-tank="${esc(e.id)}" data-end="${end}" value="${esc(rg[end] || sigLocalInput(dflt))}"></label>`;
+    // From and To: lists of the tank's runs, each with its note.
+    const { from, to } = sigAvgSpan(e);
+    const firstIn = e.runs.find((x) => x.started >= from) || e.runs[0];
+    const lastIn = [...e.runs].reverse().find((x) => x.started <= to) || e.runs[e.runs.length - 1];
+    const date = (end, label, chosen) => `<label>${label}<select data-action="sig-avg" data-tank="${esc(e.id)}" data-end="${end}">
+        ${e.runs.map((x) => `<option value="${x.started}" ${x === chosen ? 'selected' : ''}>${
+          esc(sigWhen(x.started) + (x.comment ? ' · ' + x.comment : ''))}</option>`).join('')}
+      </select></label>`;
     const d = sigAvgData(e);
     return `<div class="sig-avg" data-tank="${esc(e.id)}">
       <div class="sig-avg-chart">${sigAvgChart(e, m, d)}</div>
       <div class="sig-avg-side">
         <div class="sig-avg-stats">${sigAvgStats(e, d)}</div>
-        <div class="sig-avg-dates">${date('from', 'From', e.runs[0].started)}${date('to', 'To', e.runs[e.runs.length - 1].started)}</div>
+        <div class="sig-avg-dates">${date('from', 'From', firstIn)}${date('to', 'To', lastIn)}</div>
       </div>
     </div>`;
   }).join('');
@@ -1704,14 +1715,16 @@ function sigAveragesHTML(m) {
     ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote(kind === 'drive' ? 'No runs with driving yet.' : 'No turret-only runs yet.')}</div>`;
 }
 
-// A date was changed: redraw that tank's chart and figures now (the rest of the page
-// waits while the date box has focus).
+// A From or To run was picked: redraw that tank's chart and figures now.
+// Picking its first (From) or last (To) run leaves that end open, so later
+// runs join in.
 function sigAvgChanged(id, end, value) {
   const rg = sigAvgRange(id);
-  if (value) rg[end] = value;
-  else delete rg[end]; // cleared: back to its first or last run
-  store('tg_sig_avg_' + id, JSON.stringify(rg));
   const e = sigAvgTanks().find((x) => x.id === id);
+  const edge = e && (end === 'from' ? e.runs[0] : e.runs[e.runs.length - 1]);
+  if (value && !(edge && String(edge.started) === value)) rg[end] = value;
+  else delete rg[end];
+  store('tg_sig_avg_' + id, JSON.stringify(rg));
   const tile = document.querySelector(`.sig-avg[data-tank="${CSS.escape(id)}"]`);
   if (e && tile) {
     const metric = segChoice('sigmetric', SIG_METRICS.map((x) => [x.id, x.label]));
