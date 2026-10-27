@@ -1526,6 +1526,11 @@ function sigLiveHTML() {
     <p class="hint">Started ${esc(sigWhen(d.startedAt))}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
     ${d.run && d.state !== 'stopped' ? sigCommentBox(d.run, d.comment, 'Comment on this run') : ''}
     ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
+    ${(() => {
+      const warm = (d.tanks || []).filter((t) => t.warmingUp);
+      return warm.length ? `<p class="hint sig-warn">Powered on less than 5 minutes before this run: ${warm.map((t) => esc(t.name)).join(', ')}.
+        Tanks often do worse in their first minutes, so ${warm.length > 1 ? 'these runs don&rsquo;t' : 'this run doesn&rsquo;t'} count in the averages.</p>` : '';
+    })()}
     ${d.running ? `<ul class="sig-progress">${d.tanks.map((t) => `<li><b>${esc(t.name)}</b> ${esc(t.progress || '')}</li>`).join('')}</ul>` : ''}</div>`;
 
   // Compare: an earlier run drawn underneath, in grey.
@@ -1583,9 +1588,10 @@ function sigAvgTanks() {
     if (!!r.drive !== driving) continue;
     for (const t of r.tanks) {
       // By name: that's the tank, even if its board has been swapped.
-      if (!tanks.has(t.name)) tanks.set(t.name, { id: t.name, name: t.name, runs: [], skipped: 0 });
+      if (!tanks.has(t.name)) tanks.set(t.name, { id: t.name, name: t.name, runs: [], skipped: 0, warm: 0 });
       const e = tanks.get(t.name);
-      if (t.ref === 'ok') e.runs.push({ started: r.started, bins: t.bins, comment: r.comment || '' });
+      if (t.warmingUp) e.warm++; // just powered on: its first minutes are often worse
+      else if (t.ref === 'ok') e.runs.push({ started: r.started, bins: t.bins, comment: r.comment || '' });
       else e.skipped++;
     }
   }
@@ -1728,7 +1734,8 @@ function sigAvgStats(e, d) {
     const s = [...v].sort((a, b) => a - b);
     return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
   };
-  const rows = [['Runs', `${d.used.length} of ${e.runs.length}${e.skipped ? ` (${e.skipped} more without angles)` : ''}`]];
+  const left = [e.skipped ? `${e.skipped} without angles` : '', e.warm ? `${e.warm} just after power-on` : ''].filter(Boolean);
+  const rows = [['Runs', `${d.used.length} of ${e.runs.length}${left.length ? ` (left out: ${left.join(', ')})` : ''}`]];
   if (d.used.length) {
     const first = d.used[0].started, last = d.used[d.used.length - 1].started;
     rows.push([d.used.length > 1 ? 'Dates' : 'Date', esc(d.used.length > 1 ? `${sigWhen(first)} – ${sigWhen(last)}` : sigWhen(first))]);
@@ -1780,7 +1787,7 @@ function sigAveragesHTML(m) {
     ${seg('sigavgkind', SIG_KINDS, kind)}
     <p class="hint">Each tank's ${kind === 'drive' ? 'driving' : 'turret-only'} runs between the two dates beside its chart, both directions together:
     <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
-    Runs without IR angle marks are left out. Shows the measure chosen above.
+    Runs without IR angle marks, and runs a tank started less than 5 minutes after powering on, are left out. Shows the measure chosen above.
     <b>Quality</b>: how playable the video is. Each 10&deg; of each run scores by the worse of its frame rate (24&nbsp;fps and up = full marks, 12 or less = none)
     and its longest wait between frames (100&nbsp;ms or less = full, 400&nbsp;ms or more = none). Half the score is all round the circle, half is the
     weakest 40&deg;, where a turret can sit for a whole game. Green from 90%, amber from 60%.</p>
@@ -1872,7 +1879,8 @@ function sigChart(t, m, before, opts = {}) {
   const ref = t.ref === 'ok' ? '' : ` <span class="sig-warn">${t.ref === 'estimated' ? 'angles estimated' : 'no angles'}</span>`;
   return `<figure class="sig-chart"><svg viewBox="0 0 ${S} ${S}" role="img" aria-label="${esc(t.name)}: ${esc(m.label)} by turret angle">
       ${grid}${opts.edge ? `<circle cx="${c}" cy="${c}" r="${R}" class="sig-edge"/>` : ''}<text x="${c}" y="10" class="sig-fwd">FWD</text>${before ? lines(before.passes, 'before ') : ''}${lines(t.passes, '')}</svg>
-    <figcaption><b>${esc(t.name)}</b>${t.partner ? ` &harr; ${esc(t.partner)}` : ''}${ref}</figcaption></figure>`;
+    <figcaption><b>${esc(t.name)}</b>${t.partner ? ` &harr; ${esc(t.partner)}` : ''}${ref}${
+      t.warmingUp ? ` <span class="sig-warn">on ${Math.max(1, Math.round(t.upS / 60))} min</span>` : ''}</figcaption></figure>`;
 }
 
 function sigTable(tanks, before) {

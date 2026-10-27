@@ -111,7 +111,8 @@ type tankInfo struct {
 	ID, Name, IP string
 	Flags        tankFlags
 	Video        [3]int // fps, frame size, quality the tank has saved (0 = unknown)
-	Boot         string // how it started and how its camera started (boot.go); "" = old firmware
+	Boot         string    // how it started and how its camera started (boot.go); "" = old firmware
+	StartedAt    time.Time // when it powered on or restarted (from its hello); zero = unknown
 }
 
 // tankFlags are settings each tank keeps (in its own memory) and reports in
@@ -424,7 +425,11 @@ func (tm *tankManager) list() []tankInfo {
 		if s.camStatus != "" {
 			boot += "; " + s.camStatus
 		}
-		out = append(out, tankInfo{ID: s.id, Name: s.label(), IP: s.ip, Flags: s.flags, Video: s.video, Boot: boot})
+		info := tankInfo{ID: s.id, Name: s.label(), IP: s.ip, Flags: s.flags, Video: s.video, Boot: boot}
+		if s.boot.known() {
+			info.StartedAt = s.helloAt.Add(-time.Duration(s.boot.UpMs) * time.Millisecond)
+		}
+		out = append(out, info)
 	}
 	return out
 }

@@ -379,3 +379,42 @@ func TestStoppedRunsAreNotKept(t *testing.T) {
 		t.Error("the stopped run an older version saved is still there")
 	}
 }
+
+// A tank that powered on less than five minutes before a run is marked as
+// warming up, and the mark is kept when the run is saved and loaded.
+func TestWarmingUpIsMarked(t *testing.T) {
+	t0 := time.Date(2026, 10, 27, 20, 48, 0, 0, time.Local)
+	r := &sigRun{started: t0, ended: t0.Add(time.Minute), phase: "done", name: sigRunName(t0),
+		order: []string{"A", "B", "C"}, tanks: map[string]*sigTank{
+			"A": {id: "A", name: "Desert-04", startedAt: t0.Add(-time.Minute)},
+			"B": {id: "B", name: "Jungle-09", startedAt: t0.Add(-20 * time.Minute)},
+			"C": {id: "C", name: "Desert-05"},
+		}}
+	st := newSignalTest(nil, nil, "", t.TempDir())
+	st.mu.Lock()
+	r.file = st.save(r)
+	st.mu.Unlock()
+	check := func(snap sigSnapshot, when string) {
+		got := map[string]sigTankView{}
+		for _, v := range snap.Tanks {
+			got[v.Name] = v
+		}
+		if v := got["Desert-04"]; !v.WarmingUp || v.UpS == nil || *v.UpS != 60 {
+			t.Errorf("%s: Desert-04 (on 1 min): %+v", when, v)
+		}
+		if v := got["Jungle-09"]; v.WarmingUp || v.UpS == nil {
+			t.Errorf("%s: Jungle-09 (on 20 min): %+v", when, v)
+		}
+		if v := got["Desert-05"]; v.WarmingUp || v.UpS != nil {
+			t.Errorf("%s: Desert-05 (unknown): %+v", when, v)
+		}
+	}
+	st.mu.Lock()
+	check(st.snapshotLocked(r), "live")
+	st.mu.Unlock()
+	saved, ok := st.savedSnapshot(r.file)
+	if !ok {
+		t.Fatal("not saved")
+	}
+	check(saved, "saved")
+}

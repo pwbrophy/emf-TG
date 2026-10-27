@@ -90,6 +90,11 @@ const (
 	sigStartIgnore = 2 * time.Second // a beam already in view as a pass begins is the start, not a turn
 	sigRouterEvery = 250 * time.Millisecond
 	sigDefaultHalf = 400 * time.Millisecond // half a beam's width in time, before one is measured
+	// A tank that powered on (or restarted) less than this before a run is
+	// still warming up: its first minutes are often worse (27 October 2026:
+	// every pair's first run after power-on scored lower). Such runs are
+	// marked, and the page's averages leave them out.
+	sigWarmUp = 5 * time.Minute
 )
 
 type signalTest struct {
@@ -154,6 +159,7 @@ type sigTank struct {
 	router            []sigRouter
 	frames            []time.Time // copied from the relay when the run ends
 	finished          bool
+	startedAt         time.Time // when the tank powered on; zero = unknown
 }
 
 type sigPass struct {
@@ -225,7 +231,7 @@ func (st *signalTest) start(cfg SignalTestSettings, tanks []tankInfo) error {
 	byNum := map[int]string{}
 	for _, t := range tanks {
 		n := tankNumber(t.Name)
-		r.tanks[t.ID] = &sigTank{id: t.ID, name: t.Name, num: n}
+		r.tanks[t.ID] = &sigTank{id: t.ID, name: t.Name, num: n, startedAt: t.StartedAt}
 		r.order = append(r.order, t.ID)
 		if n > 0 {
 			byNum[n] = t.ID
@@ -861,6 +867,10 @@ type sigTankView struct {
 	MedFps   *float64      `json:"medFps,omitempty"`
 	DbmMin   *float64      `json:"dbmMin,omitempty"`
 	DbmMax   *float64      `json:"dbmMax,omitempty"`
+	// UpS: how long the tank had been on when the run began (seconds; absent
+	// = unknown). WarmingUp: under sigWarmUp, so it doesn't count in averages.
+	UpS       *float64 `json:"upS,omitempty"`
+	WarmingUp bool     `json:"warmingUp"`
 }
 
 type sigSnapshot struct {
@@ -927,6 +937,10 @@ func (st *signalTest) snapshotLocked(r *sigRun) sigSnapshot {
 			frames = st.rl.get(id).recorded()
 		}
 		v := sigTankView{ID: t.id, Name: t.name, Ref: "ok", Passes: []sigPassView{}}
+		if !t.startedAt.IsZero() {
+			up := r.started.Sub(t.startedAt)
+			v.UpS, v.WarmingUp = ptr(math.Round(up.Seconds())), up < sigWarmUp
+		}
 		if p := r.tanks[t.partner]; p != nil {
 			v.Partner = p.name
 		}
@@ -1126,6 +1140,9 @@ type sigHistTank struct {
 	Name string   `json:"name"`
 	Ref  string   `json:"ref"` // ok, estimated, none: only "ok" runs have trustworthy angles
 	Bins []sigBin `json:"bins"`
+	// The tank had powered on less than sigWarmUp before the run.
+	WarmingUp bool     `json:"warmingUp"`
+	UpS       *float64 `json:"upS,omitempty"`
 }
 
 // handleHistory: GET /api/sigtest/history — every saved run, oldest first,
@@ -1142,7 +1159,8 @@ func (st *signalTest) handleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		h := sigHistRun{File: runs[i].File, Started: snap.StartedAt, Drive: snap.Drive, Comment: snap.Comment, Tanks: []sigHistTank{}}
 		for _, t := range snap.Tanks {
-			h.Tanks = append(h.Tanks, sigHistTank{ID: t.ID, Name: t.Name, Ref: t.Ref, Bins: mergePasses(t.Passes)})
+			h.Tanks = append(h.Tanks, sigHistTank{ID: t.ID, Name: t.Name, Ref: t.Ref, Bins: mergePasses(t.Passes),
+				WarmingUp: t.WarmingUp, UpS: t.UpS})
 		}
 		out = append(out, h)
 	}
@@ -1248,6 +1266,7 @@ type sigTankFile struct {
 	Hits    []int64       `json:"hits"`
 	Router  [][3]float64  `json:"router"` // unix ms, dBm, rx Mbit/s
 	Frames  []int64       `json:"frames"`
+	Started int64         `json:"startedAt,omitempty"` // unix ms the tank powered on; 0 = unknown
 }
 
 type sigPassFile struct {
@@ -1330,6 +1349,9 @@ func (st *signalTest) save(r *sigRun) string {
 	for _, id := range r.order {
 		t := r.tanks[id]
 		to := sigTankFile{ID: t.id, Name: t.name, Hits: ms(t.hits), Frames: ms(t.frames)}
+		if !t.startedAt.IsZero() {
+			to.Started = t.startedAt.UnixMilli()
+		}
 		if p := r.tanks[t.partner]; p != nil {
 			to.Partner = p.name
 		}
@@ -1479,6 +1501,9 @@ func loadRunFile(path string) (*sigRun, error) {
 	partners := map[string]string{}
 	for _, tf := range f.Tanks {
 		t := &sigTank{id: tf.ID, name: tf.Name, num: tankNumber(tf.Name), hits: times(tf.Hits), frames: times(tf.Frames), finished: true}
+		if tf.Started > 0 {
+			t.startedAt = time.UnixMilli(tf.Started)
+		}
 		for _, p := range tf.Passes {
 			t.passes = append(t.passes, &sigPass{dir: p.Dir, start: time.UnixMilli(p.StartMs), end: time.UnixMilli(p.EndMs), timedOut: p.TimedOut})
 		}
