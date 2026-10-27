@@ -15,7 +15,9 @@ package main
 //   - viewer fps fine, phone shown fps low: the phone itself.
 // drive_pct and turret_pct say how much of each sample the tank's tracks and
 // turret were running, so a feed that only breaks up while the tank moves
-// points at motor noise rather than the radio link itself.
+// points at motor noise rather than the radio link itself. chip_temp_c is the
+// tank chip's own temperature: tanks send worse for a few minutes after a
+// cold start, and this shows whether that follows the chip warming up.
 //
 // The file lives in the temp folder (RAM on the router, so it is gone after a
 // reboot) and is downloadable at GET /api/video-log. It is rotated at
@@ -38,7 +40,7 @@ import (
 
 const videoLogMaxBytes = 8 << 20
 
-const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct,max_gap_ms," +
+const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct,max_gap_ms,chip_temp_c," +
 	"viewer,viewer_fps,viewer_dropped_per_s,phone_path,phone_shown_fps,phone_recv_fps,phone_decode_ms,phone_page_fps,device_or_note\n"
 
 type videoLog struct {
@@ -166,13 +168,16 @@ func (vl *videoLog) handle(w http.ResponseWriter, r *http.Request) {
 func streamRows(now time.Time, s streamStats) [][]string {
 	ts := now.Format("15:04:05.0")
 	base := []string{ts, "tank", s.Label, "", f1(s.FPSIn), f1(s.KBPerFrame), "", "", "", "",
-		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5)), strconv.Itoa(s.MaxGapMs)}
+		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5)), strconv.Itoa(s.MaxGapMs), ""}
 	if t := s.Tank; t != nil {
 		base[3] = strconv.Itoa(t.RSSI)
 		base[6] = f1(t.FPSSent)
 		base[7] = f1(t.SendMsAvg)
 		base[8] = strconv.Itoa(t.SendMsMax)
 		base[9] = strconv.Itoa(t.CamMisses)
+		if t.ChipC != nil {
+			base[13] = f1(*t.ChipC)
+		}
 	}
 	if len(s.Viewers) == 0 {
 		return [][]string{append(base, "", "", "", "", "", "", "", "", "")}
@@ -200,7 +205,7 @@ func (vl *videoLog) phone(tankLabel string, p phoneVideoStats) {
 	if vl == nil {
 		return
 	}
-	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "",
+	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "", "",
 		viewerName(p.Name), "", "", p.Path, f1(p.ShownFps), f1(p.RecvFps), f1(p.DecodeMs), f1(p.PageFps), p.Device})
 }
 
@@ -221,19 +226,21 @@ type tankVideoHB struct {
 	sendMsSum int
 	sendMsMax int
 	camMisses int
+	chipC     *float64 // the chip's temperature, °C; nil = not reported
 }
 
 // tankLinkStats is the latest heartbeat as shown in /api/stats and the log.
 type tankLinkStats struct {
-	RSSI      int     `json:"rssi"`      // Wi-Fi signal, dBm (closer to 0 is stronger)
-	FPSSent   float64 `json:"fpsSent"`   // frames the tank sent per second
-	SendMsAvg float64 `json:"sendMsAvg"` // average time to push one frame out
-	SendMsMax int     `json:"sendMsMax"` // longest single frame push
-	CamMisses int     `json:"camMisses"` // camera had no frame ready
+	RSSI      int      `json:"rssi"`            // Wi-Fi signal, dBm (closer to 0 is stronger)
+	FPSSent   float64  `json:"fpsSent"`         // frames the tank sent per second
+	SendMsAvg float64  `json:"sendMsAvg"`       // average time to push one frame out
+	SendMsMax int      `json:"sendMsMax"`       // longest single frame push
+	CamMisses int      `json:"camMisses"`       // camera had no frame ready
+	ChipC     *float64 `json:"chipC,omitempty"` // the tank chip's temperature, °C
 }
 
 func (h *tankVideoHB) stats(prevAt time.Time) *tankLinkStats {
-	st := &tankLinkStats{RSSI: h.rssi, SendMsMax: h.sendMsMax, CamMisses: h.camMisses}
+	st := &tankLinkStats{RSSI: h.rssi, SendMsMax: h.sendMsMax, CamMisses: h.camMisses, ChipC: h.chipC}
 	if h.frames > 0 {
 		st.SendMsAvg = float64(h.sendMsSum) / float64(h.frames)
 	}

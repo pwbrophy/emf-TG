@@ -110,7 +110,7 @@ type tankSession struct {
 type tankInfo struct {
 	ID, Name, IP string
 	Flags        tankFlags
-	Video        [3]int // fps, frame size, quality the tank has saved (0 = unknown)
+	Video        [3]int    // fps, frame size, quality the tank has saved (0 = unknown)
 	Boot         string    // how it started and how its camera started (boot.go); "" = old firmware
 	StartedAt    time.Time // when it powered on or restarted (from its hello); zero = unknown
 }
@@ -247,6 +247,8 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			VSend   int  `json:"vsend"`
 			VMax    int  `json:"vmax"`
 			VMiss   int  `json:"vmiss"`
+			// The chip's temperature, °C (firmware from 27 October 2026).
+			Temp *float64 `json:"temp"`
 			// Camera settings the tank has saved (hello only).
 			FPS      *int `json:"fps"`
 			FSize    *int `json:"fsize"`
@@ -311,7 +313,7 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			if sess != nil && msg.RSSI != nil {
 				sess.rssi.Store(int32(*msg.RSSI))
 				tm.rl.get(sess.id).setTankHB(tankVideoHB{at: time.Now(), rssi: *msg.RSSI,
-					frames: msg.VFrames, sendMsSum: msg.VSend, sendMsMax: msg.VMax, camMisses: msg.VMiss})
+					frames: msg.VFrames, sendMsSum: msg.VSend, sendMsMax: msg.VMax, camMisses: msg.VMiss, chipC: msg.Temp})
 			}
 		case "ir_emit_ack", "ir_window_result", "rfid", "pong":
 			if sess != nil && tm.onReport != nil {

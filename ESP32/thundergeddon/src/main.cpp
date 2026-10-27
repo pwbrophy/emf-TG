@@ -1755,16 +1755,19 @@ void loop()
             // rssi = Wi-Fi signal (dBm) and v* = video since the last heartbeat
             // (frames, bytes, total/longest send ms, camera misses): the server
             // logs them per tank to tell a weak radio link from a busy one.
+            // temp = the chip's own temperature sensor (degrees C): tanks send
+            // video worse for their first few minutes after a cold start
+            // (27 October 2026), and this shows whether that follows heat.
             const MjpegServer::Stats vs = mjpeg.takeStats();
             char hb[224];
             snprintf(hb, sizeof(hb),
                      "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u,\"maxblk\":%u,\"rssi\":%d,"
-                     "\"vf\":%u,\"vb\":%u,\"vsend\":%u,\"vmax\":%u,\"vmiss\":%u}",
+                     "\"vf\":%u,\"vb\":%u,\"vsend\":%u,\"vmax\":%u,\"vmiss\":%u,\"temp\":%.1f}",
                      (unsigned long)now, (unsigned)ESP.getFreeHeap(),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      (int)WiFi.RSSI(),
                      (unsigned)vs.frames, (unsigned)vs.bytes, (unsigned)vs.sendMsSum,
-                     (unsigned)vs.sendMsMax, (unsigned)vs.noFrame);
+                     (unsigned)vs.sendMsMax, (unsigned)vs.noFrame, (double)temperatureRead());
             ws.send(hb);
         }
     } else {

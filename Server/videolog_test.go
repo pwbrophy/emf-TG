@@ -21,7 +21,7 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 
 	hb := func(frames int) {
 		sendJSON(t, c, map[string]any{"cmd": "hb", "t": 1, "heap": 100000, "rssi": -71,
-			"vf": frames, "vb": frames * 12000, "vsend": frames * 30, "vmax": 180, "vmiss": 2})
+			"vf": frames, "vb": frames * 12000, "vsend": frames * 30, "vmax": 180, "vmiss": 2, "temp": 41.5})
 	}
 	hb(40)
 	time.Sleep(600 * time.Millisecond)
@@ -32,7 +32,7 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 			break
 		}
 	}
-	if link == nil || link.RSSI != -71 || link.SendMsAvg != 30 || link.SendMsMax != 180 || link.CamMisses != 2 || link.FPSSent < 5 || link.FPSSent > 20 {
+	if link == nil || link.RSSI != -71 || link.SendMsAvg != 30 || link.SendMsMax != 180 || link.CamMisses != 2 || link.ChipC == nil || *link.ChipC != 41.5 || link.FPSSent < 5 || link.FPSSent > 20 {
 		t.Fatalf("tank link stats = %+v", link)
 	}
 
@@ -48,7 +48,7 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 		t.Fatalf("want header + 2 lines, got:\n%s", b)
 	}
 	cols := len(strings.Split(lines[0], ","))
-	if !strings.Contains(lines[1], ",tank,Desert-01,-71,19.5,11.7,") || !strings.Contains(lines[1], ",2,62,0,0,Alice,19.5,") {
+	if !strings.Contains(lines[1], ",tank,Desert-01,-71,19.5,11.7,") || !strings.Contains(lines[1], ",2,62,0,0,41.5,Alice,19.5,") {
 		t.Errorf("tank line: %s", lines[1])
 	}
 	if !strings.Contains(lines[2], ",phone,Desert-01,") || !strings.Contains(lines[2], `"Pixel 7, Android 14"`) {
