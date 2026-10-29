@@ -1242,12 +1242,15 @@ func (st *signalTest) handleCSV(w http.ResponseWriter, r *http.Request) {
 
 // ── Saved runs ───────────────────────────────────────────────────────────────
 
-// sigKeepBytes: saved runs are kept until together they pass this size; then
-// the oldest go. A pair's run is about 150 KB, ten tanks' about 1 MB, so
-// this holds hundreds; the router's flash has about 150 MB free. (It used to
-// keep only 30 runs, and on 29 October 2026 a busy evening of tests pushed
-// out every Desert-01 run.)
-const sigKeepBytes = 64 << 20
+// The newest sigKeepRuns saved runs are kept; older ones are deleted. A
+// pair's run is about 120 KB and ten tanks' about 1 MB, and the router's
+// flash has about 150 MB free, so sigKeepBytes is a safety cap in case many
+// big runs pile up. (It used to keep only 30 runs, and on 29 October 2026 a
+// busy evening of tests pushed out every Desert-01 run.)
+const (
+	sigKeepRuns  = 200
+	sigKeepBytes = 100 << 20
+)
 
 var sigRunFileRe = regexp.MustCompile(`^thundergeddon-sigtest-\d{8}-\d{6}\.json$`)
 
@@ -1335,7 +1338,7 @@ func (st *signalTest) saveCommentsLocked() error {
 }
 
 // save writes a finished run's raw data as JSON and drops the oldest runs
-// once all of them pass sigKeepBytes. A run stopped early isn't kept. Returns the file's
+// beyond sigKeepRuns (or sigKeepBytes in all). A run stopped early isn't kept. Returns the file's
 // name. Caller holds st.mu.
 func (st *signalTest) save(r *sigRun) string {
 	if st.dir == "" || r.phase != "done" {
@@ -1384,7 +1387,7 @@ func (st *signalTest) save(r *sigRun) string {
 		if fi, err := os.Stat(filepath.Join(st.dir, run.File)); err == nil {
 			total += fi.Size()
 		}
-		if i == 0 || total <= sigKeepBytes {
+		if i == 0 || (i < sigKeepRuns && total <= sigKeepBytes) {
 			continue
 		}
 		old := run

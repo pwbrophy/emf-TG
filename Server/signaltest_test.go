@@ -419,7 +419,8 @@ func TestWarmingUpIsMarked(t *testing.T) {
 	check(saved, "saved")
 }
 
-// Runs are kept by total size, not count: forty small runs all stay.
+// The newest sigKeepRuns runs are kept: forty all stay, and past the limit
+// only the oldest go.
 func TestManyRunsAreKept(t *testing.T) {
 	st := newSignalTest(nil, nil, "", t.TempDir())
 	t0 := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
@@ -434,5 +435,13 @@ func TestManyRunsAreKept(t *testing.T) {
 	}
 	if n := len(st.listRunsLocked()); n != 40 {
 		t.Errorf("%d runs kept, want 40", n)
+	}
+	for i := 40; i < sigKeepRuns+5; i++ {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		st.save(&sigRun{started: at, ended: at.Add(time.Minute), phase: "done", name: sigRunName(at), tanks: map[string]*sigTank{}})
+	}
+	runs := st.listRunsLocked()
+	if len(runs) != sigKeepRuns || runs[len(runs)-1].File != sigRunName(t0.Add(5*time.Minute)) {
+		t.Errorf("%d runs kept, oldest %s", len(runs), runs[len(runs)-1].File)
 	}
 }
