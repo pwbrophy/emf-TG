@@ -56,14 +56,14 @@ finally {
     Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED -ErrorAction SilentlyContinue
 }
 
-# The tanks' hello token is the same file Unity uses. It is gitignored, so in a
+# The tanks' hello token lives next to this script. It is gitignored, so in a
 # worktree it only exists in the main checkout: look there too.
 $tokenFile = $null
-$candidates = @("$PSScriptRoot\..\Unity\EMF_Server\ws_token.txt")
+$candidates = @("$PSScriptRoot\ws_token.txt")
 try {
     $commonDir = & git rev-parse --path-format=absolute --git-common-dir 2>$null
     if ($LASTEXITCODE -eq 0 -and $commonDir) {
-        $candidates += Join-Path (Split-Path $commonDir) "Unity\EMF_Server\ws_token.txt"
+        $candidates += Join-Path (Split-Path $commonDir) "Server\ws_token.txt"
     }
 } catch { }
 foreach ($c in $candidates) {
@@ -77,7 +77,7 @@ if ($tokenFile) {
     Copy-Item $tokenFile build/ws_token.txt -Force
     $files += "build/ws_token.txt"
 } else {
-    Write-Host "==> No Unity\EMF_Server\ws_token.txt found: the router will accept any tank (as Unity does without it)"
+    Write-Host "==> No Server\ws_token.txt found: the router keeps any token it already has, otherwise it accepts any tank"
 }
 
 Write-Host "==> Uploading"

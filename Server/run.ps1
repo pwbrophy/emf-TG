@@ -25,4 +25,4 @@ $addr = if ($Lan) { ":8088" } else { "127.0.0.1:8088" }
 Write-Host "Open http://localhost:8088   (Ctrl+C to stop)" -ForegroundColor Green
 # Only with -Lan can tanks reach it; don't answer their discovery otherwise.
 $discovery = if ($Lan) { "30560" } else { "0" }
-& ./build/thundergeddon.exe -addr $addr -discovery-port $discovery -token-file ..\Unity\EMF_Server\ws_token.txt
+& ./build/thundergeddon.exe -addr $addr -discovery-port $discovery -token-file ws_token.txt

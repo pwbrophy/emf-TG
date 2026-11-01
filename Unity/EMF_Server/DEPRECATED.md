@@ -6,4 +6,4 @@ The game now runs on the Go server in [`Server/`](../../Server/README.md), on th
 
 This project is kept for reference only. The Go server also answers tank discovery, so don't run this server on the Thundergeddon network at the same time.
 
-**Don't delete this folder yet:** `Server/run.ps1` and `Server/deploy.ps1` still read the tanks' hello token from `ws_token.txt` here.
+The tanks' hello token has moved to `Server/ws_token.txt`.

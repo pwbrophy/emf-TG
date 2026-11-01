@@ -46,7 +46,7 @@ The robot must be powered on and connected to Wi-Fi for OTA to work. The `platfo
 **Secrets (never commit):** three gitignored files hold the shared credentials and must exist on every machine (desktop + laptop) — copy from their `.template` siblings on a fresh clone:
 - `ESP32/thundergeddon/src/secrets.h` — Wi-Fi creds, `OTA_PASSWORD`, `WS_HELLO_TOKEN` (baked into firmware)
 - `ESP32/thundergeddon/secrets.ini` — `ota_password` used by `pio run --target upload` and `flash_all.ps1`; must equal `OTA_PASSWORD` in secrets.h
-- `Unity/EMF_Server/ws_token.txt` — must equal `WS_HELLO_TOKEN` in secrets.h; the Go server refuses robot `hello` messages without the matching `tok` field (and accepts every tank if it has no token file). `Server/run.ps1` and `Server/deploy.ps1` still read it from this path, the one part of the old Unity folder still in use, so don't delete it
+- `Server/ws_token.txt` — must equal `WS_HELLO_TOKEN` in secrets.h; the Go server refuses robot `hello` messages without the matching `tok` field (and accepts every tank if it has no token file). `Server/run.ps1` uses it directly and `Server/deploy.ps1` uploads it to the router
 
 To rotate the OTA password: change it in `secrets.h`, flash the fleet with the OLD password via `.\flash_all.ps1 -Auth <old-password>`, then update `secrets.ini` to the new value.
 

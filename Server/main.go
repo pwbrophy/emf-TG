@@ -40,7 +40,7 @@ var startedAt = time.Now()
 
 func main() {
 	addr := flag.String("addr", ":8088", "address to listen on")
-	tokenFile := flag.String("token-file", "ws_token.txt", "file holding the tanks' shared hello token (same as Unity's ws_token.txt)")
+	tokenFile := flag.String("token-file", "ws_token.txt", "file holding the tanks' shared hello token")
 	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
 	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
 	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")

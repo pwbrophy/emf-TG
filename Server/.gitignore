@@ -1,1 +1,4 @@
 build/
+
+# Shared tank hello token (must match WS_HELLO_TOKEN in firmware secrets.h)
+ws_token.txt*
