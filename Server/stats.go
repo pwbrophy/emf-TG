@@ -24,17 +24,18 @@ type viewerStats struct {
 }
 
 type streamStats struct {
-	ID         string         `json:"id"`
-	Label      string         `json:"label"` // tank name, where known
-	Sources    int            `json:"sources"`
-	FPSIn      float64        `json:"fpsIn"`
-	KBPerFrame float64        `json:"kbPerFrame"`
-	MbitIn     float64        `json:"mbitIn"`
-	Tank       *tankLinkStats `json:"tank,omitempty"` // the tank's own report: Wi-Fi signal, send times
-	MaxGapMs   int            `json:"maxGapMs"`       // longest wait between two frames arriving
-	DrivePct   float64        `json:"drivePct"`       // share of the sample the tracks were running
-	TurretPct  float64        `json:"turretPct"`      // share of the sample the turret was turning
-	Viewers    []viewerStats  `json:"viewers"`
+	ID         string           `json:"id"`
+	Label      string           `json:"label"` // tank name, where known
+	Sources    int              `json:"sources"`
+	FPSIn      float64          `json:"fpsIn"`
+	KBPerFrame float64          `json:"kbPerFrame"`
+	MbitIn     float64          `json:"mbitIn"`
+	Tank       *tankLinkStats   `json:"tank,omitempty"`   // the tank's own report: Wi-Fi signal, send times
+	Router     *routerLinkStats `json:"router,omitempty"` // the router's view of the tank: signal, rates
+	MaxGapMs   int              `json:"maxGapMs"`         // longest wait between two frames arriving
+	DrivePct   float64          `json:"drivePct"`         // share of the sample the tracks were running
+	TurretPct  float64          `json:"turretPct"`        // share of the sample the turret was turning
+	Viewers    []viewerStats    `json:"viewers"`
 }
 
 type statsSnapshot struct {
@@ -46,13 +47,14 @@ type statsSnapshot struct {
 type statsSampler struct {
 	rl     *relay
 	vlog   *videoLog
+	link   *routerLink
 	health tankHistory // recent samples per tank for the check on Start; guarded by mu
 	mu     sync.Mutex
 	latest statsSnapshot
 }
 
-func startStats(rl *relay, vlog *videoLog) *statsSampler {
-	ss := &statsSampler{rl: rl, vlog: vlog}
+func startStats(rl *relay, vlog *videoLog, link *routerLink) *statsSampler {
+	ss := &statsSampler{rl: rl, vlog: vlog, link: link}
 	go ss.loop()
 	return ss
 }
@@ -66,6 +68,7 @@ func (ss *statsSampler) loop() {
 		last = time.Now()
 
 		snap := statsSnapshot{IntervalS: secs, System: sys.sample()}
+		links := ss.link.take()
 		var all []streamStats // including idle ones: the check on Start needs "no frames" too
 		for _, s := range ss.rl.all() {
 			frames := s.framesIn.Swap(0)
@@ -79,6 +82,7 @@ func (ss *statsSampler) loop() {
 				FPSIn:     float64(frames) / secs,
 				MbitIn:    float64(bytes) * 8 / secs / 1e6,
 				Tank:      s.tankLink(),
+				Router:    links[macFromTankID(s.id)],
 				MaxGapMs:  int(gap.Milliseconds()),
 				DrivePct:  min(100, drive.Seconds()/secs*100),
 				TurretPct: min(100, turret.Seconds()/secs*100),

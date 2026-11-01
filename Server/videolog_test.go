@@ -40,6 +40,7 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 	vl := openVideoLog(path)
 	defer vl.close()
 	vl.rows(streamRows(time.Now(), streamStats{Label: "Desert-01", FPSIn: 19.5, KBPerFrame: 11.7, Tank: link, DrivePct: 62.4,
+		Router:  &routerLinkStats{DBm: -20.5, RxMbitAvg: 58.5, RxMbitMin: 11, Rx11bPct: 25, TxMbitMin: 65},
 		Viewers: []viewerStats{{Who: "Alice", FPS: 19.5}}})...)
 	vl.phone("Desert-01", phoneVideoStats{Path: "img", ShownFps: 18, PageFps: 60, Name: "Alice", Device: "Pixel 7, Android 14"})
 	b, _ := os.ReadFile(path)
@@ -48,7 +49,7 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 		t.Fatalf("want header + 2 lines, got:\n%s", b)
 	}
 	cols := len(strings.Split(lines[0], ","))
-	if !strings.Contains(lines[1], ",tank,Desert-01,-71,19.5,11.7,") || !strings.Contains(lines[1], ",2,62,0,0,41.5,Alice,19.5,") {
+	if !strings.Contains(lines[1], ",tank,Desert-01,-71,19.5,11.7,") || !strings.Contains(lines[1], ",2,62,0,0,41.5,-20.5,58.5,11.0,25,65.0,Alice,19.5,") {
 		t.Errorf("tank line: %s", lines[1])
 	}
 	if !strings.Contains(lines[2], ",phone,Desert-01,") || !strings.Contains(lines[2], `"Pixel 7, Android 14"`) {
@@ -56,6 +57,27 @@ func TestVideoLogFromHeartbeat(t *testing.T) {
 	}
 	if n := len(strings.Split(lines[1], ",")); n != cols {
 		t.Errorf("tank line has %d columns, header %d", n, cols)
+	}
+}
+
+// The router's readings add up over a sample, then start afresh.
+func TestRouterLinkWindow(t *testing.T) {
+	l := &routerLink{win: map[string]*routerWindow{}}
+	const mac = "90:70:69:18:F2:9C"
+	l.add(parseAssocList(mac + "  -20 dBm / unknown\n\tRX: 72.0 MBit/s, MCS 7, 20MHz    0 Pkts.\n\tTX: 65.0 MBit/s, MCS 7, 20MHz    0 Pkts.\n"))
+	l.add(parseAssocList(mac + "  -30 dBm / unknown\n\tRX: 11.0 MBit/s     0 Pkts.\n\tTX: 1.0 MBit/s     0 Pkts.\n"))
+	l.add(parseAssocList(mac + "  -25 dBm / unknown\n\tRX: 6.0 MBit/s     0 Pkts.\n\tTX: 72.0 MBit/s, MCS 7, 20MHz    0 Pkts.\n"))
+	l.add(parseAssocList(mac + "  -25 dBm / unknown\n\tRX: 13.0 MBit/s, MCS 1, 20MHz    0 Pkts.\n\tTX: 72.0 MBit/s, MCS 7, 20MHz    0 Pkts.\n"))
+	got := l.take()[mac]
+	if got == nil || got.DBm != -25 || got.RxMbitAvg != 25.5 || got.RxMbitMin != 6 || got.Rx11bPct != 25 || got.TxMbitMin != 1 {
+		t.Fatalf("readings = %+v", got)
+	}
+	if again := l.take(); len(again) != 0 {
+		t.Errorf("second take = %v", again)
+	}
+	var none *routerLink
+	if none.take() != nil {
+		t.Error("nil routerLink should have no readings")
 	}
 }
 

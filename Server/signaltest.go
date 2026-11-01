@@ -174,6 +174,8 @@ type sigRouter struct {
 	at     time.Time
 	dbm    int
 	rxMbit float64
+	txMbit float64
+	rx11b  bool // rxMbit is an 802.11b rate
 }
 
 func (st *signalTest) active() bool {
@@ -558,11 +560,12 @@ func macFromTankID(id string) string {
 
 var (
 	assocStationRe = regexp.MustCompile(`^([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s+(-?\d+) dBm`)
-	assocRxRe      = regexp.MustCompile(`^\s*RX:\s*([\d.]+) MBit/s`)
+	assocRxRe      = regexp.MustCompile(`^\s*RX:\s*([\d.]+) MBit/s(.*)`)
+	assocTxRe      = regexp.MustCompile(`^\s*TX:\s*([\d.]+) MBit/s`)
 )
 
 // parseAssocList reads `iwinfo <iface> assoclist`: per station, its signal
-// and the rate the router receives it at.
+// and the rates the router receives it at and sends to it.
 func parseAssocList(out string) map[string]sigRouter {
 	res := map[string]sigRouter{}
 	cur := ""
@@ -578,10 +581,19 @@ func parseAssocList(out string) map[string]sigRouter {
 		if m := assocRxRe.FindStringSubmatch(line); m != nil && cur != "" {
 			s := res[cur]
 			s.rxMbit, _ = strconv.ParseFloat(m[1], 64)
+			s.rx11b = is11bRate(s.rxMbit) && !strings.Contains(m[2], "MCS")
+			res[cur] = s
+		} else if m := assocTxRe.FindStringSubmatch(line); m != nil && cur != "" {
+			s := res[cur]
+			s.txMbit, _ = strconv.ParseFloat(m[1], 64)
 			res[cur] = s
 		}
 	}
 	return res
+}
+
+func is11bRate(mbit float64) bool {
+	return mbit == 1 || mbit == 2 || mbit == 5.5 || mbit == 11
 }
 
 // ── Beams and angles ─────────────────────────────────────────────────────────

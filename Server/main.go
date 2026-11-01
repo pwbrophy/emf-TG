@@ -74,7 +74,7 @@ func main() {
 	rl := newRelay()
 	vlog := openVideoLog(*videoLogFile)
 	defer vlog.close()
-	stats := startStats(rl, vlog)
+	stats := startStats(rl, vlog, startRouterLink(*wifiIface, rl))
 	tanks := newTankManager(rl, *tokenFile, httpPort)
 	tanks.vlog = vlog
 	g := newGame(tanks, *settingsFile)

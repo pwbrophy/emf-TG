@@ -18,6 +18,9 @@ package main
 // points at motor noise rather than the radio link itself. chip_temp_c is the
 // tank chip's own temperature: tanks send worse for a few minutes after a
 // cold start, and this shows whether that follows the chip warming up.
+// The router_ columns are the router's own view of the tank (routerlink.go):
+// a low router_rx_mbit_min means the tank is taking airtime from the others,
+// and router_rx_11b_pct says how much of that was at an 802.11b rate.
 //
 // The file lives in the temp folder (RAM on the router, so it is gone after a
 // reboot) and is downloadable at GET /api/video-log. It is rotated at
@@ -41,6 +44,7 @@ import (
 const videoLogMaxBytes = 8 << 20
 
 const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct,max_gap_ms,chip_temp_c," +
+	"router_dbm,router_rx_mbit_avg,router_rx_mbit_min,router_rx_11b_pct,router_tx_mbit_min," +
 	"viewer,viewer_fps,viewer_dropped_per_s,phone_path,phone_shown_fps,phone_recv_fps,phone_decode_ms,phone_page_fps,device_or_note\n"
 
 type videoLog struct {
@@ -168,7 +172,7 @@ func (vl *videoLog) handle(w http.ResponseWriter, r *http.Request) {
 func streamRows(now time.Time, s streamStats) [][]string {
 	ts := now.Format("15:04:05.0")
 	base := []string{ts, "tank", s.Label, "", f1(s.FPSIn), f1(s.KBPerFrame), "", "", "", "",
-		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5)), strconv.Itoa(s.MaxGapMs), ""}
+		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5)), strconv.Itoa(s.MaxGapMs), "", "", "", "", "", ""}
 	if t := s.Tank; t != nil {
 		base[3] = strconv.Itoa(t.RSSI)
 		base[6] = f1(t.FPSSent)
@@ -178,6 +182,13 @@ func streamRows(now time.Time, s streamStats) [][]string {
 		if t.ChipC != nil {
 			base[13] = f1(*t.ChipC)
 		}
+	}
+	if r := s.Router; r != nil {
+		base[14] = f1(r.DBm)
+		base[15] = f1(r.RxMbitAvg)
+		base[16] = f1(r.RxMbitMin)
+		base[17] = strconv.Itoa(int(r.Rx11bPct + 0.5))
+		base[18] = f1(r.TxMbitMin)
 	}
 	if len(s.Viewers) == 0 {
 		return [][]string{append(base, "", "", "", "", "", "", "", "", "")}
@@ -205,7 +216,7 @@ func (vl *videoLog) phone(tankLabel string, p phoneVideoStats) {
 	if vl == nil {
 		return
 	}
-	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "", "",
+	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		viewerName(p.Name), "", "", p.Path, f1(p.ShownFps), f1(p.RecvFps), f1(p.DecodeMs), f1(p.PageFps), p.Device})
 }
 

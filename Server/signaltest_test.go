@@ -34,10 +34,10 @@ func TestParseAssocList(t *testing.T) {
 	TX: 1.0 MBit/s                                     0 Pkts.
 `
 	got := parseAssocList(out)
-	if a := got["90:70:69:18:F2:9C"]; a.dbm != -16 || a.rxMbit != 72 {
+	if a := got["90:70:69:18:F2:9C"]; a.dbm != -16 || a.rxMbit != 72 || a.txMbit != 72 || a.rx11b {
 		t.Errorf("first station %+v", a)
 	}
-	if b := got["90:70:69:09:B6:D0"]; b.dbm != -41 || b.rxMbit != 6.5 {
+	if b := got["90:70:69:09:B6:D0"]; b.dbm != -41 || b.rxMbit != 6.5 || b.txMbit != 1 || b.rx11b {
 		t.Errorf("second station %+v", b)
 	}
 }
