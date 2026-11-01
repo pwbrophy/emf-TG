@@ -12,25 +12,22 @@ GitHub: **https://github.com/pwbrophy/emf-TG** (branch: `master`)
 
 ## Working with Claude Code — Required Practices
 
-### Unity: always use Coplay MCP
-The project has the `com.coplaydev.coplay` MCP plugin installed. **After every Unity C# change, call `mcp__coplay-mcp__check_compile_errors` to verify the project compiles clean before reporting success.** Use `mcp__coplay-mcp__get_unity_logs` to read the Unity console when diagnosing runtime errors. Never rely solely on reading `.cs` files to confirm correctness — always verify through Coplay.
-
-### Branches, worktrees, and how they interact with Unity and OTA
+### Branches, worktrees, and how they interact with the server and OTA
 
 Each Claude Code session works on a dedicated branch (`claude/<random-name>`) inside a git worktree at `.claude/worktrees/<name>/`. This means the session's file edits exist **only in that worktree directory** — the main project tree (`F:\Data\Thundergeddon\EMF_Project\`) stays on `master` and is untouched.
 
-**Critical consequence for Unity and OTA:**
-- **Unity** (running from the main project tree) reads source from `Unity/EMF_Server/Assets/` in the **main** tree, not the worktree. Unity will not see C# changes made in the worktree until they are merged to master and the main tree is updated.
+**Critical consequence for the Go server and OTA:** both build from whichever directory you run them in.
+- **Go server:** `Server/run.ps1` and `Server/deploy.ps1` build the `Server/` folder they are run from.
 - **PlatformIO OTA** compiles from `ESP32/thundergeddon/src/` in whatever directory `pio run` is invoked from. If you run OTA from the worktree path, it compiles worktree sources. If you run from the main project path, it compiles master. **Always run OTA from the main project path after merging**, or explicitly `cd` into the worktree path when testing pre-merge.
 
 **Workflow:**
 1. Make all code changes inside the worktree (Claude does this automatically).
-2. Verify Unity compilation via `mcp__coplay-mcp__check_compile_errors` — Coplay MCP connects to the running Unity editor which reads the **main** tree. To test a Unity C# change, the worktree file must first be copied to the main tree or the branch merged to master. Run OTA from the worktree path to test firmware pre-merge.
+2. After Go changes, run `go test ./...` in `Server/`. Run OTA from the worktree path to test firmware pre-merge.
 3. Commit changes on the `claude/<name>` branch, then merge to `master` (or raise a PR).
-4. After merge, Unity and OTA both pick up changes from master automatically.
+4. After merge, builds from the main tree pick up the changes.
 5. Old `claude/` branches and their worktree directories can be deleted once their commits are reachable from master. Use `git log --oneline <branch> ^master` to verify before deleting.
 
-**Always commit and merge to master at the end of every session.** The user cannot see Unity C# changes or web client changes until they are on master. Never leave work only in the worktree branch — always finish by committing, merging to master, and confirming the merge succeeded. If the main tree has an unstaged copy of a file (e.g. from a compile-check copy), run `git restore <file>` in the main tree before merging.
+**Always commit and merge to master at the end of every session.** The user cannot see server, web page or firmware changes until they are on master. Never leave work only in the worktree branch — always finish by committing, merging to master, and confirming the merge succeeded. If the main tree has an unstaged copy of a file, run `git restore <file>` in the main tree before merging.
 
 ### ESP32 firmware: always upload via OTA
 Never ask the user to connect a USB cable. After every firmware change, upload using the `thundergeddon_ota` PlatformIO environment, which pushes over Wi-Fi via ArduinoOTA:
@@ -42,14 +39,14 @@ pio run -e thundergeddon_ota --target upload
 
 The robot must be powered on and connected to Wi-Fi for OTA to work. The `platformio.ini` `[env:thundergeddon_ota]` section is configured with:
 - `upload_protocol = espota`
-- `upload_port = thunder-9CF218697090.local` (mDNS hostname — may need replacing with the robot's IP if mDNS doesn't resolve on Windows; check Unity's robot list or serial output for the IP)
+- `upload_port = thunder-9CF218697090.local` (mDNS hostname — may need replacing with the robot's IP if mDNS doesn't resolve on Windows; see the IP table below or serial output)
 - `--auth=${secrets.ota_password}` (from `secrets.ini` — see **Secrets** below; NEVER commit the actual password, this repo is public)
 - `--port=3232`
 
 **Secrets (never commit):** three gitignored files hold the shared credentials and must exist on every machine (desktop + laptop) — copy from their `.template` siblings on a fresh clone:
 - `ESP32/thundergeddon/src/secrets.h` — Wi-Fi creds, `OTA_PASSWORD`, `WS_HELLO_TOKEN` (baked into firmware)
 - `ESP32/thundergeddon/secrets.ini` — `ota_password` used by `pio run --target upload` and `flash_all.ps1`; must equal `OTA_PASSWORD` in secrets.h
-- `Unity/EMF_Server/ws_token.txt` — must equal `WS_HELLO_TOKEN` in secrets.h; Unity rejects robot `hello` messages without the matching `tok` field (warns and accepts everything if the file is missing)
+- `Unity/EMF_Server/ws_token.txt` — must equal `WS_HELLO_TOKEN` in secrets.h; the Go server refuses robot `hello` messages without the matching `tok` field (and accepts every tank if it has no token file). `Server/run.ps1` and `Server/deploy.ps1` still read it from this path, the one part of the old Unity folder still in use, so don't delete it
 
 To rotate the OTA password: change it in `secrets.h`, flash the fleet with the OLD password via `.\flash_all.ps1 -Auth <old-password>`, then update `secrets.ini` to the new value.
 
@@ -96,187 +93,41 @@ pio run -e thundergeddon_ota_tg_r10 --target upload   # TG   192.168.8.110  Jung
 
 **Thundergeddon** is a hybrid physical/digital RC tank battle game for EMF Festival. Small robotic tanks fight in the real world while software handles game logic, player connections, and robot control.
 
-The system has three components:
+The system has two components:
 
 | Component | Location | Language | Role |
 |-----------|----------|----------|------|
-| Unity admin app | `Unity/EMF_Server/` | C# | Authoritative server, operator UI, game state, hit logic |
+| Go server | `Server/` | Go + JS | Authoritative server on the GL-MT3000 hub: game state, hit logic, video relay, host console, phone web pages |
 | ESP32 firmware | `ESP32/` | C++ | Robot controller: motors, camera, IR, LEDs, comms |
-| Web player client | `Webserver/ThundergeddonWeb/` | ASP.NET Core + JS | Browser UI for players on phones; joystick, video, HUD |
 
-### New Go server (`Server/`) — in progress
+**Retired, don't work here:** `Unity/EMF_Server/` (the old server, see its `DEPRECATED.md`) and `Webserver/ThundergeddonWeb/` (the old ASP.NET phone client, which only worked through it).
 
-A replacement for Unity + ASP.NET, written in Go so it runs on the **GL-MT3000 router** (linux/arm64) as well as on a PC. It speaks the existing tank protocol (UDP discovery, `/esp32` WebSocket, pulls `:81/stream` into a video relay) and runs the real-time player flow from `Docs/ui-flow.drawio`: join → queue → lobby (choose tank) → countdown → drive/turret/fire → game over → back of the queue, plus a host console (no host password for now: tapping Host Game makes that phone the host, taking over from any other; players can be asked for a game password set in Server Settings). Shooting is ported from Unity: `Server/ir.go` (the ACK-driven IR handshake from `IrSlotScheduler`) and `Server/combat.go` (damage multipliers, death → return to base → RFID base respawn, invulnerability, kill points, winner, stats from `GameService`/`PlayerWebSocketServer`), with tests in `combat_test.go`; defaults and base RFID UIDs come from the Unity scene. Sides are called **alliances** (not teams) in code and UI, to match the planned turn-based mode where an alliance can hold several teams; the host can add/remove/rename/recolour them (`Settings.Alliances`), and a tank joins the one its name starts with (Desert-01 → "desert") unless the host chooses. Capture points and RFID tags are host-editable lists too (`Settings.CapturePoints`, `Settings.RfidTags` with `use` = `base:<id>` / `point:<id>`); unknown tags a tank reads are added to the list. Host page names follow the flowchart (Server Settings, Server Lobby, Server Gameplay Control, Server Config). Players' link `/join` skips the title and menu. Players choose an alliance (not a tank) and get a free tank; tanks glow a lobby colour (`lobby.go`); cameras stream in the lobby (every tank) and during games (tanks playing), via `setStreaming`. Check on Start (`Server/health.go`): when the host taps Start, each chosen tank's last 20 s of video figures (no frames, low fps, freezes, slow sends compared with the other tanks, weak or much weaker Wi-Fi) can raise a confirm popup naming the tank, the problem and "restart it or check its antenna is tight"; the host can start anyway, and on Cancel it offers to restart the warned tanks. Signal Quality Test (`Server/signaltest.go`, Server Config → Signal Quality Test): finds turret angles where a tank's Wi-Fi breaks down (turret/hull board coupling; NS1020CA sheets under the turret board). Tanks stand in pairs hull front to hull front ~1.5 m apart (1↔6, 2↔7, 3↔8, 4↔9, 5↔10, by the number their name ends with), turrets forward; every connected turret turns `signalTest.turns` times at `signalTest.speed`, then back if `signalTest.reverse`, and stops facing forward. With `signalTest.drive` (motors test) the tanks stand lifted, tracks off the ground, and the tracks run a game-like pattern while the turrets turn (`Server/signaltest_drive.go`: full speed, creeping, arcs, spins, reversing, stops with eased changes, made from a fixed seed by a built-in splitmix64 so it is identical on every tank and every run; 180 s, then repeats; the run records `drivePattern` = `game-1`, change that name if the pattern changes); such runs are marked `drive` in the saved run, run list, history and CSV, labelled "driving" on the page, and the averages panel shows Turret only / With driving separately. Angle: partners take turns lighting the left barrel (`ir_emit_left`, continuous until `ir_emit_stop`) while the other listens (`ir_listen_window` 250 ms); a hit on a listener's front sensors (N/NE/NW, mask 0x83) marks its partner's turret at 0°; beam middles are the marks, angles interpolate between them and extrapolate at the tank's own pace; a missed beam (gap ≈ 2 turns) is filled in. Measured per 10°: the router's view of the tank (`iwinfo ra0 assoclist` every 250 ms: signal, receive rate; `-wifi-iface`, only on the router) and video (frames per second reaching the hub, longest wait between frames, from the relay's per-frame recording). Cameras stream during the test; it can't run during a game and a game can't start during it. Each run records when every tank powered on (`startedAt`, from its hello's `up`; `tankInfo.StartedAt`); a tank on for less than `sigWarmUp` (5 min) is marked `warmingUp` (page: "on N min" and a note; a tank's first minutes are often worse, 27 Oct 2026). The averages include those runs (the user's choice, 29 Oct). Only finished runs are kept: a run stopped early isn't saved, and stopped runs older versions saved are deleted when the runs are listed. Results: `/api/sigtest` (JSON, polled by the page's radial charts; their radius is curved, `SIG_CURVE` = 2, so the good end near the edge gets more room), `/api/sigtest.csv`, and a raw JSON per run (`thundergeddon-sigtest-<time>.json`) kept on flash in a `sigtest` folder next to the settings file (`/etc/thundergeddon/sigtest` on the router; `-sigtest-dir`; the newest 200 kept (`sigKeepRuns`; also capped at 100 MB in all, `sigKeepBytes`), then the oldest go; older ones in the temp folder are copied there at start). After a restart the newest saved run is shown. `/api/sigtest/runs` lists saved runs and `?run=<file>` on `/api/sigtest` / `.csv` loads one (re-binned from the raw data); the page's **Compare with** picker draws an earlier run in grey under the current one, with "was" figures in the table. The host can comment on each run ("bigger antennas"...): `host_sigtest_comment` {id: run file, text}, kept in `comments.json` in the same folder and shown in the picker and the grey run's legend. Below the results, **Average of saved runs** draws a chart per tank (by name), outlined in white, with orange average, red worst and green best lines (both directions together) over its runs from a From run to a To run picked beside each chart (lists of that tank's runs with their comments; remembered per browser, `tg_sig_avg_<name>` as start times; its first/last run = open end, so new runs join in); runs without IR marks are left out; beside each chart, a quality bar (`sigAvgQuality`: each 10° of each run scores 0-1 by the worse of its fps (12→0, 24→1) and longest frame wait (400 ms→0, 100 ms→1); quality = half the all-round average, half the weakest 40° (`SIG_SECTOR`), both averaged over runs; green ≥90%, amber ≥60%, red below; also shows both parts and where the weak spot is) and figures for the chosen runs (`sigAvgStats`: runs used, dates, typical and worst fps, angles under 20 fps, run-to-run spread, frame waits, router signal). Data: `/api/sigtest/history` (every saved run, each tank's passes merged by `mergePasses`). While the page is open every camera streams (`host_sigtest_align` every 5 s, lease 15 s, ignored during games) and **Line up the turrets** shows each tank's feed (pair order, centre line) with hold-to-turn buttons: fast 0.6 and slow (the test's speed); a positive turret speed turns left. Hold-to-turn is ignored while the test runs. Fake tanks (`-fake-tanks 10`) simulate turning turrets and partner IR for trying it without hardware. Tank start-up reports (`Server/boot.go`): each hello says why and when the tank started (`rst`: power-on, software = OTA or Restart, brownout, crash...), how Wi-Fi connected (time, tries, channel, signal, access point) and its firmware build; `cam_status` says how its camera start went. Both are logged (system log and video log rows of kind `boot`/`camera`) and shown on the host's tank page, which also has a **Restart** button (`host_tank_restart` → firmware `reboot`). Also ported: capture points and LED beacons (`combat.go`, `beacons.go`), pause and host tank tools (`hosttools.go`), Advanced tuning + presets, 2-player crews, and the spectator display (`display.go` + `web/display.html`, the old page with a swapped connection). The phone app (`app.js`) uses one frame on every screen: tabs, Back bottom-left, Next/Start bottom-right; keep that consistent. Own folder and port **8088**, but it answers tank discovery on UDP 30560 too — **Unity and this server must not both run on the Thundergeddon network**. The in-game screen is `Server/web/play.html`, a copy of the old `Webserver/.../wwwroot/index.html` kept identical on purpose (the user wants the old controls and look exactly); only its connection layer changed (`TGHub` turns `/ws` state snapshots into the old SignalR events). Change the gameplay UI there, not in `app.js`. Go-server additions on it: a cog (top right, under the host's HOST button in one column `#tg-topright`) opens a SCREEN SIZE menu that zooms the HUD and controls via `--ui-scale` (40-100%, starting at 70% where the main pointer is a mouse/trackpad and 100% on phones, saved per browser as `tg_ui_scale`, RESET forgets it; the joystick/turret thumbs divide their offsets by `uiScale`), for players on a computer where the phone-sized HUD is huge. Video diagnostics: `Server/videolog.go` writes a CSV every 2 s per streaming tank (Wi-Fi signal, tank send times, fps into the hub, what each viewer got) plus each phone's own 30 s report, and `drive_pct`/`turret_pct` (share of the sample the tracks/turret were running, from the drive and turret commands the hub sent; tracks stop 500 ms after the last command, like the tank's watchdog); it lives in the temp folder (RAM on the router) and downloads from `/api/video-log`. Use it to tell a weak antenna (low `rssi_dbm`) from a busy channel (good signal but high `tank_send_ms_avg`) from a slow phone link (`viewer_dropped_per_s`) from a slow phone (`phone_shown_fps`), and see whether a feed only breaks up while the tank is moving (motor noise). Viewer sockets keep at most ~16 KB unsent (`TCP_NOTSENT_LOWAT`, `sendqueue_linux.go`) so a slow phone gets fewer frames rather than old ones. Turret stabilisation (`Server/stabilise.go`, STAB button on `play.html`) is open loop on the hub: the tanks have no gyro, so it estimates hull yaw from the drive commands it relays and counter-turns the turret; tuning is `Tuning.Stab*` (Advanced → Stabiliser). Game rules are server-side in `Server/game.go` with tests in `game_test.go` (`go test ./...`); a player can hold several tanks later (turn-based mode is planned). Web pages in `Server/web/` are embedded in the binary — rebuild after editing them. `Server/run.ps1` runs it locally; `Server/deploy.ps1` builds, uploads over SSH (`scp -O`, no USB) and restarts it on the router (`/opt/thundergeddon`, procd service `/etc/init.d/thundergeddon`, logs via `logread -e thundergeddon`). See `Server/README.md`. Go is installed at `C:\Program Files\Go\bin` (add to PATH in shells opened before the install).
+### Go server (`Server/`)
+
+The game server, written in Go so it runs on the **GL-MT3000 router** (linux/arm64) as well as on a PC. It speaks the tank protocol (UDP discovery, `/esp32` WebSocket, pulls `:81/stream` into a video relay) and runs the real-time player flow from `Docs/ui-flow.drawio`: join → queue → lobby (choose tank) → countdown → drive/turret/fire → game over → back of the queue, plus a host console (no host password for now: tapping Host Game makes that phone the host, taking over from any other; players can be asked for a game password set in Server Settings). Shooting: `Server/ir.go` (the ACK-driven IR handshake) and `Server/combat.go` (damage multipliers, death → return to base → RFID base respawn, invulnerability, kill points, winner, stats), with tests in `combat_test.go`. Sides are called **alliances** (not teams) in code and UI, to match the planned turn-based mode where an alliance can hold several teams; the host can add/remove/rename/recolour them (`Settings.Alliances`), and a tank joins the one its name starts with (Desert-01 → "desert") unless the host chooses. Capture points and RFID tags are host-editable lists too (`Settings.CapturePoints`, `Settings.RfidTags` with `use` = `base:<id>` / `point:<id>`); unknown tags a tank reads are added to the list. Host page names follow the flowchart (Server Settings, Server Lobby, Server Gameplay Control, Server Config). Players' link `/join` skips the title and menu. Players choose an alliance (not a tank) and get a free tank; tanks glow a lobby colour (`lobby.go`); cameras stream in the lobby (every tank) and during games (tanks playing), via `setStreaming`. Check on Start (`Server/health.go`): when the host taps Start, each chosen tank's last 20 s of video figures (no frames, low fps, freezes, slow sends compared with the other tanks, weak or much weaker Wi-Fi) can raise a confirm popup naming the tank, the problem and "restart it or check its antenna is tight"; the host can start anyway, and on Cancel it offers to restart the warned tanks. Signal Quality Test (`Server/signaltest.go`, Server Config → Signal Quality Test): finds turret angles where a tank's Wi-Fi breaks down (turret/hull board coupling; NS1020CA sheets under the turret board). Tanks stand in pairs hull front to hull front ~1.5 m apart (1↔6, 2↔7, 3↔8, 4↔9, 5↔10, by the number their name ends with), turrets forward; every connected turret turns `signalTest.turns` times at `signalTest.speed`, then back if `signalTest.reverse`, and stops facing forward. With `signalTest.drive` (motors test) the tanks stand lifted, tracks off the ground, and the tracks run a game-like pattern while the turrets turn (`Server/signaltest_drive.go`: full speed, creeping, arcs, spins, reversing, stops with eased changes, made from a fixed seed by a built-in splitmix64 so it is identical on every tank and every run; 180 s, then repeats; the run records `drivePattern` = `game-1`, change that name if the pattern changes); such runs are marked `drive` in the saved run, run list, history and CSV, labelled "driving" on the page, and the averages panel shows Turret only / With driving separately. Angle: partners take turns lighting the left barrel (`ir_emit_left`, continuous until `ir_emit_stop`) while the other listens (`ir_listen_window` 250 ms); a hit on a listener's front sensors (N/NE/NW, mask 0x83) marks its partner's turret at 0°; beam middles are the marks, angles interpolate between them and extrapolate at the tank's own pace; a missed beam (gap ≈ 2 turns) is filled in. Measured per 10°: the router's view of the tank (`iwinfo ra0 assoclist` every 250 ms: signal, receive rate; `-wifi-iface`, only on the router) and video (frames per second reaching the hub, longest wait between frames, from the relay's per-frame recording). Cameras stream during the test; it can't run during a game and a game can't start during it. Each run records when every tank powered on (`startedAt`, from its hello's `up`; `tankInfo.StartedAt`); a tank on for less than `sigWarmUp` (5 min) is marked `warmingUp` (page: "on N min" and a note; a tank's first minutes are often worse, 27 Oct 2026). The averages include those runs (the user's choice, 29 Oct). Only finished runs are kept: a run stopped early isn't saved, and stopped runs older versions saved are deleted when the runs are listed. Results: `/api/sigtest` (JSON, polled by the page's radial charts; their radius is curved, `SIG_CURVE` = 2, so the good end near the edge gets more room), `/api/sigtest.csv`, and a raw JSON per run (`thundergeddon-sigtest-<time>.json`) kept on flash in a `sigtest` folder next to the settings file (`/etc/thundergeddon/sigtest` on the router; `-sigtest-dir`; the newest 200 kept (`sigKeepRuns`; also capped at 100 MB in all, `sigKeepBytes`), then the oldest go; older ones in the temp folder are copied there at start). After a restart the newest saved run is shown. `/api/sigtest/runs` lists saved runs and `?run=<file>` on `/api/sigtest` / `.csv` loads one (re-binned from the raw data); the page's **Compare with** picker draws an earlier run in grey under the current one, with "was" figures in the table. The host can comment on each run ("bigger antennas"...): `host_sigtest_comment` {id: run file, text}, kept in `comments.json` in the same folder and shown in the picker and the grey run's legend. Below the results, **Average of saved runs** draws a chart per tank (by name), outlined in white, with orange average, red worst and green best lines (both directions together) over its runs from a From run to a To run picked beside each chart (lists of that tank's runs with their comments; remembered per browser, `tg_sig_avg_<name>` as start times; its first/last run = open end, so new runs join in); runs without IR marks are left out; beside each chart, a quality bar (`sigAvgQuality`: each 10° of each run scores 0-1 by the worse of its fps (12→0, 24→1) and longest frame wait (400 ms→0, 100 ms→1); quality = half the all-round average, half the weakest 40° (`SIG_SECTOR`), both averaged over runs; green ≥90%, amber ≥60%, red below; also shows both parts and where the weak spot is) and figures for the chosen runs (`sigAvgStats`: runs used, dates, typical and worst fps, angles under 20 fps, run-to-run spread, frame waits, router signal). Data: `/api/sigtest/history` (every saved run, each tank's passes merged by `mergePasses`). While the page is open every camera streams (`host_sigtest_align` every 5 s, lease 15 s, ignored during games) and **Line up the turrets** shows each tank's feed (pair order, centre line) with hold-to-turn buttons: fast 0.6 and slow (the test's speed); a positive turret speed turns left. Hold-to-turn is ignored while the test runs. Fake tanks (`-fake-tanks 10`) simulate turning turrets and partner IR for trying it without hardware. Tank start-up reports (`Server/boot.go`): each hello says why and when the tank started (`rst`: power-on, software = OTA or Restart, brownout, crash...), how Wi-Fi connected (time, tries, channel, signal, access point) and its firmware build; `cam_status` says how its camera start went. Both are logged (system log and video log rows of kind `boot`/`camera`) and shown on the host's tank page, which also has a **Restart** button (`host_tank_restart` → firmware `reboot`). Also: capture points and LED beacons (`combat.go`, `beacons.go`), pause and host tank tools (`hosttools.go`), Advanced tuning + presets, 2-player crews, and the spectator display (`display.go` + `web/display.html`, the old page with a swapped connection). The phone app (`app.js`) uses one frame on every screen: tabs, Back bottom-left, Next/Start bottom-right; keep that consistent. Port **8088**; it answers tank discovery on UDP 30560, so **only run one copy on a network** (e.g. not `run.ps1 -Lan` while the router's copy is running) or they fight over the tanks. The in-game screen is `Server/web/play.html`, a copy of the old `Webserver/.../wwwroot/index.html` kept identical on purpose (the user wants the old controls and look exactly); only its connection layer changed (`TGHub` turns `/ws` state snapshots into the old SignalR events). Change the gameplay UI there, not in `app.js`. Go-server additions on it: a cog (top right, under the host's HOST button in one column `#tg-topright`) opens a SCREEN SIZE menu that zooms the HUD and controls via `--ui-scale` (40-100%, starting at 70% where the main pointer is a mouse/trackpad and 100% on phones, saved per browser as `tg_ui_scale`, RESET forgets it; the joystick/turret thumbs divide their offsets by `uiScale`), for players on a computer where the phone-sized HUD is huge. Video diagnostics: `Server/videolog.go` writes a CSV every 2 s per streaming tank (Wi-Fi signal, tank send times, fps into the hub, what each viewer got) plus each phone's own 30 s report, and `drive_pct`/`turret_pct` (share of the sample the tracks/turret were running, from the drive and turret commands the hub sent; tracks stop 500 ms after the last command, like the tank's watchdog); it lives in the temp folder (RAM on the router) and downloads from `/api/video-log`. Use it to tell a weak antenna (low `rssi_dbm`) from a busy channel (good signal but high `tank_send_ms_avg`) from a slow phone link (`viewer_dropped_per_s`) from a slow phone (`phone_shown_fps`), and see whether a feed only breaks up while the tank is moving (motor noise). Viewer sockets keep at most ~16 KB unsent (`TCP_NOTSENT_LOWAT`, `sendqueue_linux.go`) so a slow phone gets fewer frames rather than old ones. Turret stabilisation (`Server/stabilise.go`, STAB button on `play.html`) is open loop on the hub: the tanks have no gyro, so it estimates hull yaw from the drive commands it relays and counter-turns the turret; tuning is `Tuning.Stab*` (Advanced → Stabiliser). Game rules are server-side in `Server/game.go` with tests in `game_test.go` (`go test ./...`); a player can hold several tanks later (turn-based mode is planned). Web pages in `Server/web/` are embedded in the binary — rebuild after editing them. `Server/run.ps1` runs it locally; `Server/deploy.ps1` builds, uploads over SSH (`scp -O`, no USB) and restarts it on the router (`/opt/thundergeddon`, procd service `/etc/init.d/thundergeddon`, logs via `logread -e thundergeddon`). See `Server/README.md`. Go is installed at `C:\Program Files\Go\bin` (add to PATH in shells opened before the install).
 
 ## Architecture
 
-The **laptop** runs both the Unity app (operator/admin) and the Webserver (player web page). It is the **authoritative server** for all game state.
+The Go server on the **GL-MT3000 hub** is the **authoritative server** for all game state.
 
 ```
-Phones (browsers) ──SignalR──► ASP.NET (port 5000) ──WebSocket──► Unity (port 8081)
-                                                                        │
-Robots (ESP32) ──────────────────────WebSocket──────────────────────────┘
-                                     (commands ↓, status/hits ↑, port 8080)
+Phones (browsers) ──/ws + video──► Go server on the hub (port 8088) ──/esp32 WebSocket──► Robots (ESP32)
+                                     ▲                                (commands ↓, status/hits ↑)
+                                     └── pulls MJPEG from http://<robot-ip>:81/stream
 ```
 
-- Players join by scanning a QR code that opens the web player page on their phone.
-- The laptop routes commands to robots and resolves hit detection.
-- Each robot streams FPV video to its assigned player (MJPEG at `http://<robot-ip>:81/stream`).
-- Network: EMF Camp's shared Wi-Fi (public event network — design for instability and security).
+- Players join through `http://<hub>:8088/join`, e.g. from a QR code.
+- The server routes commands to robots and resolves hit detection.
+- The server relays each robot's FPV video to the phones watching it.
+- Network: the Thundergeddon network (192.168.8.x) is the hub's own Wi-Fi.
 
 ---
 
-## Unity App (`Unity/EMF_Server/`)
-
-**Open:** Use Unity Hub or open `Unity/EMF_Server/` as a Unity project. The project uses **URP 2D** (Universal Render Pipeline, 2D renderer).
-
-**Build:** File → Build Settings → build for Windows (standalone). No custom build scripts yet.
-
-**Key packages:**
-- `WebSocketSharp` v1.0.3-rc11 — server-side WebSocket. **Not a UPM package; DLL is at `Assets/Plugins/websocket-sharp.dll`** (downloaded from NuGet). Uses `Func<T>` factory API: `AddWebSocketService<T>(path, () => new T { Parent = this })`.
-- `com.coplaydev.coplay` (beta) — Coplay MCP plugin for Unity editor automation
-- `com.unity.inputsystem` — new Input System (EventSystem uses `InputSystemUIInputModule`)
-- `com.unity.render-pipelines.universal` — URP 2D
-- `com.unity.ugui` — includes TextMeshPro. **TMP Essential Resources have been imported** (`Assets/TextMesh Pro/`). Always assign `LiberationSans SDF` font when creating TMP components in editor scripts.
-
-### Unity Architecture
-
-All services are created once in `AppBootstrap` (`[DefaultExecutionOrder(-1000)]`, `DontDestroyOnLoad`) and accessed globally via the static `ServiceLocator`.
-
-**Important:** `AppBootstrap` uses a static `_made` guard to prevent duplicate initialisation across scene loads. This guard is reset via `[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]` so that entering play mode a second time in the same editor session works correctly (relevant when domain reload on play is disabled).
-
-**Service layer (pure C#):**
-
-| Class | Role |
-|-------|------|
-| `ServiceLocator` | Static registry — the only coupling point between systems |
-| `AppBootstrap` | Creates and wires all services at startup |
-| `GameFlow` | State machine: `MainMenu → Lobby → Playing → Ended`, fires `OnPhaseChanged` |
-| `GameState` | Snapshot created at `StartGame()`. Holds `RobotHp`, `TotalDamageDealt`, `DeadRobots`, `WinnerAllianceIndex`, `EndReason` |
-| `GameService` | `StartGame()` seeds HP. `ApplyDamage(shooterId, targetId, dir, players, dir)` applies directional multipliers, fires `OnHpChanged`/`OnRobotDied`/`OnGameWon`. `TimeExpired()` determines winner by survivors then damage. |
-| `GameSettings` | MonoBehaviour on Bootstrap. `MaxHp=100`, `DamagePerHit=25`, `RearMultiplier=3`, `MatchDurationSeconds=180` |
-| `MatchTimer` | MonoBehaviour on Bootstrap. `StartTimer(float)` / `StopTimer()`. Fires `OnTick(float remaining)` and `OnExpired`. |
-| `RobotDirectory` | Live registry of connected robots. Persists callsigns + preferred players to `robots.json`. Raises `OnRobotAdded/Updated/Removed`. `SetAssignedPlayer(robotId, playerName)` validates via `PickAssignedPlayer`. `ClearAssignedPlayer(robotId)` sets to null unconditionally. **`PickAssignedPlayer` only assigns to players who have no robot yet** — it builds a taken-set from current assignments so a second robot never steals a player who is already assigned. |
-| `PlayersService` | Player list (name + alliance). `LoadOrEnsureDefaults` and `EnsureDefaults` are **no-ops** — no Player1/Player2 defaults are seeded. Players are added exclusively when phones join via `PlayerWebSocketServer.HandleJoin`. |
-
-**Network layer:**
-
-| Class | Role |
-|-------|------|
-| `RobotWebSocketServer` | `WebSocketSharp` server at `ws://<ip>:8080/esp32`. Thread-safe `PostMain` queue for Unity safety. Heartbeat timeout sweep every 2s. Auto-starts via `Start()`. Events: `OnPong`, `OnIrEmitAck`, `OnIrWindowResult`. **Important:** `hello` is accepted at any game phase — do not add a phase gate, or robots that reconnect during Playing will never register and all commands will fail. `OnClosed` does NOT remove the robot from `RobotDirectory`; only the heartbeat sweep removes stale entries. |
-| `PlayerWebSocketServer` | `WebSocketSharp` server at `ws://127.0.0.1:8081/players`. Receives join/leave/drive/turret/fire JSON from `UnityBridgeService`. Routes drive+turret to `RobotWebSocketServer`, fire to `ShootingController.RequestFire`. Subscribes to `GameFlow.OnPhaseChanged`, `GameService.OnHpChanged/OnRobotDied/OnGameWon`. On `Playing`: sends `game_started` per connection. Sends `state_update` (HP + timer) per connection at 1 Hz and immediately on HP change. Fires `OnPlayerInput` event for `PlayerInputMonitor`. **`HandleJoin` calls `TryAssignFreeRobotToPlayer` immediately after adding the player**, so any already-connected unassigned robot is auto-assigned to the new player. |
-| `UdpDiscoveryListener` | Background thread on UDP port 30560. Auto-starts via `Start()`. Replies to robot announces with WebSocket URL. Runs during `Lobby` **and** `Playing` (`DiscoveryAllowedIn`) so power-cycled robots can rejoin mid-match. Tracks `_repliedTo` set to suppress per-robot log spam on the 2s broadcast cadence. |
-| `ESP32VideoReceiver` | Receives JPEG byte arrays, decodes into `Texture2D` on a `RawImage`. |
-
-**UI layer:**
-
-| Class | Role |
-|-------|------|
-| `GameFlowPresenter` | Shows/hides panels by `GamePhase`. Wires nav buttons to `GameFlow`. **Note:** wired to `_flow` captured at `OnEnable` — null-safe (`_flow?.Method()`) |
-| `ServerPanelPresenter` | Updates robot count label from `RobotDirectory` events |
-| `RobotSelectionPanel` | Cycle robots. On select: `stream_on + motors_on`. On deselect: `stream_off + motors_off` |
-| `ShootingController` | Realtime fire with 3s per-robot cooldown. On fire: sends `flash_fire` to shooter, then delegates IR to `IrSlotScheduler.EnqueueFire(shooterId)`. Registers as `ServiceLocator.Shooting` on Awake. Public `RequestFire(robotId)` called by `PlayerWebSocketServer` for phone fire inputs. |
-| `IrSlotScheduler` | ACK-driven IR shot queue (`Assets/Scripts/Game/IrSlotScheduler.cs`). One shot executes at a time. Protocol: `ir_emit_left` → wait `ir_emit_ack` → `ir_listen_window` to all enemies (collect b1 masks) → if any b1≠0: `ir_emit_right` + `ir_listen_window` (collect b2 masks) → hit where b1 & b2 ≠ 0 → call `GameService.ApplyDamage`, send `flash_hit`/`set_hp`. |
-| `RobotPingButton` | On PlayingPanel's `PingRow`. Sends `ping` to the selected robot and displays RTT. Subscribes to `RobotWebSocketServer.OnPong`. Wired by `WirePingButton` editor script. |
-| `RobotsPanelPresenter` | Scrollable robot list. Instantiates `Assets/Prefabs/RobotRow.prefab` into `RobotsScrollView/Viewport/Content` (which has `VerticalLayoutGroup` + `ContentSizeFitter`). Each row: Name / IP / Player / Edit button |
-| `PlayersEditorPanel` | Per-player row list. Each row: editable name, alliance dropdown (hardcoded 2), robot dropdown (exclusive — one player per robot), remove button. Requires `PlayerRow.prefab` + `rowContainer` (scroll view Content) wired by `WirePlayersPanel` editor script. |
-| `PlayerRowUI` | Component on `PlayerRow.prefab`. Holds refs to `nameField`, `allianceDropdown`, `robotDropdown`, `removeButton` so `PlayersEditorPanel` doesn't need `Find()` calls. |
-| `DevRobotsToolbar` | Add/remove fake robots for testing. Initialises in `Start()` (not `OnEnable`) — only runs once LobbyPanel becomes active |
-| `GameSettingsPanel` | Three `TMP_InputField`s for MaxHp / DamagePerHit / Duration. Writes directly to `ServiceLocator.GameSettings` |
-| `MatchTimerDisplay` | Subscribes to `MatchTimer.OnTick`. Displays `M:SS`, flashes red in last 10s |
-| `RobotHpPanel` | Subscribes to `GameService.OnHpChanged` / `OnRobotDied`. Dynamically builds HP bar rows in `RowContainer` at runtime |
-| `PlayerInputMonitor` | Subscribes to `PlayerWebSocketServer.OnPlayerInput`. Shows a live row per player in `RowContainer` (VLG + ContentSizeFitter) with name + L/R/turret values, updated every frame. Placed on PlayingPanel. |
-| `EndedPanelPresenter` | Subscribes to `GameFlow.OnPhaseChanged`. On `Ended`: reads `GameState.WinnerAllianceIndex` + `EndReason`, shows result text |
-
-### Scene (`Assets/SampleScene.unity`)
-
-The scene is fully wired:
-
-```
-Bootstrap                    — AppBootstrap, GameSettings, MatchTimer
-Servers                      — RobotWebSocketServer, PlayerWebSocketServer, UdpDiscoveryListener, ESP32VideoReceiver
-Canvas
-  ├── GameFlowPresenter       (wired to all 4 panels + 4 nav buttons)
-  ├── MainMenuPanel           — TitleLabel, SubLabel, ToLobbyButton
-  ├── LobbyPanel              — RobotsPanelPresenter, DevRobotsToolbar, PlayersEditorPanel,
-  │                             ServerPanelPresenter, GameSettingsPanel
-  │     ├── RobotsScrollView/Viewport/Content  (VLG + ContentSizeFitter)
-  │     ├── NumRobotsText, AddFakeRobotButton, RemoveLastRobotButton
-  │     ├── PlayersScrollView/Viewport/Content  (VLG + ContentSizeFitter — rows created at runtime)
-  │     ├── AddPlayerButton, StartGameButton
-  │     └── GameSettingsPanel (MaxHpField, DamageField, DurationField)
-  ├── PlayingPanel            — RobotSelectionPanel, ShootingController, GamePanelPresenter,
-  │                             MatchTimerDisplay, RobotHpPanel, PlayerInputMonitor
-  │     ├── TimerLabel, EndGameButton
-  │     ├── RobotNameLabel, RobotIpLabel, RobotPlayerLabel, RobotAllianceLabel, RobotClientLabel
-  │     ├── PrevRobotButton, NextRobotButton, ClearRobotButton
-  │     ├── RobotHpPanel/RowContainer
-  │     ├── PingRow                            (RobotPingButton, PingButton, PingResult)
-  │     └── InputsScrollView/Viewport/Content  (VLG + ContentSizeFitter — phone inputs)
-  └── EndedPanel              — EndedPanelPresenter, ResultLabel, BackToMenuButton
-EventSystem                  — InputSystemUIInputModule (new Input System)
-```
-
-**Note:** `JoystickBase`, `TurretSlider`, `ShootButton`, `ShootResultLabel`, `CooldownLabel` have been removed from PlayingPanel — tank controls are now driven from phone clients. The operator view shows HP bars and live player inputs instead.
-
-### PlayingPanel runtime builder (`Assets/Scripts/UI/PlayingPanelBuilder.cs`)
-
-`PlayingPanelBuilder` is a `[ExecuteAlways]` `MonoBehaviour` attached to `Canvas/PlayingPanel`. It replaces all the old `RebuildPlayingPanel` editor menu steps — the layout is now built automatically and saved permanently into the scene file.
-
-**How it works:**
-- In **Edit mode**: on first load (or after a recompile), `OnValidate` checks for a hidden sentinel child named `__ppb_v1`. If the sentinel is absent, it destroys all existing children, rebuilds the full UI hierarchy, adds the sentinel, marks the scene dirty, and auto-saves it. Subsequent loads find the sentinel and skip the rebuild.
-- In **Play mode**: always rebuilds fresh (sentinel is ignored).
-- Uses `System.Reflection` (`BindingFlags`) to set `[SerializeField] private` fields on components — no `SerializedObject` needed at runtime.
-
-**To force a rebuild** (e.g. after changing the layout code): bump the constant `BUILT_SENTINEL` in `PlayingPanelBuilder.cs` (e.g. `"__ppb_v1"` → `"__ppb_v2"`). The next recompile will find no matching sentinel, rebuild, and auto-save.
-
-**Why `[ExecuteAlways]` + sentinel instead of `[MenuItem]`:** The old editor menu required a manual "Thundergeddon → 9 Rebuild Playing Panel" step after every layout change. The sentinel approach makes the rebuild fully automatic — it fires on the first recompile after attaching the component, saves the scene, and never touches it again until you explicitly bump the version.
-
----
-
-### Editor scripts (`Assets/Editor/`)
-
-**There is no Thundergeddon editor menu. Do not create menu items. Do not run menu items. Make all changes directly in code.**
-
-Layout and scene wiring is handled automatically by `[ExecuteAlways]` builder components:
-
-| Builder | Attached to | What it does |
-|---------|-------------|--------------|
-| `PlayingPanelBuilder.cs` | `Canvas/PlayingPanel` | Rebuilds PlayingPanel hierarchy on recompile. Bump `BUILT_SENTINEL` constant to force a re-run. |
-| `LobbyLayoutBuilder.cs` | `Canvas/LobbyPanel` | Repositions LobbyPanel children to 3-column layout on recompile. Bump `SENTINEL` constant to force a re-run. |
-
-The only file in `Assets/Editor/` is `LobbyAutoSetup.cs` — an `[InitializeOnLoad]` class that auto-attaches `LobbyLayoutBuilder` to `LobbyPanel` on the first compile after a fresh clone. It is a no-op once the component exists in the scene.
-
-**TMP in editor scripts:** Always create text GameObjects by adding components sequentially, not with the multi-type `new GameObject(name, typeof(A), typeof(B))` constructor — TMP's internal `m_canvasRenderer` won't wire correctly that way. Use:
-```csharp
-var go = new GameObject(name);
-go.transform.SetParent(parent, false);
-go.AddComponent<RectTransform>();
-go.AddComponent<TextMeshProUGUI>(); // [RequireComponent] auto-adds CanvasRenderer
-```
-Always assign the font explicitly: `tmp.font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF.asset")`.
-
-**RectTransform before SetParent:** When building prefab hierarchies in editor scripts, always add `RectTransform` **before** calling `SetParent` on any child that will have one. Adding it after causes Unity's native-side null check to throw "There is no RectTransform attached" when you first set `anchorMin`/`anchorMax`. Pattern:
-```csharp
-var child = new GameObject("Child");
-var childRT = child.AddComponent<RectTransform>(); // add RT FIRST
-child.transform.SetParent(parent, false);          // THEN set parent
-childRT.anchorMin = Vector2.zero;                  // safe to configure now
-```
-
-**Never use `??` with Unity component lookups:** `GetComponent<T>() ?? AddComponent<T>()` uses C# null-coalescing which ignores Unity's fake-null wrapper. Use an explicit `if` check:
-```csharp
-var rt = go.GetComponent<RectTransform>();
-if (rt == null) rt = go.AddComponent<RectTransform>();
-```
-
----
-
-## WebSocket Protocol (Robot ↔ Unity)
+## WebSocket Protocol (Robot ↔ Server)
 
 All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPEG camera data.
 
-**Unity → Robot:**
+**Server → Robot:**
 
 | Command | Fields | Effect |
 |---------|--------|--------|
@@ -296,40 +147,38 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 | `ping` | — | Connectivity test. Robot replies `pong` immediately. |
 | `reboot` | — | Restart the tank (software restart, ~300 ms later; camera and stream stopped first). |
 
-**Robot → Unity:**
+**Robot → Server:**
 
 | Message | Fields | Meaning |
 |---------|--------|---------|
-| `hello` | `id`, `tok`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret`, `fps`, `fsize`, `fquality`, `rfid`, `rfid_recoveries` | Robot registers itself. `tok` is `WS_HELLO_TOKEN` from `secrets.h` — Unity rejects the hello if it doesn't match `ws_token.txt` (auth gate for the open port 8080; disabled if the file is absent). `name` is the human-readable name saved in NVS (empty string if never set). `rfid` is 1/0 (RFID reader answering); `rfid_recoveries` counts reader re-inits since boot — Unity logs an `[RFID]` warning if the reader is down or has recovered. Start-up report (firmware from 20 Oct 2026): `up` (ms since start), `rst` (reset reason), `wifi_ms`, `wifi_tries`, `ch`, `rssi0`, `bssid`, `cal` (`full`: the radio is fully calibrated every start-up), `crash` (summary of the last crash from the core dump in the coredump partition: task, pc, cause, backtrace; reported once, then erased; decode with `xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <addrs>` using the build that crashed), `fw` (build date). |
+| `hello` | `id`, `tok`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret`, `fps`, `fsize`, `fquality`, `rfid`, `rfid_recoveries` | Robot registers itself. `tok` is `WS_HELLO_TOKEN` from `secrets.h` — the server refuses the hello if it doesn't match `ws_token.txt` (auth gate for the tank WebSocket; disabled if it has no token file). `name` is the human-readable name saved in NVS (empty string if never set). `rfid` is 1/0 (RFID reader answering); `rfid_recoveries` counts reader re-inits since boot. Start-up report (firmware from 20 Oct 2026): `up` (ms since start), `rst` (reset reason), `wifi_ms`, `wifi_tries`, `ch`, `rssi0`, `bssid`, `cal` (`full`: the radio is fully calibrated every start-up), `crash` (summary of the last crash from the core dump in the coredump partition: task, pc, cause, backtrace; reported once, then erased; decode with `xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <addrs>` using the build that crashed), `fw` (build date). |
 | `cam_status` | `ok`, `tries`, `err` | Sent when the camera starts (on the first `stream_on`): `CameraController::start` tries up to 3 times. |
 | `hb` | `t`, `heap`, `maxblk`, `rssi`, `vf`, `vb`, `vsend`, `vmax`, `vmiss`, `temp` | Heartbeat every 2 s: millis, free heap and largest free block (memory health), Wi-Fi signal in dBm, video since the last heartbeat (frames sent, bytes, total and longest ms spent sending a frame, camera misses) and the chip's temperature in °C (`temperatureRead()`, firmware from 27 Oct 2026; tanks send worse for a few minutes after a cold start). The Go server logs these per tank in its video log (`chip_temp_c`). |
-| `pong` | — | Reply to `ping`; used by `RobotPingButton` to display RTT |
+| `pong` | — | Reply to `ping`; used by the host's tank tools (`hosttools.go`) |
 | `ir_emit_ack` | — | Shooter acknowledges `ir_emit_left` or `ir_emit_right` |
 | `ir_window_result` | `mask` (uint8) | 8-bit bitmask of triggered IR receivers: bit 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW |
-| `rfid` | `uid` | Tag scanned: 8-char CL1 hex UID (or a text label if the tag carries one). Sent once per tag until it has been out of range ~1 s. Matched against the UID lists in `GameSettings`. |
-| `rfid_status` | `ok` (1/0), `recoveries` | RFID reader lost, re-initialised after a chip reset, or first found after boot. `RfidController` checks the reader every 2 s and re-applies its setup if a power dip / RST glitch reset it — before this, only a reboot recovered it. Unity logs these as `[RFID]` warnings. |
+| `rfid` | `uid` | Tag scanned: 8-char CL1 hex UID (or a text label if the tag carries one). Sent once per tag until it has been out of range ~1 s. Matched against `Settings.RfidTags`. |
+| `rfid_status` | `ok` (1/0), `recoveries` | RFID reader lost, re-initialised after a chip reset, or first found after boot. `RfidController` checks the reader every 2 s and re-applies its setup if a power dip / RST glitch reset it — before this, only a reboot recovered it. |
 
-**Directional damage:** `IrSlotScheduler.ResolveAveragedCardinal` vector-averages the `mask` bits to one of N/W/S/E. `"S"` = rear hit → `RearMultiplier` (default 3×). All other directions → 1×. A hit requires both b1 (left LED) and b2 (right LED) masks to be non-zero for the same enemy.
+**Directional damage:** `resolveCardinal` (`Server/combat.go`) turns the `mask` bits into one of N/W/S/E. `"S"` = rear hit → `RearMultiplier` (default 3×). E/W = side hit → `SideMultiplier` (default 1.5×). N → 1×. A hit requires both b1 (left LED) and b2 (right LED) masks to be non-zero for the same enemy.
 
 ## UDP Discovery Protocol
 
 - Robot broadcasts `{"robotId":"<MAC12>","callsign":""}` to UDP port 30560 every 2s
-- Server (Unity `UdpDiscoveryListener`) replies unicast: `{"ws":"ws://<ip>:8080/esp32"}`
-- Discovery is active in `Lobby` **and** `Playing`, and stopped in `MainMenu`/`Ended`. It must stay on during `Playing`: the firmware never persists the WebSocket URL, so a robot that power-cycles (or drops its socket) mid-match can only get back in via a discovery reply. `RobotWebSocketServer`'s `hello` handler is the real join gate — do not re-narrow discovery to Lobby only.
+- The server (`runDiscovery` in `Server/tanks.go`) replies unicast: `{"ws":"ws://<ip>:8088/esp32"}` (capture-point beacons, which send `"kind":"beacon"`, get `/beacon` instead)
+- Discovery answers in every game phase and `hello` has no phase gate. Keep it that way: the firmware never persists the WebSocket URL, so a robot that power-cycles (or drops its socket) mid-match can only get back in via a discovery reply.
 
 ---
 
 ## Game Logic
 
-**Deathmatch (MVP):**
-- Two teams; last team standing, or most tanks alive when timer expires, wins
-- Tiebreak: most total damage dealt (tracked in `GameState.TotalDamageDealt`)
-- IR hit detection: 8 directional receivers; rear hit = 3× damage multiplier
-- 3-second fire cooldown per tank (enforced in `ShootingController`)
-- `GameService.ApplyDamage` → updates `RobotHp`, fires `OnHpChanged`, checks win condition
-- `GameService.TimeExpired` → counts alive robots per alliance, uses damage as tiebreaker
-- On robot death: motors off, robot greyed in HP panel, `OnRobotDied` event fires
-- `GameFlow.StartGame()` starts `MatchTimer`; `GameFlow.EndGame()` stops it
+**Real-time game** (`Server/game.go`, `Server/combat.go`; defaults in `Server/settings.go`):
+- IR hit detection: 8 directional receivers. A hit does `DamagePerHit` (25), ×3 from behind, ×1.5 from the side
+- 3-second fire cooldown (`FireCooldownMs`); games last 5 minutes (`MatchSeconds`)
+- At 0 HP a tank explodes (motors off for `ExplosionSeconds`), then may drive but not fire until it scans its own alliance's base tag, which respawns it at full HP. Scanning your own base while alive refills your HP. After either, the tank can't be hurt for `InvulnerableSeconds`
+- Scanning a capture point's tag takes it for your alliance, which then earns points while holding it
+- Each kill earns the killer's alliance `PointsPerKill` (25); reaching `PointsToWin` (300) wins at once
+- When time runs out, the alliance with more points wins; on a tie, more tanks still in the fight, then more damage dealt
 
 **Tank LED behaviour:**
 - Blue WS2812Bs = current HP (proportional)
@@ -340,88 +189,6 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 - Phase 1 (0–300 ms): ease-in sweep 300 → 3000 Hz, volume 0 → 128
 - Phase 2 (300–400 ms): silent gap
 - Phase 3 (400–900 ms): static that fades out; centre frequency descends 8000 → 150 Hz (blast leaving the tank); block length shrinks 20 ms → 1 ms; linear volume fade 128 → 0
-
----
-
-## Not Yet Implemented
-
-- **RobotTestPanel** — subsystem test buttons (drive, turret sweep, flash, IR) in Lobby
-- **`PetersUtils.GetLocalIPAddress()`** — referenced in `RobotWebSocketServer` and `UdpDiscoveryListener`; must pick LAN IPv4 (avoids loopback/VPN)
-
-## Known Issues / Gotchas
-
-- **Windows Firewall blocking port 8080** — If the robot can't connect via WebSocket (sends UDP announces, gets replies, but no `hello` appears in Unity console), two things are required:
-  1. Add a port-allow rule: `netsh advfirewall firewall add rule name="UnityRobotWS" dir=in action=allow protocol=TCP localport=8080`
-  2. **Delete the Unity.exe Block rule** — Windows auto-creates a per-app Block rule for Unity.exe when you first run it on a Public network (e.g. Google Home Wi-Fi). This Block rule silently drops all inbound TCP SYNs to Unity processes, overriding the port-allow rule above. Fix by running as admin: `netsh advfirewall firewall delete rule name="Unity 6000.4.10f1 Editor" dir=in` (repeat for any other Unity version shown). Alternatively, set the Wi-Fi network profile to **Private** (Settings → Network & Internet → Wi-Fi → click the network → Network profile type → Private), which avoids the Public-profile Block rule entirely.
-  - **AP isolation on Google Home Wi-Fi** — The router blocks 255.255.255.255 UDP broadcasts between Wi-Fi clients, so robots never receive normal UDP discovery replies from the laptop. Workaround already in place: `UdpDiscoveryListener` unicast-pushes the WebSocket URL to `_knownRobotIps` every 2 s (set in Inspector or via `SetRobotIps` editor script). Static IPs vary by network — see table below. BFG network (desktop PC): 192.168.86.x. Thundergeddon network (laptop): 192.168.8.x. Both use the same last octet per robot.
-- **Robot re-registration after disconnect** — `RobotWebSocketServer.OnClosed` must NOT call `_dir.Remove()`. If it does, the robot re-enters the directory via UDP `Upsert` with no WebSocket session, and all commands silently fail (`FAILED motors_on`, `FAILED ping`). Only the heartbeat timeout sweep removes stale directory entries.
-- **`hello` is accepted in Lobby and Playing only** — The `hello` handler rejects robots in MainMenu and Ended. New robots must join during Lobby; robots that drop Wi-Fi mid-match can reconnect during Playing. Do not widen this to all phases or robots can join a finished game.
-- **WebSocketSharp must bind to 0.0.0.0** — `new WebSocketServer(Port)` (port-only constructor) is used instead of `new WebSocketServer("ws://ip:port")`. Binding to a specific IP in WebSocketSharp can silently reject connections.
-- **ArduinoWebsockets Host header missing port** — WebSocketSharp 400s on `Host: 192.168.86.197` (no port). The library patch above fixes this. Root cause: ArduinoWebsockets `generateHandshake()` takes only host (no port), so the call site must pre-concatenate `host:port`.
-
----
-
-## Web Player Client (`Webserver/ThundergeddonWeb/`)
-
-ASP.NET Core 8 minimal API + SignalR. Run with `dotnet run` from `Webserver/ThundergeddonWeb/`.
-Serves on `http://0.0.0.0:5000` (all interfaces). Players navigate to `http://<laptop-ip>:5000` on their phone.
-
-### Files
-
-| File | Role |
-|------|------|
-| `Program.cs` | Registers SignalR, `UnityBridgeService` (singleton + hosted), static files, hub route |
-| `Hubs/GameHub.cs` | SignalR hub. `JoinLobby(name)`, `SendDrive(l,r)`, `SendTurret(speed)`, `Fire()`. `OnDisconnectedAsync` sends leave. |
-| `Services/UnityBridgeService.cs` | `BackgroundService`. `ClientWebSocket` connects to `ws://127.0.0.1:8081/players`. Reconnects every 3s on failure. Routes inbound Unity messages (`player_list`, `game_started`, `state_update`, `you_are_dead`, `game_over`) to correct SignalR clients. `SendToUnity(object)` serialises to JSON. |
-| `wwwroot/index.html` | Mobile-first dark-theme SPA with 5 screens (see below). Uses `@microsoft/signalr` from unpkg CDN. |
-| `wwwroot/display.html` | Operator/spectator display page (`display v7`). Navigate to `http://<laptop-ip>:5000/display.html` on a second screen. Connects via SignalR (`DisplayUpdate`, `DisplayEvent`, `SpectateUpdate`, `GameOver`, `GamePaused`/`GameResumed` events — read-only, does not call `JoinLobby`). Shows: lobby overlay with QR code (fetches LAN IP from `/api/serverip`), team points tug-of-war bar, event log with TTS announcer (mutable), per-alliance HP rows with capture point circles (North/Centre/South), FPV spectate overlay (MJPEG via `/api/robot-stream` proxy), and game-paused overlay. XSS-safe: all player names/callsigns pass through `escHtml()`. |
-| `appsettings.json` | `"Urls": "http://0.0.0.0:5000"` |
-
-### Phone SPA screens
-
-| Screen | Trigger | Content |
-|--------|---------|---------|
-| `screen-join` | Initial / on disconnect | Name input + Join button. **Player name persisted in `localStorage['tg_player_name']`** and auto-filled on load. Portrait allowed. |
-| `screen-lobby` | SignalR connected + joined | Spinning indicator + live player list (`LobbyUpdate`). Portrait allowed. |
-| `screen-playing` | `GameStarted` event | Fullscreen MJPEG stream + HP bar (top) + joystick (bottom-left) + turret pill (bottom-right) + FIRE button (bottom-centre) + timer (top-centre). **Landscape enforced** (`body.game-active` class triggers `#rotate-notice` in portrait). Auto-enters fullscreen on game start. |
-| `screen-dead` | `YouAreDead` event | Overlay on playing screen: "YOU ARE DEAD" |
-| `screen-gameover` | `GameOver` event | Winner team + reason + Play Again button |
-
-**On SignalR `onclose`** (all reconnect attempts exhausted): `returnToJoin('Server connection lost.')` is called — clears all game state, cancels rAF loop, blanks video stream, returns to `screen-join`.
-
-**Controls:**
-- **Joystick** — pointer events, circular base, thumb snaps to centre on release. Tank-drive: `l = clamp(y+x, -1,1)`, `r = clamp(y-x, -1,1)`. Sends `SendDrive` via SignalR at 20 Hz.
-- **Turret pill** — horizontal draggable thumb, springs to centre on release. Sends `SendTurret` on change.
-- **FIRE button** — sends `Fire()` via SignalR. 3 s client-side cooldown visual (countdown overlay).
-
-### WebSocket protocol (ASP.NET ↔ Unity port 8081)
-
-**ASP.NET → Unity:**
-```json
-{"cmd":"join",   "name":"Alice", "connectionId":"abc"}
-{"cmd":"leave",  "connectionId":"abc"}
-{"cmd":"drive",  "connectionId":"abc", "l":0.5,  "r":-0.3}
-{"cmd":"turret", "connectionId":"abc", "speed":0.7}
-{"cmd":"fire",   "connectionId":"abc"}
-```
-
-**Unity → ASP.NET:**
-```json
-{"cmd":"player_list",  "players":["Alice","Bob"]}
-{"cmd":"game_started", "connectionId":"abc", "callsign":"Thunder1", "videoUrl":"http://…:81/stream", "hp":100, "maxHp":100}
-{"cmd":"state_update", "connectionId":"abc", "hp":75, "maxHp":100, "timer":142.0, "cooldown":0.0}
-{"cmd":"you_are_dead", "connectionId":"abc"}
-{"cmd":"game_over",    "winnerTeam":"Alliance 1", "reason":"elimination"}
-```
-
-`player_list`, `you_are_dead`, `game_started`, `state_update` are forwarded to specific SignalR clients by `connectionId`. `game_over` is broadcast to all.
-
-### To run
-```
-cd Webserver/ThundergeddonWeb
-dotnet run
-```
-Then open `http://<your-ip>:5000` on the phone.
 
 ---
 
@@ -506,7 +273,7 @@ DRV8833 INx truth table:
 | `IrController.h` | LEDC carrier on GPIO39/40 (ch4+5/timer1) for TX; PCA9555 port 0 + GPIO14 INT for 8-dir RX. |
 | `LedController.h` | 6× WS2812B on GPIO38; HP bar in blue, fire flash white, hit flash red. |
 | `CameraController.h` | PCLK=8, XCLK=16 (corrected from old code). The driver is always initialised at VGA (the largest size offered) because esp32-camera sizes its JPEG buffers at init and never resizes them; the chosen size is then set on the sensor. |
-| `MjpegServer.h` | esp_http_server MJPEG stream on port 81 (`http://<robot-ip>:81/stream`). Phones connect directly. |
+| `MjpegServer.h` | esp_http_server MJPEG stream on port 81 (`http://<robot-ip>:81/stream`). The server pulls it and relays it to phones. |
 | `OtaSupport.h` | ArduinoOTA. Hostname `thunder-<MAC12>`, password `OTA_PASSWORD` from `secrets.h`, port 3232. Stops camera + disables motors before update. |
 | `main.cpp` | Wires all modules. Handles `drive`, `turret`, `motors_on/off`, `stream_on/off`, `flash_fire`, `flash_hit`, `set_hp`, `ir_emit_left`, `ir_emit_right`, `ir_emit_stop`, `ir_listen_window`, `ping`. Sends `hello`, `hb`, `pong`, `ir_emit_ack`, `ir_window_result`. |
 
@@ -519,7 +286,7 @@ DRV8833 INx truth table:
 
 ### ArduinoWebsockets library patch — auto-applied at build time
 
-The ArduinoWebsockets library (gilmaimon, v0.5.4) sends `Host: <ip>` in the WebSocket upgrade request, omitting the port. **WebSocketSharp 1.0.3 rejects this with 400 Bad Request** for any non-standard port (i.e. not 80/443) — so without the patch below, robots build clean but silently fail to connect to Unity.
+The ArduinoWebsockets library (gilmaimon, v0.5.4) sends `Host: <ip>` in the WebSocket upgrade request, omitting the port. The old server's WebSocket library (WebSocketSharp 1.0.3) rejected this with 400 Bad Request for any non-standard port, which is why this patch exists. The build still applies it.
 
 **This patch is now applied automatically** by [`scripts/patch_websockets.py`](ESP32/thundergeddon/scripts/patch_websockets.py), wired into both env sections via `extra_scripts = pre:scripts/patch_websockets.py` in `platformio.ini`. The script runs at script-load time and again as a pre-link action, is idempotent, and rewrites the file inside `.pio/libdeps/<env>/ArduinoWebsockets/src/websockets_client.cpp`. The library itself is pinned in `lib_deps` to commit `26eecea` (tag `0.5.4`) so the anchor line is stable.
 
