@@ -1399,7 +1399,7 @@ function signalTestPage() {
   }).join('');
   return `<div class="card"><h3>Set up</h3>
     <ol class="hint sig-steps">
-      <li>Stand the tanks in pairs, hull front to hull front, about 1.5&nbsp;m apart. Leave a good gap between pairs, so each tank's partner is the only one straight ahead.</li>
+      <li>Stand the tanks in pairs, hull front to hull front, about 1.5&nbsp;m apart. Several pairs can run together: only one barrel is lit at a time, so they can't confuse each other.</li>
       <li>Point every turret exactly forward: use the cameras below.</li>
       <li>Start: every turret turns slowly round, then back, and stops facing forward again. Each time a turret points at its partner, the partner's IR sensors mark 0&deg;.</li>
     </ol>
@@ -1523,7 +1523,8 @@ function sigLiveHTML() {
   if (d.state === 'none') return button + emptyNote('No test run yet.');
   const words = { 'warm-up': 'Starting…', turning: 'Turning', stopping: 'Stopping…', done: 'Finished', stopped: 'Stopped early: not saved' };
   let html = button + `<div class="card"><h3>${esc(words[d.state] || d.state)} &middot; ${Math.round(d.elapsedS)} s${d.drive ? ' &middot; with driving' : ''}</h3>
-    <p class="hint">Started ${esc(sigWhen(d.startedAt))}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
+    <p class="hint">Started ${esc(sigWhen(d.startedAt))}. ${(d.tanks || []).length} tanks on air${
+      d.irEveryS ? `; each listens for its partner every ${d.irEveryS.toFixed(2)}&nbsp;s` : ''}.${d.routerOk ? '' : ` Router view: ${esc(d.routerNote || 'waiting')}.`}</p>
     ${d.run && d.state !== 'stopped' ? sigCommentBox(d.run, d.comment, 'Comment on this run') : ''}
     ${d.note ? `<p class="hint">${esc(d.note)}</p>` : ''}
     ${(() => {
@@ -1575,16 +1576,23 @@ function sigAvgRange(id) {
 // IR angle marks are left out (their angles are guesses).
 // SIG_KINDS: the kinds of run the averages keep apart.
 const SIG_KINDS = [['turret', 'Turret only'], ['drive', 'With driving']];
+// SIG_AIRS: a busy channel is a different test, so its runs are kept apart too.
+const SIG_AIRS = [['pair', '2 tanks on air'], ['busy', '3 or more on air']];
 
 function sigAvgKind() {
   return segChoice('sigavgkind', SIG_KINDS);
 }
 
+function sigAvgAir() {
+  return segChoice('sigavgair', SIG_AIRS);
+}
+
 function sigAvgTanks() {
   const tanks = new Map();
   const driving = sigAvgKind() === 'drive';
+  const busy = sigAvgAir() === 'busy';
   for (const r of sigHistory || []) {
-    if (!!r.drive !== driving) continue;
+    if (!!r.drive !== driving || r.tanks.length > 2 !== busy) continue;
     for (const t of r.tanks) {
       // By name: that's the tank, even if its board has been swapped.
       if (!tanks.has(t.name)) tanks.set(t.name, { id: t.name, name: t.name, runs: [], skipped: 0 });
@@ -1783,13 +1791,14 @@ function sigAveragesHTML(m) {
   const kind = sigAvgKind();
   return `<div class="card sig-avg-card"><h3>Average of saved runs</h3>
     ${seg('sigavgkind', SIG_KINDS, kind)}
+    ${seg('sigavgair', SIG_AIRS, sigAvgAir())}
     <p class="hint">Each tank's ${kind === 'drive' ? 'driving' : 'turret-only'} runs between the two dates beside its chart, both directions together:
     <span class="sig-key avg">average</span>, <span class="sig-key worst">worst</span> and <span class="sig-key best">best</span> at each angle.
     Runs without IR angle marks are left out. Shows the measure chosen above.
     <b>Quality</b>: how playable the video is. Each 10&deg; of each run scores by the worse of its frame rate (24&nbsp;fps and up = full marks, 12 or less = none)
     and its longest wait between frames (100&nbsp;ms or less = full, 400&nbsp;ms or more = none). Half the score is all round the circle, half is the
     weakest 40&deg;, where a turret can sit for a whole game. Green from 90%, amber from 60%.</p>
-    ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote(kind === 'drive' ? 'No runs with driving yet.' : 'No turret-only runs yet.')}</div>`;
+    ${tiles ? `<div class="sig-avg-list">${tiles}</div>` : emptyNote('No runs of this kind yet.')}</div>`;
 }
 
 // A From or To run was picked: redraw that tank's chart and figures now.

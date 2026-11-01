@@ -13,10 +13,12 @@ package main
 // apart (1↔6, 2↔7, 3↔8, 4↔9, 5↔10), turrets forward. Each time a turret
 // points at its partner, the partner's front IR sensors see its barrel: that
 // moment is 0°. In between, the angle is interpolated in time, so each tank's
-// own speed (and any slowing as it goes) is taken into account. Partners
-// take turns, a few times a second: one keeps its barrel lit while the other
-// listens, so no tank listens to its own beam. Only the front sensors count,
-// so another pair's beam sweeping past from the side is ignored.
+// own speed (and any slowing as it goes) is taken into account. The tanks
+// take turns: only one barrel is lit in the whole room, and only its partner
+// listens, so one pair can't mark another pair's beam (they all see each
+// other: tried with three pairs, 1 November 2026). Only the front sensors
+// count. A tank's listens come further apart the more tanks there are; the
+// page shows how far, and a beam needs one inside it (at speed 0.15, about 1 s).
 //
 // Measured, by angle:
 //   - the router's view of the tank: signal (dBm) and receive rate, read
@@ -79,16 +81,18 @@ func (s *SignalTestSettings) clamp() {
 const (
 	sigBins      = 36              // 10° each
 	sigFrontMask = 0x83            // N, NE, NW sensors: the partner straight ahead
-	sigListenMs  = 250             // each listening window
+	sigListenMs  = 80              // each listening window: the barrel pulses every 6 ms, and a hit ends it early
 	sigWarmup    = 4 * time.Second // cameras start, motors on
-	// Hits further apart than this start a new pass of the beam. Each tank's
-	// partner listens about every 0.84 s and can miss a window at a beam's
-	// edge (Jungle-06, 21 October 2026: hits 1.7 s apart in one beam, which
-	// 1.5 s split into two "turns"). Beams a turn apart are much further.
+	// Hits further apart than this start a new pass of the beam. A partner
+	// can miss a window at a beam's edge (Jungle-06, 21 October 2026: hits
+	// 1.7 s apart in one beam, which 1.5 s split into two "turns"). Beams a
+	// turn apart are much further.
 	sigRunGap      = 3 * time.Second
 	sigMinTurn     = 4.0             // seconds: no turret turns faster in this test
 	sigStartIgnore = 2 * time.Second // a beam already in view as a pass begins is the start, not a turn
 	sigRouterEvery = 250 * time.Millisecond
+	sigIrWait      = 400 * time.Millisecond // longest wait for a tank's reply in its IR turn
+	sigIrMinCycle  = 400 * time.Millisecond // with few tanks, go round no faster than this
 	sigDefaultHalf = 400 * time.Millisecond // half a beam's width in time, before one is measured
 	// A tank that powered on (or restarted) less than this before a run is
 	// still warming up: its first minutes are often worse (27 October 2026:
@@ -146,6 +150,11 @@ type sigRun struct {
 	routerOK       bool
 	routerNote     string
 	listenAt       map[string]time.Time // listener → middle of its current window
+	irEvents       chan sigIrEvent      // tanks' replies during their IR turn
+	irCycles       int                  // times round all the tanks
+	irCycleTime    time.Duration        // how long those took
+	irEveryMs      int64                // from a saved run: how often each tank listened
+	irLate         int                  // IR turns with a reply that didn't come in time
 	driveDone      chan struct{}        // closed when the driving has stopped (Settings.Drive)
 	name           string               // the file it's saved as (comments are kept by it)
 	file           string               // saved run, once finished
@@ -229,7 +238,7 @@ func (st *signalTest) start(cfg SignalTestSettings, tanks []tankInfo) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	now := time.Now()
 	r := &sigRun{started: now, phase: "warm-up", cfg: cfg, cancel: cancel, name: sigRunName(now),
-		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}}
+		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}, irEvents: make(chan sigIrEvent, 16)}
 	byNum := map[int]string{}
 	for _, t := range tanks {
 		n := tankNumber(t.Name)
@@ -409,8 +418,10 @@ func (st *signalTest) finish(r *sigRun) {
 	r.ended = now
 	r.file = st.save(r)
 	snap := st.snapshotLocked(r)
+	late := r.irLate
 	st.mu.Unlock()
 
+	log.Printf("[SignalTest] %d tanks on air: each listened every %.2f s, %d IR turns had a late reply", len(r.order), snap.IrEveryS, late)
 	for _, t := range snap.Tanks {
 		log.Printf("[SignalTest] %s: %s", t.Name, t.Summary)
 	}
@@ -419,45 +430,122 @@ func (st *signalTest) finish(r *sigRun) {
 	}
 }
 
-// irLoop: partners take turns, one lit while the other listens.
+// irLoop goes round the tanks that have a partner, one at a time, so only one
+// barrel is lit in the whole room and only its partner listens. Several pairs
+// can then run together even if they can all see each other.
 func (st *signalTest) irLoop(ctx context.Context, r *sigRun) {
-	var lowGroup, highGroup []string // 1-5 and the rest
+	turns := irTurns(r)
+	if len(turns) == 0 {
+		return
+	}
+	for {
+		began := time.Now()
+		for _, tn := range turns {
+			if ctx.Err() != nil {
+				return
+			}
+			st.irTurn(ctx, r, tn)
+		}
+		if !sleepCtx(ctx, sigIrMinCycle-time.Since(began)) {
+			return
+		}
+		st.mu.Lock()
+		r.irCycles++
+		r.irCycleTime += time.Since(began)
+		st.mu.Unlock()
+	}
+}
+
+// sigIrTurn: one tank lights its barrel and only its partner listens.
+type sigIrTurn struct{ lit, listen string }
+
+func irTurns(r *sigRun) []sigIrTurn {
+	turns := []sigIrTurn{}
 	for _, id := range r.order {
-		if t := r.tanks[id]; t.num >= 1 && t.num <= 5 {
-			lowGroup = append(lowGroup, id)
-		} else {
-			highGroup = append(highGroup, id)
+		if p := r.tanks[id].partner; p != "" {
+			turns = append(turns, sigIrTurn{lit: id, listen: p})
 		}
 	}
-	turns := [][2][]string{{lowGroup, highGroup}, {highGroup, lowGroup}}
+	return turns
+}
+
+// irTurn waits for each step's reply rather than a fixed time: the barrel is
+// on before the partner listens, and off (the ping is answered after the
+// stop) before the next tank's turn. A tank that doesn't reply only costs
+// its turn. Once lit, a barrel is always told to stop.
+func (st *signalTest) irTurn(ctx context.Context, r *sigRun, tn sigIrTurn) {
+	r.drainIr()
+	if !st.tanks.sendTo(tn.lit, `{"cmd":"ir_emit_left"}`) {
+		return
+	}
+	late := !r.waitIr(ctx, "ack", tn.lit, sigIrWait)
+	mid := time.Now().Add(sigListenMs / 2 * time.Millisecond)
+	st.mu.Lock()
+	r.listenAt[tn.listen] = mid
+	st.mu.Unlock()
+	if st.tanks.sendTo(tn.listen, fmt.Sprintf(`{"cmd":"ir_listen_window","ms":%d}`, sigListenMs)) {
+		late = !r.waitIr(ctx, "result", tn.listen, sigListenMs*time.Millisecond+sigIrWait) || late
+	}
+	st.mu.Lock()
+	delete(r.listenAt, tn.listen)
+	st.mu.Unlock()
+	st.send(tn.lit, `{"cmd":"ir_emit_stop"}`)
+	st.send(tn.lit, `{"cmd":"ping"}`)
+	late = !r.waitIr(ctx, "pong", tn.lit, sigIrWait) || late
+	if late && ctx.Err() == nil {
+		st.mu.Lock()
+		r.irLate++
+		st.mu.Unlock()
+	}
+}
+
+// sigIrEvent is a tank's reply during its IR turn: ack, result or pong.
+type sigIrEvent struct{ kind, tank string }
+
+func (r *sigRun) noteIr(kind, tank string) {
+	select {
+	case r.irEvents <- sigIrEvent{kind, tank}:
+	default:
+	}
+}
+
+func (r *sigRun) drainIr() {
 	for {
-		for _, tn := range turns {
-			lit, listen := tn[0], tn[1]
-			for _, id := range lit {
-				st.send(id, `{"cmd":"ir_emit_left"}`)
-			}
-			if !sleepCtx(ctx, 40*time.Millisecond) {
-				return
-			}
-			mid := time.Now().Add(sigListenMs / 2 * time.Millisecond)
-			st.mu.Lock()
-			for _, id := range listen {
-				r.listenAt[id] = mid
-			}
-			st.mu.Unlock()
-			for _, id := range listen {
-				st.send(id, fmt.Sprintf(`{"cmd":"ir_listen_window","ms":%d}`, sigListenMs))
-			}
-			if !sleepCtx(ctx, (sigListenMs+110)*time.Millisecond) {
-				return
-			}
-			for _, id := range lit {
-				st.send(id, `{"cmd":"ir_emit_stop"}`)
-			}
-			if !sleepCtx(ctx, 20*time.Millisecond) {
-				return
-			}
+		select {
+		case <-r.irEvents:
+		default:
+			return
 		}
+	}
+}
+
+func (r *sigRun) waitIr(ctx context.Context, kind, tank string, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	for {
+		select {
+		case e := <-r.irEvents:
+			if e.kind == kind && e.tank == tank {
+				return true
+			}
+		case <-t.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+// irReply passes on a tank's ack or pong to the run's IR turns.
+func (st *signalTest) irReply(kind, tank string) {
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	r := st.run
+	st.mu.Unlock()
+	if r != nil && r.irEvents != nil {
+		r.noteIr(kind, tank)
 	}
 }
 
@@ -478,6 +566,7 @@ func (st *signalTest) irResult(listener string, mask int) bool {
 		return false // not a window the test asked for
 	}
 	delete(r.listenAt, listener)
+	r.noteIr("result", listener)
 	if !r.ended.IsZero() {
 		return true // a late reply after the run
 	}
@@ -896,6 +985,7 @@ type sigSnapshot struct {
 	Settings   any           `json:"settings,omitempty"`
 	Tanks      []sigTankView `json:"tanks"`
 	Drive      bool          `json:"drive"`          // the tanks drove back and forth too (Settings.Drive)
+	IrEveryS   float64       `json:"irEveryS"`       // how often each tank listened for its partner; 0 = unknown
 	Run        string        `json:"run,omitempty"`  // its file name, from the start (comments are kept by it)
 	File       string        `json:"file,omitempty"` // once saved
 	Comment    string        `json:"comment,omitempty"`
@@ -932,6 +1022,11 @@ func (st *signalTest) snapshotLocked(r *sigRun) sigSnapshot {
 	snap := sigSnapshot{State: r.phase, Running: r.ended.IsZero(), StartedAt: r.started.UnixMilli(),
 		ElapsedS: end.Sub(r.started).Seconds(), Note: r.note, RouterOK: r.routerOK, RouterNote: r.routerNote,
 		Settings: r.cfg, Drive: r.cfg.Drive, Run: r.name, File: r.file, Tanks: []sigTankView{}}
+
+	snap.IrEveryS = float64(r.irEveryMs) / 1000
+	if r.irCycles > 0 {
+		snap.IrEveryS = math.Round(r.irCycleTime.Seconds()/float64(r.irCycles)*100) / 100
+	}
 
 	// The fleet's typical turn time, for tanks without a pace of their own.
 	var paces []float64
@@ -1269,11 +1364,12 @@ var sigRunFileRe = regexp.MustCompile(`^thundergeddon-sigtest-\d{8}-\d{6}\.json$
 // sigRunFile is a finished run's raw data (marks, hits, router readings,
 // frame times), so its charts can be worked out again later.
 type sigRunFile struct {
-	Started  int64              `json:"started"`
-	Ended    int64              `json:"ended"`
-	Phase    string             `json:"phase"`
-	Settings SignalTestSettings `json:"settings"`
-	Tanks    []sigTankFile      `json:"tanks"`
+	Started   int64              `json:"started"`
+	Ended     int64              `json:"ended"`
+	Phase     string             `json:"phase"`
+	Settings  SignalTestSettings `json:"settings"`
+	IrEveryMs int64              `json:"irEveryMs,omitempty"` // how often each tank listened for its partner
+	Tanks     []sigTankFile      `json:"tanks"`
 }
 
 type sigTankFile struct {
@@ -1364,6 +1460,9 @@ func (st *signalTest) save(r *sigRun) string {
 		return out
 	}
 	out := sigRunFile{Started: r.started.UnixMilli(), Ended: r.ended.UnixMilli(), Phase: r.phase, Settings: r.cfg}
+	if r.irCycles > 0 {
+		out.IrEveryMs = r.irCycleTime.Milliseconds() / int64(r.irCycles)
+	}
 	for _, id := range r.order {
 		t := r.tanks[id]
 		to := sigTankFile{ID: t.id, Name: t.name, Hits: ms(t.hits), Frames: ms(t.frames)}
@@ -1521,7 +1620,7 @@ func loadRunFile(path string) (*sigRun, error) {
 	}
 	cfg := f.Settings
 	cfg.clamp()
-	r := &sigRun{started: time.UnixMilli(f.Started), ended: time.UnixMilli(f.Ended), phase: f.Phase, cfg: cfg,
+	r := &sigRun{started: time.UnixMilli(f.Started), ended: time.UnixMilli(f.Ended), phase: f.Phase, cfg: cfg, irEveryMs: f.IrEveryMs,
 		tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}, name: filepath.Base(path), file: filepath.Base(path), routerOK: true}
 	byName := map[string]string{}
 	partners := map[string]string{}

@@ -85,6 +85,7 @@ func main() {
 	}
 	// Runs used to be saved next to the video log (the router's RAM): keep them.
 	g.sigtest = newSignalTest(tanks, rl, *wifiIface, *sigtestDir, filepath.Dir(*videoLogFile))
+	tanks.fakeNoShots = g.sigtest.active
 	g.sigtest.onDone = func() {
 		g.mu.Lock()
 		g.syncCameras() // back to the phase's cameras

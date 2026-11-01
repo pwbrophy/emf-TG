@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -443,5 +444,134 @@ func TestManyRunsAreKept(t *testing.T) {
 	runs := st.listRunsLocked()
 	if len(runs) != sigKeepRuns || runs[len(runs)-1].File != sigRunName(t0.Add(5*time.Minute)) {
 		t.Errorf("%d runs kept, oldest %s", len(runs), runs[len(runs)-1].File)
+	}
+}
+
+// sigIrRoom plays tanks that all see each other: any lit barrel reaches every
+// listener. It fails the test if a listener could see the wrong barrel.
+type sigIrRoom struct {
+	*fakeTanks
+	t      *testing.T
+	st     *signalTest
+	mu     sync.Mutex
+	lit    map[string]bool
+	mute   string // this tank never replies
+	listen map[string]int
+}
+
+func (o *sigIrRoom) sendTo(id, msg string) bool {
+	reply := func(kind string) {
+		if id != o.mute {
+			go o.st.irReply(kind, id)
+		}
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	switch {
+	case strings.Contains(msg, "ir_emit_left"):
+		if len(o.lit) != 0 {
+			o.t.Errorf("%s lit while %v still lit", id, o.lit)
+		}
+		o.lit[id] = true
+		reply("ack")
+	case strings.Contains(msg, "ir_emit_stop"):
+		delete(o.lit, id)
+	case strings.Contains(msg, "ping"):
+		reply("pong")
+	case strings.Contains(msg, "ir_listen_window"):
+		o.listen[id]++
+		mask := 0
+		for lit := range o.lit {
+			mask = sigFrontMask
+			if lit != sigIrPartners[id] {
+				o.t.Errorf("%s listened while the wrong barrel, %s, was lit", id, lit)
+			}
+		}
+		if id != o.mute {
+			go o.st.irResult(id, mask)
+		}
+	}
+	return true
+}
+
+var sigIrPartners = map[string]string{"3": "8", "8": "3", "4": "9", "9": "4"}
+
+func newSigIrRoom(t *testing.T, mute string) (*sigIrRoom, *sigRun) {
+	o := &sigIrRoom{fakeTanks: &fakeTanks{}, t: t, lit: map[string]bool{}, listen: map[string]int{}, mute: mute}
+	o.st = newSignalTest(o, newRelay(), "", "")
+	r := &sigRun{tanks: map[string]*sigTank{}, listenAt: map[string]time.Time{}, irEvents: make(chan sigIrEvent, 16)}
+	for _, id := range []string{"3", "4", "8", "9"} {
+		r.order = append(r.order, id)
+		r.tanks[id] = &sigTank{id: id, partner: sigIrPartners[id]}
+	}
+	r.tanks["10"] = &sigTank{id: "10"} // no partner: it never takes a turn
+	r.order = append(r.order, "10")
+	o.st.run = r
+	return o, r
+}
+
+// Pairs in sight of each other: one barrel at a time, only its partner
+// listening, and each tank's beam marked for it.
+func TestOneBarrelLitAtATime(t *testing.T) {
+	o, r := newSigIrRoom(t, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel()
+	o.st.irLoop(ctx, r)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.listen["10"] != 0 {
+		t.Errorf("a tank with no partner listened %d times", o.listen["10"])
+	}
+	for id, p := range sigIrPartners {
+		if o.listen[id] < 2 {
+			t.Errorf("%s listened %d times", id, o.listen[id])
+		}
+		if len(r.tanks[p].hits) != o.listen[id] {
+			t.Errorf("%s: %d hits from %d listens", p, len(r.tanks[p].hits), o.listen[id])
+		}
+	}
+	if len(o.lit) != 0 {
+		t.Errorf("still lit: %v", o.lit)
+	}
+	if r.irLate != 0 {
+		t.Errorf("late turns: %d", r.irLate)
+	}
+	if r.irCycles < 2 || r.irCycleTime/time.Duration(r.irCycles) < sigIrMinCycle {
+		t.Errorf("%d cycles in %v: faster than the minimum", r.irCycles, r.irCycleTime)
+	}
+}
+
+// A tank that stops replying costs its turns, not the others'.
+func TestSilentTankOnlyCostsItsTurn(t *testing.T) {
+	o, r := newSigIrRoom(t, "3")
+	ctx, cancel := context.WithTimeout(context.Background(), 3200*time.Millisecond)
+	defer cancel()
+	o.st.irLoop(ctx, r)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.listen["4"] < 2 || o.listen["9"] < 2 {
+		t.Errorf("the other pair stalled: %v", o.listen)
+	}
+	if r.irLate == 0 {
+		t.Error("late turns weren't counted")
+	}
+}
+
+// A saved run keeps how often its tanks listened.
+func TestSavedRunKeepsIrPace(t *testing.T) {
+	dir := t.TempDir()
+	st := newSignalTest(&fakeTanks{}, newRelay(), "", dir)
+	now := time.Now()
+	r := &sigRun{started: now.Add(-time.Minute), ended: now, phase: "done", name: sigRunName(now), tanks: map[string]*sigTank{}, irCycles: 4, irCycleTime: 3400 * time.Millisecond}
+	file := st.save(r)
+	if file == "" {
+		t.Fatal("not saved")
+	}
+	got, err := loadRunFile(filepath.Join(dir, file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := st.snapshotLocked(got); s.IrEveryS != 0.85 {
+		t.Errorf("irEveryS = %v, want 0.85", s.IrEveryS)
 	}
 }

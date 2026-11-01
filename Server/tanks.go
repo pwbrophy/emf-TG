@@ -70,7 +70,8 @@ type tankManager struct {
 	onConnected func(id string)               // a tank (re)connected and is ready for commands
 	onReport    func(id string, r tankReport) // IR replies and RFID reads
 
-	fake fakeWorld // pretend IR for -fake-tanks
+	fake        fakeWorld   // pretend IR for -fake-tanks
+	fakeNoShots func() bool // true while a lit fake barrel isn't a shot (the signal test)
 
 	vlog *videoLog // start-up and camera reports go here too; nil = off
 }

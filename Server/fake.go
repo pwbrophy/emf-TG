@@ -5,9 +5,9 @@ package main
 // barrel is lit, every other fake tank that listens "sees" it, from a side
 // that changes with each shot: front, right, rear, left.
 //
-// For the signal test (several barrels lit at once) fake turrets also turn:
-// a listening tank's front sensor sees its partner's barrel while that
-// turret points within fakeBeamDeg of straight at it.
+// For the signal test (one barrel lit at a time, not a shot) fake turrets
+// also turn: a listening tank's front sensor sees its partner's barrel while
+// that turret points within fakeBeamDeg of straight at it.
 
 import (
 	"encoding/json"
@@ -100,9 +100,10 @@ func (tm *tankManager) fakeCommand(id string, msg []byte) {
 		f.mu.Unlock()
 	case "ir_listen_window":
 		partner := tm.fakePartner(id)
+		noShots := tm.fakeNoShots != nil && tm.fakeNoShots()
 		f.mu.Lock()
 		mask := 0
-		if len(f.lit) == 1 && f.emitter != "" && f.emitter != id {
+		if !noShots && len(f.lit) == 1 && f.emitter != "" && f.emitter != id {
 			mask = fakeHitMasks[(f.shots-1)%len(fakeHitMasks)] // a shot
 		}
 		if t := f.turrets[partner]; t != nil && f.lit[partner] {

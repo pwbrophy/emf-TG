@@ -186,6 +186,7 @@ func (g *game) tankMessage(id string, m tankReport) {
 	switch m.Cmd {
 	case "ir_emit_ack":
 		if g.sigtest.active() {
+			g.sigtest.irReply("ack", id)
 			return // the signal test lights barrels; there's no shot
 		}
 		g.ir.reply(irReply{tank: id, ack: true, mask: -1})
@@ -208,6 +209,7 @@ func (g *game) tankMessage(id string, m tankReport) {
 		}
 		g.mu.Unlock()
 	case "pong":
+		g.sigtest.irReply("pong", id)
 		g.mu.Lock()
 		if t, ok := g.pingSent[id]; ok {
 			g.pingMs[id] = int(time.Since(t).Milliseconds())
@@ -238,7 +240,7 @@ type inMsg struct {
 	Alliance string           `json:"alliance"` // an alliance id ("" = from the tank's name)
 	ID       string           `json:"id"`       // an alliance or capture point id
 	Color    string           `json:"color"`
-	Text     string           `json:"text"` // a comment (signal test runs)
+	Text     string           `json:"text"`   // a comment (signal test runs)
 	UID      string           `json:"uid"`    // an RFID tag
 	Use      string           `json:"use"`    // what a tag is for: "base:<id>", "point:<id>", ""
 	Beacon   int              `json:"beacon"` // a capture point's LED beacon, 0 = none
