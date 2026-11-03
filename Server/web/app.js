@@ -680,8 +680,8 @@ function hostTankRow(t) {
       <div class="btn-row">
         <button class="btn small secondary" type="button" data-action="tank-identify" data-tank="${esc(t.id)}">Identify</button>
         <button class="btn small secondary" type="button" data-action="tank-ping" data-tank="${esc(t.id)}">Ping${t.pingMs ? ` (${t.pingMs} ms)` : ''}</button>
-        ${inGame && t.player ? '' : `<button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="-0.5">&#9664; Turret</button>
-        <button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="0.5">Turret &#9654;</button>`}
+        ${inGame && t.player ? '' : `<button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="0.5">&#9664; Turret</button>
+        <button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="-0.5">Turret &#9654;</button>`}
         <button class="btn small secondary" type="button" data-action="tank-resync" data-tank="${esc(t.id)}">Reset</button>
         <button class="btn small secondary" type="button" data-action="tank-restart" data-tank="${esc(t.id)}" data-name="${esc(t.name)}">Restart</button>
         ${state.phase === 'lobby' && t.player ? `<button class="btn small danger" type="button" data-action="tank-free" data-tank="${esc(t.id)}">Remove Player</button>` : ''}
