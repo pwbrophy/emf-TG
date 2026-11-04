@@ -44,7 +44,7 @@ func main() {
 	discoveryPort := flag.Int("discovery-port", 30560, "UDP port tanks broadcast on to find a server; 0 = don't answer")
 	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
 	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")
-	wifiIface := flag.String("wifi-iface", "ra0", "the router's 2.4 GHz Wi-Fi interface, for the signal test's view of each tank (iwinfo); empty = off")
+	wifiIface := flag.String("wifi-iface", "ra0", "the router's 2.4 GHz Wi-Fi interface, for its view of each tank (iwinfo) and its airtime fairness (iwpriv); empty = off")
 	videoLogFile := flag.String("video-log", filepath.Join(os.TempDir(), "thundergeddon-video.csv"),
 		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); empty = off")
 	sigtestDir := flag.String("sigtest-dir", "", "where finished signal test runs are kept (default: a sigtest folder next to the settings file)")
@@ -79,6 +79,7 @@ func main() {
 	tanks.vlog = vlog
 	g := newGame(tanks, *settingsFile)
 	g.vlog = vlog
+	g.airtime = startAirtimeControl(*wifiIface, g.settings.AirtimeFairness)
 	g.checkTanks = stats.check
 	if *sigtestDir == "" {
 		*sigtestDir = filepath.Join(filepath.Dir(*settingsFile), "sigtest")

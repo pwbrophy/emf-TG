@@ -112,8 +112,9 @@ type result struct {
 type game struct {
 	mu      sync.Mutex
 	tanks   tankControl
-	beacons *beaconManager // nil in tests
-	vlog    *videoLog      // phones' video reports go here; nil = off
+	beacons *beaconManager  // nil in tests
+	vlog    *videoLog       // phones' video reports go here; nil = off
+	airtime *airtimeControl // the router's airtime fairness; nil = not controlled
 
 	// The check on Start (health.go): checkTanks is nil in tests that don't
 	// set it; camSince is when each tank's camera last came on.
@@ -397,6 +398,7 @@ func (g *game) saveNewSettings(s Settings) {
 	log.Printf("[Game] host changed settings")
 	g.pushTuning(old.Tuning)
 	g.syncCameras() // "keep cameras on" may have changed
+	g.airtime.set(s.AirtimeFairness)
 }
 
 // ── Joining and leaving ──────────────────────────────────────────────────────

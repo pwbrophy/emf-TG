@@ -514,7 +514,7 @@ function setHostPage(p) {
 }
 
 const CONFIG_PAGES = [
-  ['config-server', 'Server Settings', 'Game password, players before queuing, debug menu, 2-player tanks, buzzer'],
+  ['config-server', 'Server Settings', 'Game password, players before queuing, debug menu, 2-player tanks, buzzer, airtime fairness'],
   ['config-gameplay', 'Gameplay Settings', 'Match length, points, damage, reload, dead time'],
   ['config-advanced', 'Advanced Settings', 'Motor, control and video tuning, shot timing, presets'],
   ['config-alliances', 'Alliances', 'Names, colours, add and remove'],
@@ -867,6 +867,10 @@ function serverSettingsForm() {
     ${field('Players in lobby before queuing (0 = one per robot)', 'maxPlayers', 'int', 'min="0" max="40"', true)}
     <div class="wide chk-grid">${check('Debug menu on players&rsquo; phones', 'debugConsole')}
       ${check('2-player tanks (driver + gunner)', 'twoPlayerTanks')}${check('Tank buzzers on', 'tuning.buzzer')}</div>
+    <div class="wide">${check('Router airtime fairness (both Wi-Fi bands)', 'airtimeFairness')}
+      <p class="hint">Leave off: with it on, several tanks switching off or dying within seconds can slow every other tank for about 8 minutes.
+      With it off, a phone with a poor signal on the tanks&rsquo; 2.4&nbsp;GHz network can slow them more, so keep phones on 5&nbsp;GHz.
+      Set again every minute; takes effect within seconds of changing it here.</p></div>
   </div>`;
 }
 

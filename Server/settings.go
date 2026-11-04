@@ -58,6 +58,8 @@ type Settings struct {
 	CamerasAlwaysOn bool `json:"camerasAlwaysOn"`
 	DebugConsole    bool `json:"debugConsole"` // the "DBG" log button on players' phones
 
+	AirtimeFairness bool `json:"airtimeFairness"` // the router's airtime fairness, on both Wi-Fi bands; off by default (airtime.go)
+
 	Tuning Tuning `json:"tuning"` // Advanced: how tanks and controls behave
 
 	SignalTest SignalTestSettings `json:"signalTest"` // Server Config → Signal Quality Test (signaltest.go)
