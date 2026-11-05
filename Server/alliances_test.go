@@ -88,8 +88,9 @@ func TestThreeAlliances(t *testing.T) {
 	}
 }
 
-// Tags: a new tag a tank reads is listed; once the host makes it a base it
-// works as one.
+// Tags: a new tag a tank reads in a game is listed; the host can't assign
+// it until the game is over (tag changes are between games), and once it's a
+// base it works as one.
 func TestNewTagAssignedAsBase(t *testing.T) {
 	g, _, _, h, a, _ := combatGame(t, nil)
 	g.tankMessage("a", tankReport{Cmd: "rfid", UID: "deadbeef"})
@@ -98,18 +99,80 @@ func TestNewTagAssignedAsBase(t *testing.T) {
 		t.Fatalf("new tag not listed first: %+v", s.RfidTags)
 	}
 	h.send(inMsg{T: "host_tag_use", UID: "DEADBEEF", Use: "base:desert"})
+	if !strings.Contains(h.lastError(), "between games") {
+		t.Fatal("assigned a tag mid-game")
+	}
 	g.mu.Lock()
+	g.changeSettings(func(s *Settings) { // as if set before the game
+		for i := range s.RfidTags {
+			if s.RfidTags[i].UID == "DEADBEEF" {
+				s.RfidTags[i].Use = "base:desert"
+			}
+		}
+	})
 	g.match.fighters["a"].hp = 50
 	g.mu.Unlock()
 	g.tankMessage("a", tankReport{Cmd: "rfid", UID: "DEADBEEF"})
 	if m := a.waitFor("rfid"); m["text"] != "Hit points restored!" {
 		t.Fatalf("base tag: %v", m["text"])
 	}
+	h.send(inMsg{T: "host_end"})
 	h.send(inMsg{T: "host_tag_forget", UID: "DEADBEEF"})
 	for _, tg := range h.state().RfidTags {
 		if tg.UID == "DEADBEEF" {
-			t.Fatal("tag not forgotten")
+			t.Fatal("tag not forgotten after the game")
 		}
+	}
+}
+
+// During a game the host can't change alliances, capture points or tags, nor
+// the settings that only matter when joining or starting a game; the rest
+// (damage, reload...) still change at once.
+func TestSettingsLockedDuringGame(t *testing.T) {
+	g, _, _, h, _, _ := combatGame(t, nil)
+	before := g.settings
+	s := g.settings
+	s.ClientPassword = "secret"
+	s.MaxPlayers = 7
+	s.TwoPlayerTanks = !s.TwoPlayerTanks
+	s.MatchSeconds = 60
+	s.CountdownSeconds = 9
+	s.PointsToWin = 50
+	s.DamagePerHit = 40
+	h.send(inMsg{T: "host_settings", Settings: &s})
+	got := g.settings
+	if got.ClientPassword != before.ClientPassword || got.MaxPlayers != before.MaxPlayers ||
+		got.TwoPlayerTanks != before.TwoPlayerTanks || got.MatchSeconds != before.MatchSeconds ||
+		got.CountdownSeconds != before.CountdownSeconds || got.PointsToWin != before.PointsToWin {
+		t.Fatalf("a locked setting changed mid-game: %+v", got)
+	}
+	if got.DamagePerHit != 40 {
+		t.Fatal("damage per hit should change mid-game")
+	}
+
+	for _, m := range []inMsg{
+		{T: "host_alliance_edit", ID: "desert", Name: "Sand"},
+		{T: "host_point_edit", ID: "north", Name: "Hill", Beacon: -1},
+		{T: "host_tag_add", UID: "abcd1234"},
+	} {
+		h.send(m)
+		if !strings.Contains(h.lastError(), "between games") {
+			t.Fatalf("%s wasn't refused mid-game", m.T)
+		}
+	}
+	if g.settings.Alliances[0].Name == "Sand" || g.settings.CapturePoints[0].Name == "Hill" {
+		t.Fatal("a list changed mid-game")
+	}
+	for _, tg := range g.settings.RfidTags {
+		if tg.UID == "ABCD1234" {
+			t.Fatal("a tag was added mid-game")
+		}
+	}
+
+	h.send(inMsg{T: "host_end"})
+	h.send(inMsg{T: "host_settings", Settings: &s})
+	if g.settings.MatchSeconds != 60 || g.settings.ClientPassword != "secret" {
+		t.Fatal("settings should change between games")
 	}
 }
 

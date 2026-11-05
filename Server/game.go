@@ -379,12 +379,23 @@ func (g *game) hostAction(c *client, m inMsg) {
 
 // applySettings saves settings the host's page sent. The alliance, capture
 // point and tag lists have their own host messages (and a tank can add a tag
-// at any moment), so the page's copies of those are ignored.
+// at any moment), so the page's copies of those are ignored. During a game
+// the settings that only matter when joining or starting a game are locked
+// (the page shows them greyed out), so they can't change mid-game.
 func (g *game) applySettings(s Settings) {
 	s.Alliances = g.settings.Alliances
 	s.TankAlliances = g.settings.TankAlliances
 	s.CapturePoints = g.settings.CapturePoints
 	s.RfidTags = g.settings.RfidTags
+	if g.inMatch() {
+		old := g.settings
+		s.ClientPassword = old.ClientPassword
+		s.MaxPlayers = old.MaxPlayers
+		s.TwoPlayerTanks = old.TwoPlayerTanks
+		s.MatchSeconds = old.MatchSeconds
+		s.CountdownSeconds = old.CountdownSeconds
+		s.PointsToWin = old.PointsToWin
+	}
 	g.saveNewSettings(s)
 }
 

@@ -505,6 +505,26 @@ const CONFIG_PAGES = [
   ['config-tags', 'Tags and Capture Points', 'RFID tags for bases and capture points'],
   ['config-signal', 'Signal Quality Test', 'Turn every turret round and chart the radio at each angle'],
 ];
+// Config pages left out of the menu during a game (the hub refuses their
+// changes then too).
+const CONFIG_PAGES_BETWEEN_GAMES = ['config-alliances', 'config-tags', 'config-signal'];
+// Settings that only matter when joining or starting a game: greyed out during
+// a game (the hub keeps their old values then too, applySettings).
+const SETTINGS_BETWEEN_GAMES = ['clientPassword', 'maxPlayers', 'twoPlayerTanks', 'matchSeconds',
+  'countdownSeconds', 'pointsToWin'];
+
+function hostInGame() {
+  return state.phase === 'countdown' || state.phase === 'playing';
+}
+
+function lockedNow(path) {
+  return hostInGame() && SETTINGS_BETWEEN_GAMES.includes(path);
+}
+
+function lockedNote(paths) {
+  return hostInGame() && paths.some((p) => SETTINGS_BETWEEN_GAMES.includes(p))
+    ? '<p class="hint wide">A game is on: the greyed-out settings can be changed between games.</p>' : '';
+}
 
 function renderHost() {
   const ph = state.phase;
@@ -759,6 +779,10 @@ function hostPlayCard() {
 // ── Server Config ────────────────────────────────────────────────────────────
 
 function renderHostConfig() {
+  if (hostInGame() && CONFIG_PAGES_BETWEEN_GAMES.includes(hostPage)) {
+    hostPage = 'config'; // a game started while it was open: back to the menu
+    session('tg_host_page', hostPage);
+  }
   const page = CONFIG_PAGES.find(([id]) => id === hostPage);
   $('host-title').textContent = page ? page[1] : 'Server Config';
   $('host-info').textContent = '';
@@ -779,7 +803,7 @@ function renderHostConfig() {
       break;
     }
     default:
-      html = `<div class="list">${CONFIG_PAGES.map(([id, title, sub]) =>
+      html = `<div class="list">${CONFIG_PAGES.filter(([id]) => !hostInGame() || !CONFIG_PAGES_BETWEEN_GAMES.includes(id)).map(([id, title, sub]) =>
         `<button type="button" class="item menu-row" data-action="host-page" data-page="${id}">
           <div class="main"><div class="name">${title}</div><div class="sub">${sub}</div></div><span class="chev">&rsaquo;</span></button>`).join('')}</div>
         <button class="btn danger" type="button" data-action="host-close" style="margin-top:16px">Close Game</button>`;
@@ -814,12 +838,14 @@ function field(label, path, kind, attrs = '', wide = false) {
   if (kind === 'min') v = v / 60;
   if (kind === 'ms') v = v / 1000;
   const type = kind === 'text' ? 'text' : 'number';
-  return `<label class="field ${wide ? 'wide' : ''}">${label}<input type="${type}" ${type === 'number' ? 'inputmode="decimal"' : ''}
-    data-set="${path}" data-kind="${kind}" value="${esc(v)}" ${attrs}></label>`;
+  const locked = lockedNow(path);
+  return `<label class="field ${wide ? 'wide' : ''} ${locked ? 'locked' : ''}">${label}<input type="${type}" ${type === 'number' ? 'inputmode="decimal"' : ''}
+    data-set="${path}" data-kind="${kind}" value="${esc(v)}" ${attrs} ${locked ? 'disabled' : ''}></label>`;
 }
 
 function check(label, path) {
-  return `<label class="chk"><input type="checkbox" data-set="${path}" data-kind="bool" ${getPath(state.settings, path) ? 'checked' : ''}> ${label}</label>`;
+  const locked = lockedNow(path);
+  return `<label class="chk ${locked ? 'locked' : ''}"><input type="checkbox" data-set="${path}" data-kind="bool" ${getPath(state.settings, path) ? 'checked' : ''} ${locked ? 'disabled' : ''}> ${label}</label>`;
 }
 
 function readSetting(el) {
@@ -845,7 +871,7 @@ document.addEventListener('change', (e) => {
 });
 
 function serverSettingsForm() {
-  return `<div class="settings-grid">
+  return `<div class="settings-grid">${lockedNote(['clientPassword'])}
     <label class="field wide">Game<select disabled><option>Realtime</option><option>Turn-based (coming later)</option></select></label>
     ${field('Game password for players (blank = none)', 'clientPassword', 'text', 'maxlength="32" autocomplete="off"', true)}
     ${field('Players in lobby before queuing (0 = one per robot)', 'maxPlayers', 'int', 'min="0" max="40"', true)}
@@ -859,7 +885,7 @@ function serverSettingsForm() {
 }
 
 function gameplaySettingsForm() {
-  return `<div class="settings-grid">
+  return `<div class="settings-grid">${lockedNote(['matchSeconds'])}
     ${field('Match duration (minutes)', 'matchSeconds', 'min', 'min="0.5" max="60" step="0.5"')}
     ${field('Start countdown (seconds)', 'countdownSeconds', 'int', 'min="0" max="30"')}
     ${field('Victory points to win', 'pointsToWin', 'int', 'min="1"')}

@@ -15,7 +15,20 @@ import (
 	"time"
 )
 
+// listToolLocked: the host messages that change the alliances, capture
+// points and RFID tags. They're refused during a game, and their pages
+// (Alliances, Tags and Capture Points) are hidden from the host's menu then.
+var listToolLocked = map[string]bool{
+	"host_alliance_add": true, "host_alliance_remove": true, "host_alliance_edit": true,
+	"host_point_add": true, "host_point_remove": true, "host_point_edit": true,
+	"host_tag_use": true, "host_tag_add": true, "host_tag_forget": true,
+}
+
 func (g *game) hostTool(c *client, m inMsg) {
+	if listToolLocked[m.T] && g.inMatch() {
+		g.sendError(c, "Change alliances, capture points and tags between games.")
+		return
+	}
 	switch m.T {
 	case "host_pause":
 		g.setPaused(m.On)
@@ -76,12 +89,9 @@ func (g *game) hostTool(c *client, m inMsg) {
 			}
 		}
 
-	// Alliances, capture points and RFID tags.
+	// Alliances, capture points and RFID tags: between games only (see
+	// listToolLocked).
 	case "host_alliance_add", "host_alliance_remove", "host_point_add", "host_point_remove":
-		if g.inMatch() {
-			g.sendError(c, "Add and remove these between games.")
-			return
-		}
 		g.changeSettings(func(s *Settings) { listChange(s, m) })
 	case "host_alliance_edit":
 		g.changeSettings(func(s *Settings) {
