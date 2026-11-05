@@ -635,8 +635,8 @@ function hostBattleTab() {
   const drive = state.me.status === 'playing'
     ? '<button class="btn primary" type="button" data-action="host-drive" style="margin-bottom:10px">Drive My Tank</button>' : '';
   const pause = ph === 'playing'
-    ? `<button class="btn small ${state.paused ? 'primary' : 'secondary'}" type="button" data-action="host-pause" data-on="${!state.paused}">${state.paused ? 'Resume' : 'Pause Game'}</button>` : '';
-  const close = '<button class="btn small danger" type="button" data-action="host-close">Close Game</button>';
+    ? `<button class="btn ${state.paused ? 'primary' : 'secondary'}" type="button" data-action="host-pause" data-on="${!state.paused}">${state.paused ? 'Resume' : 'Pause Game'}</button>` : '';
+  const close = '<button class="btn danger" type="button" data-action="host-close">Close Game</button>';
   return `<div class="card"><div class="timer-row">
       <div><h3 style="margin:0">${ph === 'countdown' ? 'Starting in' : 'Time left'}</h3>
       <div class="timer-big" id="host-timer-big">${fmtClock(remainingMs())}</div>

@@ -841,7 +841,10 @@ details.item[open] > summary::after { transform: rotate(90deg); }
 .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0 10px; }
 
 .timer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.battle-btns { display: flex; flex-direction: column; gap: 8px; }
+/* Pause Game and Close Game: side by side, as tall as the timer card. */
+.timer-row > :first-child { flex: none; white-space: nowrap; }
+.battle-btns { flex: 1 1 auto; align-self: stretch; display: flex; justify-content: flex-end; gap: 8px; max-width: 380px; }
+.battle-btns .btn { flex: 1 1 0; width: auto; max-width: 186px; padding: 10px 12px; font-size: clamp(0.85rem, 2.6vw, 1.05rem); }
 
 /* Server Gameplay: always says a game is on (green), or that it's paused
    (orange), above the tabs. */
