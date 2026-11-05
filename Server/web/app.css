@@ -169,6 +169,8 @@ button:disabled { opacity: 0.45; cursor: default; }
   box-shadow: 0 6px 18px rgba(255, 77, 28, 0.35);
 }
 
+.nav-btn.back.danger { border-color: rgba(255, 77, 77, 0.6); color: var(--bad); }
+
 .nav-btn.next.danger {
   background: transparent;
   border: 2px solid rgba(255, 77, 77, 0.6);

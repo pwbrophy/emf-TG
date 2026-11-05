@@ -573,8 +573,11 @@ function renderHost() {
   }
   setHTML($('host-body'), html);
 
-  // Bottom bar: Menu on the left, the next step on the right.
-  const back = '<button class="nav-btn back" type="button" data-action="host-menu">Menu</button>';
+  // Bottom bar: Menu on the left (Close Game in the lobby: there's no reason
+  // to leave an open lobby without closing it), the next step on the right.
+  const back = ph === 'lobby'
+    ? '<button class="nav-btn back danger" type="button" data-action="host-close">Close Game</button>'
+    : '<button class="nav-btn back" type="button" data-action="host-menu">Menu</button>';
   const ready = state.players.filter((p) => p.tank).length;
   let mid = '', right = '';
   switch (ph) {
