@@ -639,23 +639,18 @@ function hostBattleTab() {
       <div class="timer-big" id="host-timer-big">${fmtClock(remainingMs())}</div>
       ${state.paused ? '<div class="paused-tag">PAUSED</div>' : ''}</div><div class="battle-btns">${pause}${close}</div></div></div>
     ${drive}
-    <div class="two-col">${scoreCard()}${pointsCard(true)}</div>`;
+    <div class="two-col">${scoreCard()}${pointsCard()}</div>`;
 }
 
-// pointsCard: the capture points. In a game the host can tap one to change
-// its owner (nobody → each alliance in turn → nobody).
-function pointsCard(canCycle) {
-  const cycle = canCycle && state.phase === 'playing';
-  const pts = state.capturePoints.map((p, i) => {
+// pointsCard: who holds each capture point (display only).
+function pointsCard() {
+  const pts = state.capturePoints.map((p) => {
     const a = p.owner >= 0 ? state.alliances[p.owner] : null;
     const style = a ? `style="border-color:${esc(a.color)}"` : '';
-    const inner = `<div class="name">${esc(p.name)}</div>
-      <div class="sub" ${a ? `style="color:${esc(a.color)}"` : ''}>${esc(a ? a.name : 'Nobody')}</div>`;
-    return cycle
-      ? `<button type="button" class="point" ${style} data-action="host-capture" data-point="${i}">${inner}</button>`
-      : `<div class="point" ${style}>${inner}</div>`;
+    return `<div class="point" ${style}><div class="name">${esc(p.name)}</div>
+      <div class="sub" ${a ? `style="color:${esc(a.color)}"` : ''}>${esc(a ? a.name : 'Nobody')}</div></div>`;
   }).join('');
-  return `<div class="card"><h3>Capture points${cycle ? ' &middot; tap to change' : ''}</h3>
+  return `<div class="card"><h3>Capture points</h3>
     ${pts ? `<div class="points">${pts}</div>` : emptyNote('No capture points (add them in Server Config).')}</div>`;
 }
 
@@ -1165,7 +1160,6 @@ document.addEventListener('click', (e) => {
     case 'host-end': if (confirm('End the game now?')) send({ t: 'host_end' }); break;
     case 'host-lobby': send({ t: 'host_lobby' }); break;
     case 'host-pause': send({ t: 'host_pause', on: el.dataset.on === 'true' }); break;
-    case 'host-capture': send({ t: 'host_capture', point: +el.dataset.point }); break;
     case 'host-damage': send({ t: 'host_damage', tank, dir: el.dataset.dir }); break;
     case 'host-heal': send({ t: 'host_heal', tank }); break;
     case 'host-close':
