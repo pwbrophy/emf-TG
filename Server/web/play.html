@@ -3286,7 +3286,7 @@ function startGoFireworks(colors, canvas) {
       const size    = 2.2 + Math.random() * 3.8;
       const color   = colors[Math.floor(Math.random() * colors.length)];
       _goParticles.push({
-        type:'spark', x:rx, y:ry,
+        type:'spark', x:rx, y:ry, ox:rx, oy:ry, // ox/oy: the burst's centre
         vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
         life:maxLife, maxLife, color, size, sprite: fwSprite(color),
         freq:  10 + Math.random() * 22,   // glitter flicker Hz (real time)
@@ -3300,6 +3300,26 @@ function startGoFireworks(colors, canvas) {
     const dt = Math.min((t - lastT) / 1000, 0.05);
     lastT = t;
     const drawFrom = performance.now();
+    // The screen turned (or the window changed size): the canvas was sized
+    // for the old one and the page stretched it to fill the new one. Resize
+    // it and move everything in the air to the same place on the new screen.
+    // A burst's centre moves; its sparks keep their spacing around it, so
+    // the burst stays round.
+    if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+      const sx = window.innerWidth / canvas.width, sy = window.innerHeight / canvas.height;
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+      for (const p of _goParticles) {
+        if (p.type === 'spark') {
+          const dx = p.x - p.ox, dy = p.y - p.oy;
+          p.ox *= sx; p.oy *= sy;
+          p.x = p.ox + dx; p.y = p.oy + dy;
+        } else {
+          p.x *= sx; p.y *= sy;
+          if (p.trail) for (const q of p.trail) { q.x *= sx; q.y *= sy; }
+        }
+      }
+    }
     if (!fpsFrom) fpsFrom = t;
     if (t - fpsFrom >= 3000) {
       dbg(`fireworks: ${(fpsFrames * 1000 / (t - fpsFrom)).toFixed(0)} fps, ` +
