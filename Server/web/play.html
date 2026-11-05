@@ -3255,17 +3255,24 @@ function startGoFireworks(colors, canvas) {
 
   function launchRocket() {
     // Pick the explosion apex first so it's always visible, then derive the launch point.
-    const apexX = canvas.width  * (0.12 + Math.random() * 0.76);
+    // Keep it far enough in from the sides for its sparks (up to ~140 px
+    // out) to stay on a narrow portrait screen.
+    const marginX = Math.min(canvas.width * 0.4, Math.max(canvas.width * 0.12, 110));
+    const apexX = marginX + Math.random() * (canvas.width - 2 * marginX);
     const apexY = canvas.height * (0.04 + Math.random() * 0.24);
     const T     = 1.4 + Math.random() * 1.0;   // 1.4–2.4 s travel time (half speed)
     const h     = canvas.height - apexY;
     const vy0   = -2 * h / T;
     const grav  = 2 * h / (T * T);
     const color = colors[Math.floor(Math.random() * colors.length)];
-    // ±30° off vertical: vx = ±|vy0|×tan(30°)
-    const vx      = (Math.random() * 2 - 1) * Math.abs(vy0) * 0.5774;
-    // Launch x is derived from apex so the explosion stays on-screen
-    const launchX = Math.max(0, Math.min(canvas.width, apexX - vx * T));
+    // Up to 30° off vertical: vx = ±|vy0|×tan(30°), but no more sideways
+    // than lets it start on screen. On a tall portrait screen 30° drifts
+    // further than the screen is wide; the launch point used to be pushed
+    // back on screen without changing vx, so the rocket overshot its apex
+    // and burst off the side.
+    let vx = (Math.random() * 2 - 1) * Math.abs(vy0) * 0.5774;
+    vx = Math.max((apexX - canvas.width) / T, Math.min(apexX / T, vx));
+    const launchX = apexX - vx * T; // so it bursts at apexX
     _goParticles.push({
       type:'rocket', x:launchX, y:canvas.height,
       vx, vy:vy0, grav,
