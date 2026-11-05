@@ -539,7 +539,10 @@ function renderHost() {
   if (ph !== 'countdown' && ph !== 'playing') setHostView('console');
   const config = hostPage !== '';
   $('host-config-btn').hidden = config;
-  $('host-banner').hidden = config || !hostInGame();
+  const banner = $('host-banner');
+  banner.hidden = config || !hostInGame();
+  banner.textContent = state.paused ? 'Paused' : 'Battle in progress';
+  banner.classList.toggle('paused', !!state.paused);
 
   if (config) {
     renderHostConfig();
@@ -547,7 +550,7 @@ function renderHost() {
   }
   const players = state.players.filter((p) => !p.host).length;
   $('host-title').textContent = { idle: 'Server Settings', lobby: 'Server Lobby', countdown: 'Starting',
-    playing: state.paused ? 'Paused' : 'Server Gameplay', ended: 'Game Over' }[ph];
+    playing: 'Server Gameplay', ended: 'Game Over' }[ph]; // paused: the banner says so
   $('host-info').textContent = ph === 'lobby' ? `${players}/${state.capacity}` : '';
 
   const tabs = hostTabs(ph);

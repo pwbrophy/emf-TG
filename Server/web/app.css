@@ -843,15 +843,16 @@ details.item[open] > summary::after { transform: rotate(90deg); }
 .timer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .battle-btns { display: flex; flex-direction: column; gap: 8px; }
 
-/* Server Gameplay: always says a game is on, above the tabs. */
+/* Server Gameplay: always says a game is on (green), or that it's paused
+   (orange), above the tabs. */
 .battle-banner {
   flex: none;
   margin: 0 max(var(--gutter), env(safe-area-inset-right)) 6px max(var(--gutter), env(safe-area-inset-left));
   padding: 6px 10px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--ok);
   border-radius: 12px;
-  background: rgba(255, 77, 28, 0.12);
-  color: var(--accent2);
+  background: rgba(60, 207, 110, 0.12);
+  color: var(--ok);
   font-family: Impact, system-ui, sans-serif;
   font-size: clamp(1.2rem, 6.5vw, 2.6rem);
   white-space: nowrap;
@@ -859,7 +860,13 @@ details.item[open] > summary::after { transform: rotate(90deg); }
   line-height: 1.1;
   text-align: center;
   text-transform: uppercase;
-  text-shadow: 0 0 18px rgba(255, 77, 28, 0.6);
+  text-shadow: 0 0 18px rgba(60, 207, 110, 0.5);
+}
+.battle-banner.paused {
+  border-color: var(--accent2);
+  background: rgba(255, 140, 0, 0.12);
+  color: var(--accent2);
+  text-shadow: 0 0 18px rgba(255, 140, 0, 0.6);
 }
 .timer-row .timer-big { font-size: 2.4rem; }
 .paused-tag { color: var(--accent2); font-weight: 800; letter-spacing: 0.15em; }
