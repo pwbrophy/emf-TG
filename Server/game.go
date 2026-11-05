@@ -1050,11 +1050,16 @@ func (g *game) setPhase(ph phase) {
 	g.phase = ph
 	if ph == phaseLobby {
 		// Tanks from the last game are free again, and back to their idle lights.
-		for _, p := range g.players {
+		// Players still on the results who haven't tapped Play Again join the
+		// back of the queue, behind those who did: left "finished", they were
+		// never let into a lobby again and sat on old results for good.
+		for _, p := range g.sortedPlayers() {
 			if p.status == stFinished {
 				p.tank, p.role, p.allowGunner = "", "", false
 				if p.isHost {
 					p.status = stLobby // the host playing too is back in the lobby
+				} else {
+					g.enqueue(p)
 				}
 			}
 		}

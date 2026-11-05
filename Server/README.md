@@ -35,9 +35,9 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | `tanks.go` | Tank discovery, control WebSocket (`/esp32`), command queue, video pull |
 | `video.go`, `stats.go` | Video relay to viewers; frame-rate and CPU stats |
 | `settings.go` | Host settings, saved to `settings.json` |
-| `web/index.html`, `app.js`, `app.css` | The phone app: menu, join, queue, lobby, results, host console. Every screen: top bar, tabs, content, bottom bar with Back on the left and Next/Start on the right. Host settings save as soon as they change |
+| `web/index.html`, `app.js`, `app.css` | The phone app: menu, join, queue, lobby, host console. Every screen: top bar, tabs, content, bottom bar with Back on the left and Next/Start on the right. Host settings save as soon as they change |
 | `web/display.html` | The spectator display for a big screen (the Unity-era page with its connection swapped for the Go server's) |
-| `web/play.html` | The in-game screen: the Unity-era player page kept as it was (controls, HUD, effects, keyboard/gamepad), with `TGHub` standing in for its SignalR connection. Players are sent here when their game starts |
+| `web/play.html` | The in-game screen: the Unity-era player page kept as it was (controls, HUD, effects, keyboard/gamepad), with `TGHub` standing in for its SignalR connection. Players are sent here when their game starts; after it, it shows the game over sequence (victory/defeat, then Match Stats with Play Again and Visit Thundergeddon.com). Play Again goes back to the main page, which queues them for the next game |
 | `web/streams.html` | Video test page |
 | `web/test-grid.html` | Test grid: six player pages on one screen (each its own pretend phone), with Connect All / Choose Tanks / New Names / Reload All. `?players=N` for 1-12 |
 | `cmd/loadtest` | Fake tanks and viewers for load tests |

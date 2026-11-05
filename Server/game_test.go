@@ -338,6 +338,37 @@ func TestFullGameAndBackOfQueue(t *testing.T) {
 	}
 }
 
+// A player who stays on the results without tapping Play Again is queued
+// when the host goes back to the lobby, behind anyone who did tap it.
+func TestFinishedPlayersQueueWhenLobbyReopens(t *testing.T) {
+	g, _ := newTestGame(t, "Desert-01", "Jungle-02")
+	h := hostUp(t, g)
+	a := phone(t, g, "a")
+	a.send(inMsg{T: "join", Name: "Alice"})
+	b := phone(t, g, "b")
+	b.send(inMsg{T: "join", Name: "Bob"})
+	a.send(inMsg{T: "pick_tank", Tank: "a"})
+	b.send(inMsg{T: "pick_tank", Tank: "b"})
+	h.send(inMsg{T: "host_start", Force: true})
+	h.send(inMsg{T: "host_end"})
+	if s := a.state(); s.Me.Status != "finished" {
+		t.Fatalf("Alice after the game: %+v", s.Me)
+	}
+
+	b.send(inMsg{T: "play_again"}) // Bob taps Play Again, Alice doesn't
+	g.settings.MaxPlayers = 1      // room for one: Bob, then Alice waits
+	h.send(inMsg{T: "host_lobby"})
+	if s := b.state(); s.Me.Status != "lobby" {
+		t.Fatalf("Bob should be in the lobby: %+v", s.Me)
+	}
+	if s := a.state(); s.Me.Status != "queued" || s.Me.QueuePos != 1 || s.Me.Tank != "" {
+		t.Fatalf("Alice should be queued: %+v", s.Me)
+	}
+	if s := a.state(); len(s.Results) != 0 {
+		t.Fatalf("Alice still gets the old results: %+v", s.Results)
+	}
+}
+
 func TestStartWarnsAboutPlayersWithoutTanks(t *testing.T) {
 	g, _ := newTestGame(t, "Desert-01", "Jungle-02")
 	h := hostUp(t, g)

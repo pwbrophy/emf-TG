@@ -861,11 +861,28 @@
       color: #fff;
       letter-spacing: 0.12em;
       text-align: center;
+      position: relative;
+      text-shadow: 0 0 10px rgba(255,255,255,0.7), 0 0 30px rgba(255,80,0,0.5), 0 0 60px rgba(255,0,0,0.2);
+    }
+    /* The pulse: a copy of the text that is only its big glow, fading in and
+       out. Animating text-shadow itself repainted a 150 px blur every frame
+       (and kept on doing so behind the victory screen); an opacity fade is
+       done by the GPU without repainting. */
+    #go-title::after {
+      content: attr(data-text);
+      position: absolute;
+      inset: 0;
+      color: transparent;
+      text-shadow: 0 0 30px rgba(255,255,255,1), 0 0 80px rgba(255,80,0,0.9), 0 0 150px rgba(255,0,0,0.4);
+      opacity: 0;
+      will-change: opacity;
+      pointer-events: none;
       animation: go-pulse 0.9s ease-in-out infinite alternate;
     }
+    #go-p1:not(.visible) #go-title::after { animation: none; }
     @keyframes go-pulse {
-      from { text-shadow: 0 0 10px rgba(255,255,255,0.7), 0 0 30px rgba(255,80,0,0.5), 0 0 60px rgba(255,0,0,0.2); }
-      to   { text-shadow: 0 0 30px rgba(255,255,255,1),   0 0 80px rgba(255,80,0,0.9), 0 0 150px rgba(255,0,0,0.4); }
+      from { opacity: 0; }
+      to   { opacity: 1; }
     }
 
     /* Black fade overlay — sits between video (z0) and GAME OVER text (z2) */
@@ -1501,7 +1518,7 @@
 
   <!-- Phase 1: pulsing GAME OVER text over video -->
   <div id="go-p1">
-    <div id="go-title">GAME OVER</div>
+    <div id="go-title" data-text="GAME OVER">GAME OVER</div>
   </div>
 
   <!-- Animated black fade -->
@@ -1542,7 +1559,8 @@
     <div class="go-stat-sub"><span class="go-stat-label">from kills</span><span class="go-stat-value" id="stat-vp-kills">&#8212;</span></div>
     <div class="go-stat-row"><span class="go-stat-label">Your nemesis</span><span class="go-stat-value go-nemesis" id="stat-nemesis">&#8212;</span></div>
     <div class="go-btn-row">
-      <button class="go-btn-primary" onclick="continueToSite()">CONTINUE</button>
+      <button class="go-btn-primary" onclick="playAgain()">PLAY AGAIN</button>
+      <button class="go-btn-secondary" onclick="leaveForSite()">VISIT THUNDERGEDDON.COM</button>
     </div>
   </div>
 
@@ -2390,7 +2408,7 @@ function tgOnMessage(hub, m) {
     if (!tgOver) {
       tgOver = true;
       // A game the host ended has no winner: the page goes straight on to
-      // the main page's results; otherwise the victory/defeat sequence plays.
+      // the stats; otherwise the victory/defeat sequence plays first.
       const mine = (m.results || []).find(r => r.name === me.name) || {};
       hub.emit('GameOver', { winnerTeam: m.winnerAlliance || '', reason: m.endCode || 'manual' });
       hub.emit('PlayerStats', {
@@ -2991,12 +3009,9 @@ let _goParticles    = [];
 let _pendingStats   = null;
 
 function onGameOver(data) {
-  // Operator manually ended the game — no winner, no cinematic, straight to join screen.
-  if (data.reason === 'manual' || !data.winnerTeam) {
-    dbg('onGameOver: manual end — returning to join');
-    returnToJoin('Game ended by operator.');
-    return;
-  }
+  // The host ended the game: no winner, so no victory/defeat — straight on to
+  // the stats, which hold Play Again (see below).
+  const manualEnd = data.reason === 'manual' || !data.winnerTeam;
 
   // Only run the cinematic sequence for players actively in game.
   // Everyone else (join/lobby screen) just gets returned to the join screen.
@@ -3073,6 +3088,15 @@ function onGameOver(data) {
   stopGoFireworks();
 
   overlay.classList.add('active');
+
+  if (manualEnd) {
+    dbg('onGameOver: the host ended the game — straight to stats');
+    stopGameStream();
+    document.body.classList.remove('game-active');
+    try { screen.orientation.unlock(); } catch (_) {}
+    goToStats();
+    return;
+  }
 
   // Phase 1: fade in GAME OVER text (screen-playing stays active — video visible)
   requestAnimationFrame(() => p1.classList.add('visible'));
@@ -3165,9 +3189,25 @@ function resetGoOverlay() {
   _pendingStats = null;
 }
 
-function continueToSite() {
-  // On to the main page's results, with Play Again.
+// Play Again: back to the main page, which puts a player who has just played
+// at the back of the queue (play_again) and shows them the queue or the lobby.
+// The host goes back to the host console.
+function playAgain() {
   tgToMainPage();
+}
+
+// Visit Thundergeddon.com: the player is done, so give up their place (or the
+// next lobby would hold one for them until the server forgets them, 90 s
+// later). The host keeps hosting. Waits for "leave" to go out before going.
+function leaveForSite() {
+  const me = tgState && tgState.me;
+  if (connection && me && !me.isHost) connection._raw({ t: 'leave' });
+  const ws = connection && connection._ws;
+  const until = performance.now() + 1000;
+  (function go() {
+    if (ws && ws.bufferedAmount > 0 && performance.now() < until) { setTimeout(go, 50); return; }
+    visitThundergeddon();
+  })();
 }
 
 // ── Fireworks engine ─────────────────────────────────────────────────────────
@@ -3176,14 +3216,42 @@ function continueToSite() {
 const FW_SPARK_SCALE = 0.25; // physics time-scale for sparks
 const FW_GRAVITY_SPARK = 180; // px/s² downward for sparks (at 1x scale)
 
+// A soft round dot (colour at the centre, fading to nothing at the edge),
+// drawn once per colour and then stamped with drawImage. The sparks used to
+// build two new radial gradients each, every frame, switching the blend mode
+// for each one: with 100+ sparks in the air that is several hundred unbatched
+// gradient draws a frame, which is what dropped phones' frame rates on the
+// victory screen. A stamped sprite looks the same and costs a fraction.
+const FW_SPRITE_PX = 64;
+const _fwSprites = {};
+function fwSprite(color, peakAlpha = 1) {
+  const key = color + '/' + peakAlpha;
+  if (_fwSprites[key]) return _fwSprites[key];
+  const c = document.createElement('canvas');
+  c.width = c.height = FW_SPRITE_PX;
+  const g = c.getContext('2d');
+  const r = FW_SPRITE_PX / 2;
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, color);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.globalAlpha = peakAlpha;
+  g.fillStyle = grad;
+  g.fillRect(0, 0, FW_SPRITE_PX, FW_SPRITE_PX);
+  return (_fwSprites[key] = c);
+}
+
 function startGoFireworks(colors, canvas) {
   const ctx = canvas.getContext('2d');
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
   _goParticles  = [];
+  const flashSprite = fwSprite('#ffffff', 0.75);
 
   let lastT      = 0;
   let nextRocket = 0;
+  // Frame rate and drawing time, every 3 s in the debug console, to check
+  // how a phone copes with the fireworks.
+  let fpsFrames = 0, fpsDrawMs = 0, fpsFrom = 0;
 
   function launchRocket() {
     // Pick the explosion apex first so it's always visible, then derive the launch point.
@@ -3220,7 +3288,7 @@ function startGoFireworks(colors, canvas) {
       _goParticles.push({
         type:'spark', x:rx, y:ry,
         vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed,
-        life:maxLife, maxLife, color, size,
+        life:maxLife, maxLife, color, size, sprite: fwSprite(color),
         freq:  10 + Math.random() * 22,   // glitter flicker Hz (real time)
         phase: Math.random() * Math.PI * 2,
         age:   0,
@@ -3231,7 +3299,16 @@ function startGoFireworks(colors, canvas) {
   function frame(t) {
     const dt = Math.min((t - lastT) / 1000, 0.05);
     lastT = t;
+    const drawFrom = performance.now();
+    if (!fpsFrom) fpsFrom = t;
+    if (t - fpsFrom >= 3000) {
+      dbg(`fireworks: ${(fpsFrames * 1000 / (t - fpsFrom)).toFixed(0)} fps, ` +
+          `${(fpsDrawMs / Math.max(1, fpsFrames)).toFixed(1)} ms drawing, ${_goParticles.length} sparks`);
+      fpsFrames = 0; fpsDrawMs = 0; fpsFrom = t;
+    }
 
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (t >= nextRocket) {
@@ -3240,6 +3317,7 @@ function startGoFireworks(colors, canvas) {
     }
 
     const alive = [];
+    const glows = []; // flashes and sparks, drawn together after the rockets
 
     for (const p of _goParticles) {
       if (p.type === 'rocket') {
@@ -3254,12 +3332,10 @@ function startGoFireworks(colors, canvas) {
           explodeRocket(p.x, p.y);
           // don't push — rocket consumed
         } else {
+          ctx.fillStyle = p.color;
           for (let i = 0; i < p.trail.length; i++) {
             ctx.globalAlpha = (i / p.trail.length) * 0.8;
-            ctx.fillStyle   = p.color;
-            ctx.beginPath();
-            ctx.arc(p.trail[i].x, p.trail[i].y, 1.6, 0, Math.PI*2);
-            ctx.fill();
+            ctx.fillRect(p.trail[i].x - 1.6, p.trail[i].y - 1.6, 3.2, 3.2);
           }
           ctx.globalAlpha = 1;
           ctx.fillStyle   = '#fff';
@@ -3270,19 +3346,7 @@ function startGoFireworks(colors, canvas) {
         }
 
       } else if (p.type === 'flash') {
-        // Single-frame additive flash at the explosion origin — not pushed to alive
-        const flashR = Math.min(canvas.width, canvas.height) * 0.25;
-        const flashG = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, flashR);
-        flashG.addColorStop(0, 'rgba(255,255,255,0.75)');
-        flashG.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 1;
-        ctx.fillStyle   = flashG;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, flashR, 0, Math.PI*2);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
-
+        glows.push(p); // single frame: not kept
       } else {
         // Sparks at 1/4-speed physics, full-speed glitter
         const sdt = dt * FW_SPARK_SCALE;
@@ -3294,69 +3358,64 @@ function startGoFireworks(colors, canvas) {
         p.x    += p.vx * sdt;
         p.y    += p.vy * sdt;
         p.life -= sdt;
-
         if (p.life > 0) {
-          const frac    = p.life / p.maxLife;
-          // Fast flicker in real time
-          const flicker = 0.5 + 0.5 * Math.sin(p.age * p.freq * Math.PI * 2 + p.phase);
-          // Glitter-out: hold bright for most of life, quick fade only in last 20%
-          const endFade = frac < 0.20 ? (frac / 0.20) : 1.0;
-          const alpha   = flicker * endFade;
-
-          // All spark layers use additive blending so overlapping sparks get brighter
-          ctx.globalCompositeOperation = 'lighter';
-
-          // Outer glow — radial gradient halo
-          ctx.globalAlpha = alpha * 0.6;
-          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3.0);
-          glowGrad.addColorStop(0, p.color);
-          glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = glowGrad;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 3.0, 0, Math.PI*2);
-          ctx.fill();
-
-          // Main body — radial gradient disk
-          ctx.globalAlpha = alpha;
-          const bodyGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-          bodyGrad.addColorStop(0, p.color);
-          bodyGrad.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = bodyGrad;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
-          ctx.fill();
-
-          // White core — visible when flicker is bright
-          if (flicker > 0.45) {
-            const coreFrac = (flicker - 0.45) / 0.55;
-            ctx.globalAlpha = alpha * coreFrac;
-            ctx.fillStyle   = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI*2);
-            ctx.fill();
-          }
-
-          // Cross sparkle at peak brightness
-          if (flicker > 0.80) {
-            const peakFrac = (flicker - 0.80) / 0.20;
-            const len = p.size * 3.5 * Math.max(0.3, frac);
-            ctx.globalAlpha = alpha * peakFrac * 0.95;
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth   = 0.9;
-            ctx.beginPath();
-            ctx.moveTo(p.x - len, p.y); ctx.lineTo(p.x + len, p.y);
-            ctx.moveTo(p.x, p.y - len); ctx.lineTo(p.x, p.y + len);
-            ctx.stroke();
-          }
-
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = 1;
+          glows.push(p);
           alive.push(p);
         }
       }
     }
 
+    // All glow layers blend additively, so overlapping sparks get brighter.
+    // One switch for the whole batch instead of one per spark.
+    ctx.globalCompositeOperation = 'lighter';
+    const flashR = Math.min(canvas.width, canvas.height) * 0.25;
+    for (const p of glows) {
+      if (p.type === 'flash') {
+        ctx.globalAlpha = 1;
+        ctx.drawImage(flashSprite, p.x - flashR, p.y - flashR, flashR * 2, flashR * 2);
+        continue;
+      }
+      const frac    = p.life / p.maxLife;
+      // Fast flicker in real time
+      const flicker = 0.5 + 0.5 * Math.sin(p.age * p.freq * Math.PI * 2 + p.phase);
+      // Glitter-out: hold bright for most of life, quick fade only in last 20%
+      const endFade = frac < 0.20 ? (frac / 0.20) : 1.0;
+      const alpha   = flicker * endFade;
+
+      // Outer glow halo, then the main body: the same soft dot at two sizes
+      const g = p.size * 3.0;
+      ctx.globalAlpha = alpha * 0.6;
+      ctx.drawImage(p.sprite, p.x - g, p.y - g, g * 2, g * 2);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(p.sprite, p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+
+      // White core — visible when flicker is bright
+      if (flicker > 0.45) {
+        const coreFrac = (flicker - 0.45) / 0.55;
+        ctx.globalAlpha = alpha * coreFrac;
+        ctx.fillStyle   = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // Cross sparkle at peak brightness
+      if (flicker > 0.80) {
+        const peakFrac = (flicker - 0.80) / 0.20;
+        const len = p.size * 3.5 * Math.max(0.3, frac);
+        ctx.globalAlpha = alpha * peakFrac * 0.95;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth   = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(p.x - len, p.y); ctx.lineTo(p.x + len, p.y);
+        ctx.moveTo(p.x, p.y - len); ctx.lineTo(p.x, p.y + len);
+        ctx.stroke();
+      }
+    }
+
     _goParticles    = alive;
+    fpsFrames++;
+    fpsDrawMs += performance.now() - drawFrom;
     _goFireworksRaf = requestAnimationFrame(frame);
   }
 

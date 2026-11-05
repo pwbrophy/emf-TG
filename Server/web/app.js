@@ -149,9 +149,12 @@ function homeView() {
   return JOIN_LINK ? 'join' : 'menu';
 }
 
+let playAgainSent = false;
+
 function currentScreen() {
   if (!state) return localView;
   const me = state.me;
+  if (me.status !== 'finished') playAgainSent = false;
   const inGame = state.phase === 'countdown' || state.phase === 'playing';
   if (me.isHost && hostWanted) {
     if (hostDriving() && me.status === 'playing' && inGame) return 'play';
@@ -161,7 +164,12 @@ function currentScreen() {
     case 'queued': return 'wait';
     case 'lobby': return state.phase === 'lobby' ? 'lobby' : 'wait';
     case 'playing': return 'play';
-    case 'finished': return 'results';
+    // Just played: the game page showed the result and stats; arriving here
+    // (Play Again there, or a reload) means on to the next game, so join the
+    // back of the queue. Sent once per game; the server ignores repeats.
+    case 'finished':
+      if (!playAgainSent) { playAgainSent = true; send({ t: 'play_again' }); }
+      return 'wait';
   }
   return localView;
 }
@@ -188,7 +196,6 @@ function render() {
     case 'host': renderHost(); break;
     case 'wait': renderWait(); break;
     case 'lobby': renderLobby(); break;
-    case 'results': renderResults(); break;
   }
 }
 
@@ -197,7 +204,6 @@ function enterScreen(screen) {
     $('join-name').value = store('tg_player_name') || '';
     setTimeout(() => $('join-name').focus(), 50);
   }
-  if (screen === 'results') fireworks();
 }
 
 function go(view) {
@@ -219,7 +225,7 @@ function setTab(scope, id) {
   tabChoice[scope] = id;
   session('tg_tabs', JSON.stringify(tabChoice));
   render();
-  for (const body of ['host-body', 'lobby-body', 'results-body']) $(body).scrollTop = 0;
+  for (const body of ['host-body', 'lobby-body']) $(body).scrollTop = 0;
 }
 
 function renderTabs(el, scope, tabs, current) {
@@ -323,6 +329,9 @@ function renderWait() {
   } else if (state.phase === 'lobby') {
     title = 'The lobby is full';
     detail = "You'll be let in when there's room.";
+  } else if (state.phase === 'ended') {
+    title = 'Game over';
+    detail = "You're in the queue for the next game: the lobby opens soon.";
   } else {
     title = 'Game in progress';
     detail = "You're in the queue for the next game.";
@@ -432,6 +441,8 @@ function renderLobby() {
 }
 
 // ── Game Over / Stats ────────────────────────────────────────────────────────
+// The host console's Game Over page. Players see their result and stats on
+// play.html, which has Play Again.
 
 function resultsTable() {
   const rows = (state.results || []).map((r) =>
@@ -471,33 +482,6 @@ function resultsBody(scope) {
   const body = tab === 'scores' ? `<div class="card">${resultsTable()}</div>`
     : tab === 'details' ? `<div class="card">${resultsDetails()}</div>` : scoreCard();
   return { tabs, tab, html: head + body };
-}
-
-function renderResults() {
-  const r = resultsBody('results');
-  renderTabs($('results-tabs'), 'results', r.tabs, r.tab);
-  setHTML($('results-body'), r.html);
-}
-
-function fireworks() {
-  const colours = ['#ff4d1c', '#ff8c00', '#ffd27a', '#ffffff', '#4fbf5a', '#1e90ff'];
-  for (let burst = 0; burst < 6; burst++) {
-    setTimeout(() => {
-      const x = 15 + Math.random() * 70, y = 15 + Math.random() * 40;
-      for (let i = 0; i < 18; i++) {
-        const s = document.createElement('div');
-        s.className = 'spark';
-        const a = (i / 18) * Math.PI * 2, d = 60 + Math.random() * 60;
-        s.style.left = x + 'vw';
-        s.style.top = y + 'vh';
-        s.style.background = colours[(burst + i) % colours.length];
-        s.style.setProperty('--dx', Math.cos(a) * d + 'px');
-        s.style.setProperty('--dy', Math.sin(a) * d + 'px');
-        document.body.append(s);
-        setTimeout(() => s.remove(), 1200);
-      }
-    }, burst * 350);
-  }
 }
 
 // ── Host pages ───────────────────────────────────────────────────────────────
@@ -1129,7 +1113,6 @@ document.addEventListener('click', (e) => {
     case 'leave-gunner': send({ t: 'leave_gunner' }); break;
     case 'allow-gunner': send({ t: 'allow_gunner', on: el.checked }); break;
     case 'swap-roles': send({ t: 'swap_roles' }); break;
-    case 'play-again': send({ t: 'play_again' }); break;
     case 'host-drive': setHostView('drive'); render(); break;
     case 'host-open': send({ t: 'host_open' }); break;
     case 'host-start': send({ t: 'host_start' }); break;
