@@ -96,11 +96,18 @@ setInterval(() => send({ t: 'ping' }), 5000);
 
 function onMessage(m) {
   switch (m.t) {
-    case 'state':
+    case 'state': {
+      const wasInGame = state && (state.phase === 'countdown' || state.phase === 'playing');
       state = m;
       stateAt = performance.now();
+      if (!wasInGame && hostInGame()) {
+        // A game has started: the host's page opens on its Battle tab.
+        delete tabChoice['host-game'];
+        session('tg_tabs', JSON.stringify(tabChoice));
+      }
       render();
       break;
+    }
     case 'error':
       toast(m.msg);
       break;
@@ -532,6 +539,7 @@ function renderHost() {
   if (ph !== 'countdown' && ph !== 'playing') setHostView('console');
   const config = hostPage !== '';
   $('host-config-btn').hidden = config;
+  $('host-banner').hidden = config || !hostInGame();
 
   if (config) {
     renderHostConfig();
@@ -543,8 +551,11 @@ function renderHost() {
   $('host-info').textContent = ph === 'lobby' ? `${players}/${state.capacity}` : '';
 
   const tabs = hostTabs(ph);
-  const tab = tabs.length ? currentTab('host-' + ph, tabs) : '';
-  renderTabs($('host-tabs'), 'host-' + ph, tabs, tab);
+  // The countdown and the game share one tab choice (reset to Battle when a
+  // game starts, onMessage).
+  const scope = hostInGame() ? 'host-game' : 'host-' + ph;
+  const tab = tabs.length ? currentTab(scope, tabs) : '';
+  renderTabs($('host-tabs'), scope, tabs, tab);
 
   let html = '';
   switch (tab || ph) {
@@ -619,10 +630,11 @@ function hostBattleTab() {
     ? '<button class="btn primary" type="button" data-action="host-drive" style="margin-bottom:10px">Drive My Tank</button>' : '';
   const pause = ph === 'playing'
     ? `<button class="btn small ${state.paused ? 'primary' : 'secondary'}" type="button" data-action="host-pause" data-on="${!state.paused}">${state.paused ? 'Resume' : 'Pause Game'}</button>` : '';
+  const close = '<button class="btn small danger" type="button" data-action="host-close">Close Game</button>';
   return `<div class="card"><div class="timer-row">
       <div><h3 style="margin:0">${ph === 'countdown' ? 'Starting in' : 'Time left'}</h3>
       <div class="timer-big" id="host-timer-big">${fmtClock(remainingMs())}</div>
-      ${state.paused ? '<div class="paused-tag">PAUSED</div>' : ''}</div>${pause}</div></div>
+      ${state.paused ? '<div class="paused-tag">PAUSED</div>' : ''}</div><div class="battle-btns">${pause}${close}</div></div></div>
     ${drive}
     <div class="two-col">${scoreCard()}${pointsCard(true)}</div>`;
 }
@@ -805,8 +817,7 @@ function renderHostConfig() {
     default:
       html = `<div class="list">${CONFIG_PAGES.filter(([id]) => !hostInGame() || !CONFIG_PAGES_BETWEEN_GAMES.includes(id)).map(([id, title, sub]) =>
         `<button type="button" class="item menu-row" data-action="host-page" data-page="${id}">
-          <div class="main"><div class="name">${title}</div><div class="sub">${sub}</div></div><span class="chev">&rsaquo;</span></button>`).join('')}</div>
-        <button class="btn danger" type="button" data-action="host-close" style="margin-top:16px">Close Game</button>`;
+          <div class="main"><div class="name">${title}</div><div class="sub">${sub}</div></div><span class="chev">&rsaquo;</span></button>`).join('')}</div>`;
   }
   if (!tabs.length) renderTabs($('host-tabs'), 'none', [], '');
   setHTML($('host-body'), html);
