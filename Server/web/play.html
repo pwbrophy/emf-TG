@@ -1170,6 +1170,10 @@
       -webkit-mask-image: none;
       mask-image: none;
     }
+    /* Simple beam: the plain white trapezoid band (clip-path only, see
+       updateSimpleBeam), with no glow filter and no feathered mask. */
+    #fire-beam.simple { filter: none !important; }
+    #fire-beam.simple #fire-beam-shape { -webkit-mask-image: none !important; mask-image: none !important; }
 
     /* ── Hit direction overlay ── */
     #hit-overlay {
@@ -4064,9 +4068,10 @@ let _lastFireTickAt   = 0;
 let _fireJankStrikes  = 0;
 
 // Simple shot effects (Go server addition): on old, slow devices (an Android 5
-// Fire 7 with 1 GB stuttered badly on every shot) the shot is just a plain
-// white flash that fades out, with no beam, no blended flash and no camera
-// shake. Chosen automatically for Android 6 or older, or 1 GB of memory or
+// Fire 7 with 1 GB stuttered badly on every shot) the shot is a plain white
+// flash that fades out and a plain white beam (the same sweep, but a hard-edged
+// band with no glow or feathering, see updateSimpleBeam), with no blended flash
+// and no camera shake. Chosen automatically for Android 6 or older, or 1 GB of memory or
 // less; the cog menu's SHOT EFFECTS button overrides it (saved per browser as
 // tg_fx = 'simple' | 'full').
 const FX_KEY = 'tg_fx';
@@ -4172,7 +4177,7 @@ function updateFireEffectBounds() {
     el.style.height = height + 'px';
   }
   const beamEl = document.getElementById('fire-beam');
-  if (beamEl) beamEl.style.filter = computeBeamGlowFilter(width);
+  if (beamEl) beamEl.style.filter = _simpleFx ? 'none' : computeBeamGlowFilter(width);
 }
 window.addEventListener('resize', () => { if (document.body.classList.contains('game-active')) updateFireEffectBounds(); });
 
@@ -4231,6 +4236,28 @@ function updateFireBeamClip(elapsedMs) {
     `rgba(0,0,0,0) ${trailY}%, rgba(0,0,0,0) 100%)`;
   shapeEl.style.webkitMaskImage = mask;
   shapeEl.style.maskImage = mask;
+  wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
+}
+
+// Simple effects' beam: the same band sweeping from the muzzle to the
+// reticule as updateFireBeamClip, drawn as a hard-edged white quadrilateral
+// (the slice of the barrel→reticule trapezoid between the band's two edges)
+// by clip-path alone. Repainting a small solid shape is cheap; the glow blur
+// and gradient mask of the full beam are what old devices can't keep up with.
+function updateSimpleBeam(elapsedMs) {
+  const wrapperEl = document.getElementById('fire-beam');
+  const shapeEl   = document.getElementById('fire-beam-shape');
+  if (!wrapperEl || !shapeEl) return;
+  const p = beamEaseProgress(elapsedMs);
+  const trailY = BEAM_BASE_Y + (BEAM_APEX_Y - BEAM_BASE_Y) * p;
+  const bandH  = BEAM_BAND_H_START + (BEAM_BAND_H_END - BEAM_BAND_H_START) * p;
+  const leadY  = Math.max(BEAM_APEX_Y, trailY - bandH);
+  const halfW  = y => BEAM_APEX_HALF_W +
+    (BEAM_BASE_HALF_W - BEAM_APEX_HALF_W) * (y - BEAM_APEX_Y) / (BEAM_BASE_Y - BEAM_APEX_Y);
+  const hl = halfW(leadY), ht = halfW(trailY);
+  const clip = `polygon(${50 - hl}% ${leadY}%,${50 + hl}% ${leadY}%,` +
+               `${50 + ht}% ${trailY}%,${50 - ht}% ${trailY}%)`;
+  shapeEl.style.clipPath = shapeEl.style.webkitClipPath = clip;
   wrapperEl.style.opacity = String(beamOpacityAt(elapsedMs));
 }
 
@@ -4314,7 +4341,7 @@ function noteFireTickTiming() {
 // Called once per real (or emulated) video frame while any of fire-flash,
 // fire-beam, or camera shake is active.
 function onVideoFrameTick() {
-  if (_fireBeamActive) noteFireTickTiming();
+  if (_fireBeamActive && !_simpleFx) noteFireTickTiming(); // its low-FX fallback would add a blur back
   if (_fireFlashActive) {
     const el = document.getElementById('fire-flash');
     const elapsed = performance.now() - _fireStartTime;
@@ -4328,7 +4355,7 @@ function onVideoFrameTick() {
   }
   if (_fireBeamActive) {
     const elapsed = performance.now() - _fireStartTime;
-    updateFireBeamClip(elapsed);
+    if (_simpleFx) updateSimpleBeam(elapsed); else updateFireBeamClip(elapsed);
     if (elapsed >= BEAM_MS) {
       _fireBeamActive = false;
       document.getElementById('fire-beam').style.display = 'none';
@@ -4361,10 +4388,17 @@ function playFireFx() {
     stopFireFx();
     updateFireEffectBounds();
     playSimpleFireFx(flashEl);
+    beamEl.classList.add('simple');
+    beamEl.style.display = 'block';
+    _fireStartTime   = performance.now();
+    _fireBeamActive  = true;
+    updateSimpleBeam(0);
+    ensureFireTicking();
     return;
   }
   if (_simpleFxTimer) { clearTimeout(_simpleFxTimer); _simpleFxTimer = null; }
   flashEl.classList.remove('simple');
+  beamEl.classList.remove('simple');
   flashEl.style.transition = '';
   flashEl.style.display = beamEl.style.display = 'block'; // hidden while idle — see CSS
   updateFireEffectBounds();
