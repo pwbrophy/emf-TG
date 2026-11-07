@@ -463,12 +463,15 @@
     }
 
     /* Top right: the host's HOST button (host playing too) above the cog,
-       then the cog's menu, in one column so they never overlap. */
+       then the cog's menu, in one column so they never overlap.
+       z-index 30: above #controls (20) and the toasts (25), so on a short
+       screen (old tablets) the open menu draws over the FIRE button and turret
+       slider instead of under them; below the death/pause overlays (45+). */
     #tg-topright {
       position: absolute;
       top: 3.2vmin;
       right: 2vmax;
-      z-index: 15;
+      z-index: 30;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
