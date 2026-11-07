@@ -1444,7 +1444,9 @@
       style="width:22.4vmin;height:22.4vmin;display:flex;align-items:center;justify-content:center;
              background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);
              border-radius:4.8vmin;color:rgba(255,255,255,0.8);font-size:10.24vmin;
-             cursor:pointer;line-height:1;">⛶</button>
+             cursor:pointer;line-height:1;"><!-- Drawn, not the ⛶ character: old Android has no font with it (showed a box) -->
+      <svg viewBox="0 0 24 24" style="width:1em;height:1em;display:block" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6"/></svg></button>
     <div style="font-size:2.77vmin;font-weight:600;letter-spacing:0.05em;color:rgba(255,255,255,0.7);text-shadow:0 1px 3px rgba(0,0,0,0.8);">FULLSCREEN</div>
   </div>
 
@@ -1493,7 +1495,10 @@
   <button id="tg-host-btn" onclick="tgToHostConsole()" style="display:none;
     padding:1.6vmin 3.2vmin;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.3);border-radius:4.8vmin;
     color:rgba(255,255,255,0.8);font-size:3.2vmin;font-weight:700;letter-spacing:0.08em;cursor:pointer;">HOST</button>
-  <button id="ui-cog" type="button" onclick="toggleUiMenu()" title="Screen size" aria-label="Screen size" aria-expanded="false">&#9881;</button>
+  <button id="ui-cog" type="button" onclick="toggleUiMenu()" title="Screen size" aria-label="Screen size" aria-expanded="false"><!-- Drawn, not the ⚙ character: old Android has no font with it (showed a box) -->
+    <svg viewBox="0 0 24 24" style="width:1em;height:1em;display:block" fill="none" stroke="currentColor" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke-width="4" stroke-dasharray="3.534 3.534"/>
+      <circle cx="12" cy="12" r="6.25" stroke-width="3"/></svg></button>
   <div id="ui-menu" hidden>
     <div>SCREEN SIZE</div>
     <div class="ui-row">
@@ -1508,7 +1513,8 @@
 
 <!-- ── Game paused overlay ─────────────────────────────────────────── -->
 <div id="game-paused-overlay">
-  <h2>&#9646;&#9646; PAUSED</h2>
+  <!-- Pause bars drawn, not ▮▮ characters: old Android fonts may not have them -->
+  <h2><span aria-hidden="true" style="display:inline-block;width:0.22em;height:0.72em;background:currentColor;margin-right:0.14em"></span><span aria-hidden="true" style="display:inline-block;width:0.22em;height:0.72em;background:currentColor;margin-right:0.35em"></span>PAUSED</h2>
   <p>Game paused by operator</p>
 </div>
 
