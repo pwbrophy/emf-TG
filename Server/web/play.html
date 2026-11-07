@@ -1161,6 +1161,15 @@
       mask-image: radial-gradient(ellipse 24% 42% at 50% 102%,
         rgba(0,0,0,0) 50%, #000 95%);
     }
+    /* Simple shot effects (old/slow devices, see _simpleFx): a flat white
+       layer faded by a CSS opacity transition, which the browser runs without
+       redrawing anything. No blend mode, no mask, no beam, no shake. */
+    #fire-flash.simple {
+      mix-blend-mode: normal;
+      background: #fff;
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
 
     /* ── Hit direction overlay ── */
     #hit-overlay {
@@ -1507,6 +1516,8 @@
       <button id="ui-scale-up" type="button" onclick="stepUiScale(1)" aria-label="Bigger">+</button>
     </div>
     <button id="ui-scale-reset" type="button" onclick="resetUiScale()">RESET</button>
+    <div style="margin-top:1.6vmin">SHOT EFFECTS</div>
+    <button id="ui-fx" type="button" onclick="setSimpleFx(!_simpleFx)" title="Simple effects run smoother on old phones and tablets">FULL</button>
   </div>
   </div>
 </div>
@@ -4052,6 +4063,54 @@ try { _lowFx = localStorage.getItem('tg_lowfx') === '1'; } catch (e) {}
 let _lastFireTickAt   = 0;
 let _fireJankStrikes  = 0;
 
+// Simple shot effects (Go server addition): on old, slow devices (an Android 5
+// Fire 7 with 1 GB stuttered badly on every shot) the shot is just a plain
+// white flash that fades out, with no beam, no blended flash and no camera
+// shake. Chosen automatically for Android 6 or older, or 1 GB of memory or
+// less; the cog menu's SHOT EFFECTS button overrides it (saved per browser as
+// tg_fx = 'simple' | 'full').
+const FX_KEY = 'tg_fx';
+function detectSlowDevice() {
+  const m = /Android (\d+)/.exec(navigator.userAgent);
+  if (m && Number(m[1]) <= 6) return true;
+  if (navigator.deviceMemory && navigator.deviceMemory <= 1) return true;
+  return false;
+}
+let _simpleFx = detectSlowDevice();
+try {
+  const v = localStorage.getItem(FX_KEY);
+  if (v === 'simple') _simpleFx = true;
+  else if (v === 'full') _simpleFx = false;
+} catch (e) {}
+let _simpleFxTimer = null;
+
+function setSimpleFx(on) {
+  _simpleFx = on;
+  try { localStorage.setItem(FX_KEY, on ? 'simple' : 'full'); } catch (e) {}
+  updateFxButton();
+}
+function updateFxButton() {
+  const b = document.getElementById('ui-fx');
+  if (b) b.textContent = _simpleFx ? 'SIMPLE' : 'FULL';
+}
+updateFxButton();
+
+function playSimpleFireFx(flashEl) {
+  if (_simpleFxTimer) clearTimeout(_simpleFxTimer);
+  flashEl.classList.add('simple');
+  flashEl.style.transition = 'none';
+  flashEl.style.display = 'block';
+  flashEl.style.opacity = '0.55';
+  void flashEl.offsetWidth; // apply the bright start before the fade begins
+  flashEl.style.transition = 'opacity 0.3s ease-out';
+  flashEl.style.opacity = '0';
+  _simpleFxTimer = setTimeout(() => {
+    _simpleFxTimer = null;
+    flashEl.style.display = 'none';
+    flashEl.style.transition = '';
+  }, 350);
+}
+
 // Static barrel→reticule trapezoid outline (X taper), computed once from the
 // BEAM_* constants — the apex/base positions never change, so this doesn't
 // need to be recomputed per tick like the mask (see updateFireBeamClip).
@@ -4205,7 +4264,7 @@ let _shakeStartTime = 0;
 
 function triggerShake(tierName) {
   const cfg = SHAKE_TIERS[tierName];
-  if (!cfg) return;
+  if (!cfg || _simpleFx) return; // no shake in simple effects: it moves the whole video every frame
   const now = performance.now();
   const activeDone = !_shakeTier || (now - _shakeStartTime) >= SHAKE_TIERS[_shakeTier].durationMs;
   if (activeDone || SHAKE_TIER_RANK[tierName] >= SHAKE_TIER_RANK[_shakeTier]) {
@@ -4298,6 +4357,15 @@ function playFireFx() {
   const beamEl  = document.getElementById('fire-beam');
   const beamShapeEl = document.getElementById('fire-beam-shape');
   if (!flashEl || !beamEl || !beamShapeEl) return;
+  if (_simpleFx) {
+    stopFireFx();
+    updateFireEffectBounds();
+    playSimpleFireFx(flashEl);
+    return;
+  }
+  if (_simpleFxTimer) { clearTimeout(_simpleFxTimer); _simpleFxTimer = null; }
+  flashEl.classList.remove('simple');
+  flashEl.style.transition = '';
   flashEl.style.display = beamEl.style.display = 'block'; // hidden while idle — see CSS
   updateFireEffectBounds();
   _fireStartTime   = performance.now();
@@ -4317,10 +4385,11 @@ function stopFireFx() {
   _fireBeamActive  = false;
   _shakeTier       = null;
   if (_fireTimerId) { clearInterval(_fireTimerId); _fireTimerId = null; }
+  if (_simpleFxTimer) { clearTimeout(_simpleFxTimer); _simpleFxTimer = null; }
   const flashEl = document.getElementById('fire-flash');
   const beamEl  = document.getElementById('fire-beam');
   const videoShakeEl = document.getElementById('video-shake');
-  if (flashEl) { flashEl.style.opacity = '0'; flashEl.style.display = 'none'; }
+  if (flashEl) { flashEl.style.transition = ''; flashEl.style.opacity = '0'; flashEl.style.display = 'none'; }
   if (beamEl)  { beamEl.style.opacity  = '0'; beamEl.style.display  = 'none'; }
   if (videoShakeEl) videoShakeEl.style.transform = '';
 }
