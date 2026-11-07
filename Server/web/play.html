@@ -1450,6 +1450,9 @@
 
   <!-- Controls -->
   <div id="controls">
+    <!-- 100 CSS px wide, never seen: tells screenRect() how this browser
+         reports boxes inside the zoomed controls (see there). -->
+    <div id="zoom-probe" style="position:absolute;left:0;top:0;width:100px;height:1px;visibility:hidden;pointer-events:none;"></div>
     <!-- Joystick -->
     <div id="joystick-base">
       <div id="joystick-cross"></div>
@@ -3652,6 +3655,22 @@ document.addEventListener('pointerdown', e => {
   setUiScale(saved === null ? UI_SCALE_DEFAULT : saved, false);
 }
 
+// On-screen box of a control inside the zoomed #controls, in the same pixels
+// as pointer events. Chrome before 128 (old tablets) gives getBoundingClientRect
+// of a zoomed element divided by its zoom, so at 70% the joystick's centre came
+// out in the wrong place and the thumb jumped away from the finger; Chrome 128+
+// and other browsers give the real box. The probe (100 CSS px wide) tells which:
+// it really is 100 × uiScale px wide on screen, whatever the browser reports.
+const zoomProbe = document.getElementById('zoom-probe');
+function screenRect(el) {
+  const r = el.getBoundingClientRect();
+  const p = zoomProbe.getBoundingClientRect();
+  const w = Math.max(p.width, p.height); // the long side, even with the body rotated
+  const k = w > 0 ? (100 * uiScale) / w : 1; // 1 normally, uiScale on old Chrome
+  if (Math.abs(k - 1) < 0.02) return r;
+  return { left: r.left * k, top: r.top * k, width: r.width * k, height: r.height * k };
+}
+
 const joyBase  = document.getElementById('joystick-base');
 const joyThumb = document.getElementById('joystick-thumb');
 
@@ -3659,7 +3678,7 @@ joyBase.addEventListener('pointerdown', e => {
   e.preventDefault();
   joyBase.setPointerCapture(e.pointerId);
   recomputeControlRadii(); // cheap, and self-corrects if a zoom/resize event was missed
-  const rect  = joyBase.getBoundingClientRect();
+  const rect  = screenRect(joyBase);
   joyOriginX  = rect.left + rect.width  / 2;
   joyOriginY  = rect.top  + rect.height / 2;
   _joyPointerHeld = true;
@@ -3765,7 +3784,7 @@ function recomputeControlRadii() {
   // height. Measuring .width there gave the turret slider's short side, so its
   // radius was a few px: the thumb barely moved and every drag was full speed.
   const rotated = document.body.classList.contains('game-active') && window.innerWidth < window.innerHeight;
-  const along = el => { const r = el.getBoundingClientRect(); return rotated ? r.height : r.width; };
+  const along = el => { const r = screenRect(el); return rotated ? r.height : r.width; };
 
   const jb = along(joyBase);
   const jt = along(joyThumb);
@@ -3836,7 +3855,7 @@ turretBase.addEventListener('pointerdown', e => {
   e.preventDefault();
   turretBase.setPointerCapture(e.pointerId);
   recomputeControlRadii(); // cheap, and self-corrects if a zoom/resize event was missed
-  const rect    = turretBase.getBoundingClientRect();
+  const rect    = screenRect(turretBase);
   turretOriginX = rect.left + rect.width  / 2;
   turretOriginY = rect.top  + rect.height / 2;
   turretActive  = true;
