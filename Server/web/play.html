@@ -3757,12 +3757,19 @@ const turretThumb = document.getElementById('turret-thumb');
 function recomputeControlRadii() {
   const prevJoy = JOY_RADIUS, prevTurret = TURRET_RADIUS;
 
-  const jb = joyBase.getBoundingClientRect().width;
-  const jt = joyThumb.getBoundingClientRect().width;
+  // getBoundingClientRect is the on-screen box: when the body is CSS-rotated 90°
+  // (portrait phone, not fullscreen) a control's landscape width is its on-screen
+  // height. Measuring .width there gave the turret slider's short side, so its
+  // radius was a few px: the thumb barely moved and every drag was full speed.
+  const rotated = document.body.classList.contains('game-active') && window.innerWidth < window.innerHeight;
+  const along = el => { const r = el.getBoundingClientRect(); return rotated ? r.height : r.width; };
+
+  const jb = along(joyBase);
+  const jt = along(joyThumb);
   if (jb > 0 && jt > 0) JOY_RADIUS = (jb - jt) / 2;
 
-  const tb = turretBase.getBoundingClientRect().width;
-  const tt = turretThumb.getBoundingClientRect().width;
+  const tb = along(turretBase);
+  const tt = along(turretThumb);
   if (tb > 0 && tt > 0) TURRET_RADIUS = (tb - tt) / 2;
 
   // Also runs on every pointerdown, so only log real changes — otherwise this
