@@ -6,6 +6,8 @@
 //                          out as the 3x-damage direction.
 //   flashFire(ms)        — all white for ms, then restore HP bar
 //   HP bar               — blue pixels proportional to remaining HP (default)
+//   AP bar               — turn-based games, during the tank's turn: green
+//                          pixels for its action points instead (setAp)
 //
 // A hit arriving during a fire flash immediately overrides it.
 // After any timed effect expires, the HP bar is automatically redrawn.
@@ -107,6 +109,17 @@ public:
         _nextPulseToggle = millis() + 500;
         if (_hp > 0 && (_effect == Effect::DeadBlink || _effect == Effect::DeathExplosion))
             _effect = Effect::None;
+        if (_effect == Effect::None && !_playerColorActive) _drawHpBar();
+    }
+
+    // ---- Action points (turn-based games) ----
+
+    // During its turn the server shows the tank's action points in green in
+    // place of the HP bar (set_ap); maxAp <= 0 goes back to the HP bar.
+    void setAp(float ap, float maxAp)
+    {
+        _ap    = (ap < 0) ? 0 : ap;
+        _apMax = maxAp;
         if (_effect == Effect::None && !_playerColorActive) _drawHpBar();
     }
 
@@ -224,6 +237,7 @@ public:
     {
         _hp                = 0;
         _maxHp             = 100;
+        _apMax             = 0;
         _effect            = Effect::None;
         _playerColorActive = false;
         _invulnActive      = false;
@@ -430,7 +444,7 @@ private:
     // Drive the 0.5 s warning pulse when HP is in the last LED's territory.
     void _updatePulse(uint32_t now)
     {
-        if (_effect != Effect::None || _hp <= 0 || _playerColorActive) return;
+        if (_effect != Effect::None || _hp <= 0 || _playerColorActive || _apMax > 0) return;
         float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
         if (ledsF > 1.0f) return; // only pulse at last LED
 
@@ -475,6 +489,7 @@ private:
     // and the whole strip looked dead well before HP actually hit 0.
     void _drawHpBar()
     {
+        if (_apMax > 0) { _drawApBar(); return; }
         _strip.clear();
         if (_hp > 0 && _maxHp > 0) {
             float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
@@ -498,6 +513,25 @@ private:
                     _strip.setPixelColor(partialIdx, _strip.Color(0, 0, partialBright));
             }
         }
+        _strip.show();
+    }
+
+    // The action-point bar: green, filled from the front like the HP bar,
+    // the last LED dimming smoothly as the points run down (no warning pulse).
+    void _drawApBar()
+    {
+        _strip.clear();
+        float ledsF = _ap * LED_STRIP_COUNT / _apMax;
+        if (ledsF > (float)LED_STRIP_COUNT) ledsF = (float)LED_STRIP_COUNT;
+        int fullLeds = (int)ledsF;
+        int firstFull = LED_STRIP_COUNT - fullLeds;
+        for (int i = firstFull; i < LED_STRIP_COUNT; i++)
+            _strip.setPixelColor(i, _strip.Color(0, DIM_BRIGHTNESS, 0));
+        uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * (float)DIM_BRIGHTNESS);
+        if (_ap > 0 && fullLeds == 0 && partialBright < 2) partialBright = 2; // a few points left: still visible
+        int partialIdx = firstFull - 1;
+        if (partialBright > 0 && partialIdx >= 0)
+            _strip.setPixelColor(partialIdx, _strip.Color(0, partialBright, 0));
         _strip.show();
     }
 
@@ -664,6 +698,8 @@ private:
     uint32_t          _seqStart          = 0;
     int               _hp                = 0;   // dark until set_hp received from server
     int               _maxHp             = 100;
+    float             _ap                = 0;     // action points shown while _apMax > 0 (set_ap)
+    float             _apMax             = 0;     // 0 = show the HP bar
     bool              _pulseOn           = true;  // warning-pulse display state
     uint32_t          _nextPulseToggle   = 0;
 

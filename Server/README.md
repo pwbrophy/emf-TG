@@ -82,7 +82,9 @@ fixed amount. A turn ends when every army taps END TURN (or can't act) or
 its time runs out, then a short handover. Overwatch (host toggle): a tank
 keeps its points and, during enemy turns, sends silent IR probes while
 enemies move; the first moving enemy it hits takes one shot. Destroyed tanks
-are out for the game; an alliance wins by being the last with tanks, by
+are out for the game. Once per turn a tank can spend points to recharge part
+of its shield (default 20 % for 5 AP). During its turn a tank's LEDs show its
+action points in green instead of its HP in blue. An alliance wins by being the last with tanks, by
 points (kills, and capture points held at the start of each of its turns),
 or on points at the round limit. The turn-based game has its own copies of
 the game rules (`Settings.Turns`: HP, damage, cooldown, points...), so the

@@ -526,12 +526,17 @@
       width: 36vmax;
       height: 5.4vmin;
       border-radius: 2.7vmin;
-      border: 2px solid rgba(120,200,255,0.9);
+      border: 2px solid rgba(120,255,150,0.9);
       background: rgba(10,10,16,0.65);
       overflow: hidden;
       z-index: 10;
     }
-    #tb-ap-fill { height: 100%; width: 100%; background: #2f8fff; transition: width 0.2s linear; }
+    /* Action points are green (the shield/HP bar is blue), as on the tank's LEDs. */
+    #tb-ap-fill { height: 100%; width: 100%; background: #2fbf4a; transition: width 0.2s linear; }
+    .tb-chip .tb-info.tb-ap { color: #5fe07a; opacity: 1; }
+    /* Darkens the video when it isn't this player's turn. */
+    #tb-dim { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+    body.tb-mode.tb-notmine #tb-dim { opacity: 0.6; }
     #tb-ap-text {
       position: absolute;
       inset: 0;
@@ -1527,6 +1532,8 @@
     <img id="stream" src="" alt="" onerror="this.style.display='none'; document.getElementById('stream-placeholder').style.display='flex';" />
     <canvas id="stream-canvas" style="display:none"></canvas>
     <div id="stream-placeholder" style="display:none">No video stream</div>
+    <!-- Turn-based (Go server addition): darkens the video when it isn't this player's turn. -->
+    <div id="tb-dim"></div>
 
     <!-- Fire beam overlay: glowing bolt travelling from the barrel to the reticule.
          #fire-beam (glow only) wraps #fire-beam-shape (the masked/clipped white
@@ -1648,6 +1655,7 @@
   <div id="tb-actions">
     <button id="tb-endturn" type="button" onclick="tbEndTurn()">END TURN</button>
     <button id="tb-overwatch" type="button" onclick="tbOverwatch()">OVERWATCH</button>
+    <button id="tb-recharge" type="button" onclick="tbRecharge()">SHIELD</button>
   </div>
 </div>
 
@@ -2432,6 +2440,7 @@ class TGHub {
     else if (method === 'SelectTank') this._raw({ t: 'select_tank', tank: a[0] });
     else if (method === 'EndTurn')    this._raw({ t: 'end_turn', on: !!a[0] });
     else if (method === 'Overwatch')  this._raw({ t: 'overwatch', on: !!a[0] });
+    else if (method === 'Recharge')   this._raw({ t: 'recharge' });
     // What this phone drew, for the server's video log (/api/video-log).
     else if (method === 'ReportVideoStats') this._raw({ t: 'vstats', vstats: a[0] });
     return Promise.resolve();
@@ -2671,6 +2680,16 @@ function tbOnState(m) {
   ow.textContent = me.overwatch ? 'ON OVERWATCH' : 'OVERWATCH';
   ow.disabled = !me.myTurn || !!me.turnDone || (!me.overwatch && ap + 1e-9 < (rules.fireAp || 0));
 
+  // Shield recharge: once per turn, rechargePct % of max HP for rechargeAp.
+  const rc = document.getElementById('tb-recharge');
+  rc.classList.toggle('tb-hide', !(rules.rechargePct > 0) || !me.myTurn || tbArmyGone);
+  rc.textContent = me.recharged ? 'SHIELD RECHARGED' : 'SHIELD +' + rules.rechargePct + '% · ' + (rules.rechargeAp || 0) + ' AP';
+  rc.disabled = !!me.recharged || !!me.turnDone || !!me.overwatch || (me.hp >= me.maxHp) ||
+    ap + 1e-9 < (rules.rechargeAp || 0);
+
+  // The video is darkened when it isn't this player's turn.
+  document.body.classList.toggle('tb-notmine', !me.myTurn);
+
   // A page reopened after the whole army was destroyed.
   const mine = me.tanks || [];
   if (!tbArmyGone && mine.length && mine.every(t => t.life && t.life !== 'alive')) tbArmyDestroyed();
@@ -2705,9 +2724,10 @@ function tbRenderTanks() {
       const out = t.life && t.life !== 'alive';
       const hp = Math.max(0, Math.min(100, (t.hp || 0) / (me.maxHp || 100) * 100));
       const info = out ? 'DESTROYED' : (t.overwatch ? 'OVERWATCH' : (t.ap != null ? t.ap.toFixed(1) + ' AP' : ''));
+      const infoCls = !out && !t.overwatch && t.ap != null ? 'tb-info tb-ap' : 'tb-info';
       return `<button type="button" class="tb-chip ${t.id === me.tank ? 'sel' : ''} ${out ? 'out' : ''}" ${out ? 'disabled' : ''}
         onclick="tbSelect('${t.id}')"><span class="tb-name">${i < 9 ? (i + 1) + '. ' : ''}${escHtml(t.name)}</span>
-        <span class="tb-hp"><i style="width:${hp}%"></i></span><span class="tb-info">${info}</span></button>`;
+        <span class="tb-hp"><i style="width:${hp}%"></i></span><span class="${infoCls}">${info}</span></button>`;
     }).join('');
   }
   const el = document.getElementById('tb-tanks');
@@ -2764,6 +2784,10 @@ function tbEndTurn() {
 
 function tbOverwatch() {
   if (connection && tgState) connection.send('Overwatch', !tgState.me.overwatch).catch(() => {});
+}
+
+function tbRecharge() {
+  if (connection && tgState) connection.send('Recharge').catch(() => {});
 }
 
 function tbTankDestroyed(m) {

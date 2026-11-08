@@ -747,7 +747,7 @@ function hostTankRow(t) {
   if (inGame && t.life) {
     status = t.life === 'dead' || t.life === 'destroyed' ? 'Destroyed' : t.life === 'returning' ? 'Returning' : `${t.hp || 0} HP`;
     status += t.invulnerable ? ' &middot; shielded' : '';
-    if (t.ap != null && t.life === 'alive') status += ` &middot; ${t.ap} AP${t.overwatch ? ' &middot; overwatch' : ''}`;
+    if (t.ap != null && t.life === 'alive') status += ` &middot; <span style="color:#3fbf5a">${t.ap} AP</span>${t.overwatch ? ' &middot; overwatch' : ''}`;
   } else if (t.pingMs) {
     status = `${t.pingMs} ms`;
   }
@@ -1033,6 +1033,10 @@ function turnSettingsForm() {
       <p class="hint">A tank with enough points for a shot can go on overwatch: during enemy turns it fires once, by itself,
       at the first enemy that moves into its line of fire. More than 4 tanks on overwatch at once makes each one check less often.</p></div>
     ${ow ? field('Overwatch IR listen window (ms)', 'turns.overwatchWindowMs', 'int', 'min="5" max="1000"') : ''}
+    <h4 class="wide">Shield recharge</h4>
+    ${field('Shield recharged (% of hit points, 0 = off)', 'turns.shieldRechargePct', 'num', 'min="0" max="100" step="1"')}
+    ${field('Recharge cost (action points)', 'turns.shieldRechargeAp', 'num', 'min="0" max="1000" step="0.5"')}
+    <p class="hint wide">Once per turn, each tank can spend the points to get that much of its shield back (never above full).</p>
     <h4 class="wide">Points</h4>
     ${field('Victory points to win', 'turns.pointsToWin', 'int', 'min="1"')}
     ${field('Points per kill', 'turns.pointsPerKill', 'int', 'min="0"')}

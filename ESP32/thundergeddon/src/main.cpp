@@ -1274,6 +1274,13 @@ static void handleWsText(const String& s)
         return;
     }
 
+    // Turn-based games: action points in green during the tank's turn
+    // (max 0 = back to the HP bar).
+    if (strcmp(cmd, "set_ap") == 0) {
+        leds.setAp(doc["ap"] | 0.0f, doc["max"] | 0.0f);
+        return;
+    }
+
     // ---- Generic flash (used by operator test panel) ----
 
     if (strcmp(cmd, "flash") == 0) {

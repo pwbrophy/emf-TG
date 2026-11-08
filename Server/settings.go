@@ -103,6 +103,11 @@ type TurnSettings struct {
 	Overwatch         bool `json:"overwatch"`
 	OverwatchWindowMs int  `json:"overwatchWindowMs"` // the probes' listen window: short, so they can run back to back
 
+	// Shield recharge: once per turn a tank can spend ShieldRechargeAp to
+	// get back ShieldRechargePct % of its max HP (0 % = switched off).
+	ShieldRechargePct float64 `json:"shieldRechargePct"`
+	ShieldRechargeAp  float64 `json:"shieldRechargeAp"`
+
 	TurnSeconds          int `json:"turnSeconds"`          // 0 = no time limit
 	HandoverSeconds      int `json:"handoverSeconds"`      // pause between turns
 	MaxRounds            int `json:"maxRounds"`            // 0 = no limit
@@ -116,6 +121,7 @@ func defaultTurnSettings() TurnSettings {
 		PointsPerKill: 25, PointsToWin: 300, CountdownSeconds: 5,
 		ApPerTurn: 10, DriveApPerSec: 1, TurretApPerSec: 0, FireAp: 4, ShotWindowMs: 250,
 		Overwatch: true, OverwatchWindowMs: 40,
+		ShieldRechargePct: 20, ShieldRechargeAp: 5,
 		TurnSeconds: 90, HandoverSeconds: 3, CapturePointsPerTurn: 10,
 	}
 }
@@ -135,6 +141,8 @@ func (t *TurnSettings) clamp() {
 	t.FireAp = max(0, min(t.FireAp, 1000))
 	t.ShotWindowMs = max(5, min(t.ShotWindowMs, 1000))
 	t.OverwatchWindowMs = max(5, min(t.OverwatchWindowMs, 1000))
+	t.ShieldRechargePct = max(0, min(t.ShieldRechargePct, 100))
+	t.ShieldRechargeAp = max(0, min(t.ShieldRechargeAp, 1000))
 	t.TurnSeconds = max(0, min(t.TurnSeconds, 60*60))
 	t.HandoverSeconds = max(0, min(t.HandoverSeconds, 30))
 	t.MaxRounds = max(0, min(t.MaxRounds, 1000))

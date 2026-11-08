@@ -53,6 +53,7 @@ const (
 type turnTank struct {
 	ap        float64
 	overwatch bool
+	recharged bool // the shield was recharged this turn
 
 	driveRate  float64   // action points per second the tracks are spending
 	turretRate float64   // and the turret
@@ -392,6 +393,12 @@ func (g *game) advanceTurn(now time.Time) {
 // moving tanks, the end of a turn, the handover. True = the phones need a
 // fresh snapshot (also while points are draining, so the bars move).
 func (g *game) tickTurns(now time.Time) bool {
+	changed := g.runTurnClock(now)
+	g.syncApLeds()
+	return changed
+}
+
+func (g *game) runTurnClock(now time.Time) bool {
 	m := g.match
 	ts := m.turns
 	changed := false
@@ -643,6 +650,96 @@ func (g *game) repairAtBase(c *combatant) {
 	g.sendCrew(c, map[string]any{"t": "rfid", "text": "Repaired! That used this tank's action points."})
 }
 
+// rechargeShield: once per turn a tank can spend ShieldRechargeAp to get
+// back ShieldRechargePct % of its max HP.
+func (g *game) rechargeShield(cl *client) {
+	c := g.seat(cl.device)
+	if c == nil || g.match.turns == nil {
+		return
+	}
+	tr := g.settings.Turns
+	maxHp := g.rules().MaxHp
+	switch {
+	case tr.ShieldRechargePct <= 0:
+		g.sendError(cl, "Shield recharge is switched off.")
+		return
+	case !g.turnCanAct(c):
+		return
+	case c.turn.recharged:
+		g.sendError(cl, "This tank has already recharged its shield this turn.")
+		return
+	case c.hp >= maxHp:
+		g.sendError(cl, "The shield is already full.")
+		return
+	}
+	now := time.Now()
+	g.meterAp(c, now)
+	if c.turn.ap+1e-9 < tr.ShieldRechargeAp {
+		g.sendError(cl, fmt.Sprintf("Recharging the shield needs %g action points.", tr.ShieldRechargeAp))
+		return
+	}
+	gain := max(1, int(math.Round(float64(maxHp)*tr.ShieldRechargePct/100)))
+	c.turn.ap = max(0, c.turn.ap-tr.ShieldRechargeAp)
+	c.turn.recharged = true
+	c.hp = min(maxHp, c.hp+gain)
+	if c.hp*4 > maxHp {
+		g.match.lowHpWarned[c.tank] = false
+	}
+	g.tanks.sendTo(c.tank, `{"cmd":"flash_heal"}`)
+	g.sendSetHp(c)
+	g.syncApLeds()
+	g.sendCrew(c, map[string]any{"t": "fire_result", "text": fmt.Sprintf("Shield recharged: %d / %d", c.hp, maxHp)})
+	log.Printf("[Turns] %s recharged its shield to %d", c.tankName, c.hp)
+}
+
+// ── The tanks' LED bars ──────────────────────────────────────────────────────
+
+// apLed is what a tank's LED bar shows: its HP (blue, the firmware's
+// default) or, during its alliance's turn, its action points (green).
+type apLed struct {
+	shown  bool // the AP bar is on
+	tenths int  // the AP it shows, in tenths
+}
+
+// syncApLeds puts each tank's action points on its LED bar during its
+// alliance's turn (set_ap, green), so the players can see them drain as
+// the tank drives; the rest of the time the bar shows HP again. Sent only
+// when the shown value changes (at most every tick, 200 ms).
+func (g *game) syncApLeds() {
+	m := g.match
+	if m == nil || m.turns == nil {
+		return
+	}
+	ts := m.turns
+	playing := g.phase == phasePlaying && len(ts.order) > 0 && !ts.handover
+	apMax := g.settings.Turns.ApPerTurn
+	for _, c := range m.fighters {
+		want := playing && c.alliance == ts.active && c.life == alive
+		tenths := int(math.Round(c.turn.ap * 10))
+		switch {
+		case want && (!c.apLed.shown || c.apLed.tenths != tenths):
+			c.apLed = apLed{shown: true, tenths: tenths}
+			g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"set_ap","ap":%.1f,"max":%g}`, float64(tenths)/10, apMax))
+		case !want && c.apLed.shown:
+			c.apLed.shown = false
+			g.tanks.sendTo(c.tank, `{"cmd":"set_ap","max":0}`)
+		}
+	}
+}
+
+// apLedsOff: every tank's bar back to HP (the game is over).
+func (g *game) apLedsOff() {
+	if g.match == nil {
+		return
+	}
+	for _, c := range g.match.fighters {
+		if c.apLed.shown {
+			c.apLed.shown = false
+			g.tanks.sendTo(c.tank, `{"cmd":"set_ap","max":0}`)
+		}
+	}
+}
+
 // ── Overwatch ────────────────────────────────────────────────────────────────
 
 func (g *game) setOverwatch(cl *client, on bool) {
@@ -841,6 +938,8 @@ type turnRulesView struct {
 	TurretApPerSec  float64 `json:"turretApPerSec"`
 	FireAp          float64 `json:"fireAp"`
 	Overwatch       bool    `json:"overwatch"`
+	RechargePct     float64 `json:"rechargePct"` // shield recharge: % of max HP, 0 = off
+	RechargeAp      float64 `json:"rechargeAp"`
 	TurnSeconds     int     `json:"turnSeconds"`
 	MaxRounds       int     `json:"maxRounds"`
 	MaxTanksPerArmy int     `json:"maxTanksPerArmy"`
@@ -856,6 +955,7 @@ type myTankView struct {
 	Life      string   `json:"life,omitempty"`
 	Ap        *float64 `json:"ap,omitempty"`
 	Overwatch bool     `json:"overwatch,omitempty"`
+	Recharged bool     `json:"recharged,omitempty"`
 }
 
 // turnSnapshot adds the turn-based parts of a page's snapshot.
@@ -863,7 +963,7 @@ func (g *game) turnSnapshot(s *snapshot, p *player) {
 	tr := g.settings.Turns
 	s.Mode = modeTurns
 	s.TurnRules = &turnRulesView{ApPerTurn: tr.ApPerTurn, DriveApPerSec: tr.DriveApPerSec, TurretApPerSec: tr.TurretApPerSec,
-		FireAp: tr.FireAp, Overwatch: tr.Overwatch, TurnSeconds: tr.TurnSeconds, MaxRounds: tr.MaxRounds, MaxTanksPerArmy: tr.MaxTanksPerArmy}
+		FireAp: tr.FireAp, Overwatch: tr.Overwatch, RechargePct: tr.ShieldRechargePct, RechargeAp: tr.ShieldRechargeAp, TurnSeconds: tr.TurnSeconds, MaxRounds: tr.MaxRounds, MaxTanksPerArmy: tr.MaxTanksPerArmy}
 	m := g.match
 	inGame := m != nil && m.turns != nil && len(m.turns.order) > 0 && (g.phase == phasePlaying || g.phase == phaseEnded)
 	if inGame {
@@ -906,7 +1006,7 @@ func (g *game) turnSnapshot(s *snapshot, p *player) {
 		if inGame && (p.status == stPlaying || p.status == stFinished) {
 			if c := m.fighters[id]; c != nil {
 				ap := roundAp(c.turn.ap)
-				v.Hp, v.Life, v.Ap, v.Overwatch = c.hp, c.life.String(), &ap, c.turn.overwatch
+				v.Hp, v.Life, v.Ap, v.Overwatch, v.Recharged = c.hp, c.life.String(), &ap, c.turn.overwatch, c.turn.recharged
 			}
 		}
 		s.Me.Tanks = append(s.Me.Tanks, v)
@@ -916,7 +1016,7 @@ func (g *game) turnSnapshot(s *snapshot, p *player) {
 	}
 	if c := m.fighters[p.tank]; c != nil {
 		ap := roundAp(c.turn.ap)
-		s.Me.Ap, s.Me.ApMax, s.Me.Overwatch = &ap, tr.ApPerTurn, c.turn.overwatch
+		s.Me.Ap, s.Me.ApMax, s.Me.Overwatch, s.Me.Recharged = &ap, tr.ApPerTurn, c.turn.overwatch, c.turn.recharged
 	}
 	ts := m.turns
 	s.Me.MyTurn = g.phase == phasePlaying && !ts.handover && g.playerAlliance(p) == ts.active

@@ -509,6 +509,11 @@ func TestOverwatchFiresOnceAtAMovingEnemy(t *testing.T) {
 	if hp := g.hpOf("a"); hp != 75 {
 		t.Fatalf("Desert-01 HP %d, want 75 (one overwatch hit)", hp)
 	}
+	// The overwatch tank shows its shot (lights and buzzer), the target its hit.
+	if ft.count(`c {"cmd":"flash_fire"}`) != 1 || ft.count(`a {"cmd":"flash_hit"`) != 1 {
+		t.Fatalf("flash_fire to the shooter %d, flash_hit to the target %d",
+			ft.count(`c {"cmd":"flash_fire"}`), ft.count(`a {"cmd":"flash_hit"`))
+	}
 	if m := b.waitFor("fire_result"); !strings.HasPrefix(m["text"].(string), "Overwatch: Hit") {
 		t.Fatalf("Bob was told %v", m)
 	}
@@ -642,5 +647,86 @@ func TestChangingModeClearsLobbyChoices(t *testing.T) {
 	h.send(inMsg{T: "host_settings", Settings: &st})
 	if s := a.state(); s.Me.Tank != "" || s.Mode != modeTurns {
 		t.Fatalf("after switching to turn-based Alice still has %q (mode %q)", s.Me.Tank, s.Mode)
+	}
+}
+
+func TestTurnsShieldRechargeOncePerTurn(t *testing.T) {
+	g, ft, _, h, a, _, _ := turnGame(t, nil) // defaults: 20 % for 5 AP
+	a.send(inMsg{T: "recharge"})
+	if e := a.lastError(); !strings.Contains(e, "already full") {
+		t.Fatalf("recharging a full shield: error %q", e)
+	}
+	h.send(inMsg{T: "host_damage", Tank: "a", Dir: "S"}) // 25 × 3 = 75: HP 25
+	a.send(inMsg{T: "recharge"})
+	if hp, ap := g.hpOf("a"), g.apOf("a"); hp != 45 || !apNear(ap, 5) {
+		t.Fatalf("after recharging HP %d AP %v, want 45 and 5", hp, ap)
+	}
+	if ft.count(`a {"cmd":"flash_heal"}`) != 1 || ft.count(`a {"cmd":"set_hp","hp":45,`) != 1 || !a.state().Me.Recharged {
+		t.Fatal("the tank should flash and show its HP, and the phone know it recharged")
+	}
+	a.send(inMsg{T: "recharge"})
+	if e := a.lastError(); !strings.Contains(e, "already recharged") || g.hpOf("a") != 45 {
+		t.Fatalf("a second recharge in one turn: error %q, HP %d", e, g.hpOf("a"))
+	}
+	// Desert-02 without the points.
+	a.send(inMsg{T: "select_tank", Tank: "b"})
+	h.send(inMsg{T: "host_damage", Tank: "b", Dir: "N"})
+	g.mu.Lock()
+	g.fighter("b").turn.ap = 4
+	g.mu.Unlock()
+	a.send(inMsg{T: "recharge"})
+	if e := a.lastError(); !strings.Contains(e, "needs 5 action points") || g.hpOf("b") != 75 {
+		t.Fatalf("recharging without the points: error %q, HP %d", e, g.hpOf("b"))
+	}
+	// The next turn it can recharge again, up to full.
+	forceTurn(g, 1)
+	forceTurn(g, 0)
+	a.send(inMsg{T: "recharge"})
+	if hp := g.hpOf("b"); hp != 95 {
+		t.Fatalf("Desert-02 HP %d after recharging in a new turn, want 95", hp)
+	}
+}
+
+func TestTurnsShieldRechargeSwitchedOff(t *testing.T) {
+	g, _, _, h, a, _, _ := turnGame(t, func(s *Settings) { s.Turns.ShieldRechargePct = 0 })
+	h.send(inMsg{T: "host_damage", Tank: "a", Dir: "N"})
+	a.send(inMsg{T: "recharge"})
+	if e := a.lastError(); !strings.Contains(e, "switched off") || g.hpOf("a") != 75 {
+		t.Fatalf("error %q, HP %d", e, g.hpOf("a"))
+	}
+	g.mu.Lock()
+	g.broadcast()
+	g.mu.Unlock()
+	if r, _ := rawState(a)["turnRules"].(map[string]any); r == nil || r["rechargePct"] != 0.0 {
+		t.Fatalf("the phones should be told recharging is off: %v", r)
+	}
+}
+
+func TestTurnsApShowsOnTheTankDuringItsTurn(t *testing.T) {
+	g, ft, _, _, a, _, _ := turnGame(t, func(s *Settings) { s.Turns.HandoverSeconds = 1 })
+	g.tick(200 * time.Millisecond)
+	for _, id := range []string{"a", "b"} {
+		if ft.count(id+` {"cmd":"set_ap","ap":10.0,"max":10}`) != 1 {
+			t.Fatalf("Desert tank %s should show 10 AP", id)
+		}
+	}
+	if ft.count(`c {"cmd":"set_ap"`) != 0 {
+		t.Fatal("a Jungle tank showed AP during Desert's turn")
+	}
+	g.tick(200 * time.Millisecond)
+	if ft.count(`a {"cmd":"set_ap"`) != 1 {
+		t.Fatal("set_ap should only be sent when the AP changes")
+	}
+	g.mu.Lock()
+	g.fighter("a").turn.ap = 6.04
+	g.mu.Unlock()
+	g.tick(200 * time.Millisecond)
+	if ft.count(`a {"cmd":"set_ap","ap":6.0,"max":10}`) != 1 {
+		t.Fatal("the bar should follow the AP")
+	}
+	a.send(inMsg{T: "end_turn", On: true})
+	g.tick(200 * time.Millisecond)
+	if ft.count(`a {"cmd":"set_ap","max":0}`) != 1 {
+		t.Fatal("the bar should go back to HP when the turn ends")
 	}
 }

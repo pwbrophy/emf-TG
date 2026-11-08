@@ -329,6 +329,8 @@ func (g *game) handle(c *client, m inMsg) {
 		g.setTurnDone(c.device, m.On)
 	case "overwatch":
 		g.setOverwatch(c, m.On)
+	case "recharge":
+		g.rechargeShield(c)
 
 	case "host_login":
 		g.hostLogin(c)
@@ -820,6 +822,7 @@ func (g *game) tankConnected(id string) {
 				g.tanks.sendTo(id, `{"cmd":"motors_on"}`)
 			}
 			g.sendSetHp(c)
+			c.apLed.shown = false // it starts with its HP bar: syncApLeds puts the AP bar back
 			log.Printf("[Game] %s's tank reconnected mid-game", c.crewNames())
 		}
 	}
@@ -1110,6 +1113,7 @@ func (g *game) endGame(code string) {
 		g.endReason += " · " + g.allianceName(winner) + " win!"
 	}
 
+	g.apLedsOff()
 	g.results = g.combatResults()
 	for _, p := range g.players {
 		if p.status != stPlaying {
@@ -1381,8 +1385,9 @@ type meView struct {
 	Ap        *float64     `json:"ap,omitempty"`
 	ApMax     float64      `json:"apMax,omitempty"`
 	Overwatch bool         `json:"overwatch,omitempty"`
-	MyTurn    bool         `json:"myTurn,omitempty"`   // my alliance's turn (and not the handover)
-	TurnDone  bool         `json:"turnDone,omitempty"` // I tapped END TURN
+	MyTurn    bool         `json:"myTurn,omitempty"`    // my alliance's turn (and not the handover)
+	TurnDone  bool         `json:"turnDone,omitempty"`  // I tapped END TURN
+	Recharged bool         `json:"recharged,omitempty"` // the selected tank recharged its shield this turn
 }
 
 type pointView struct {

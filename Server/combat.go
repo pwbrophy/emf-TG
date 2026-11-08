@@ -155,7 +155,8 @@ type combatant struct {
 
 	stab stabState // turret stabilisation (stabilise.go)
 
-	turn turnTank // turn-based games: action points and overwatch (turns.go)
+	turn  turnTank // turn-based games: action points and overwatch (turns.go)
+	apLed apLed    // turn-based games: what the tank's LED bar shows (turns.go)
 }
 
 func (c *combatant) invulnerable(now time.Time) bool {
