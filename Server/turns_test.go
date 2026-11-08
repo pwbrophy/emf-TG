@@ -83,6 +83,18 @@ func forceTurn(g *game, a int) {
 	g.broadcast()
 }
 
+// last is the last command sent to a tank.
+func (f *fakeTanks) last(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.sent) - 1; i >= 0; i-- {
+		if msg, ok := strings.CutPrefix(f.sent[i], id+" "); ok {
+			return msg
+		}
+	}
+	return ""
+}
+
 func (g *game) fighter(id string) *combatant {
 	return g.match.fighters[id]
 }
@@ -708,17 +720,22 @@ func TestTurnsShieldRechargeSwitchedOff(t *testing.T) {
 func TestTurnsApShowsOnTheTankDuringItsTurn(t *testing.T) {
 	g, ft, _, _, a, _, _ := turnGame(t, func(s *Settings) { s.Turns.HandoverSeconds = 1 })
 	g.tick(200 * time.Millisecond)
-	for _, id := range []string{"a", "b"} {
-		if ft.count(id+` {"cmd":"set_ap","ap":10.0,"max":10}`) != 1 {
-			t.Fatalf("Desert tank %s should show 10 AP", id)
-		}
+	// Desert's turn: Alice's selected tank (a) shows its AP in green, her
+	// other tank (b) stays blue, Jungle's tanks go red-orange.
+	if ft.count(`a {"cmd":"set_ap","ap":10.0,"max":10}`) != 1 {
+		t.Fatal("Alice's selected tank should show 10 AP")
 	}
-	if ft.count(`c {"cmd":"set_ap"`) != 0 {
-		t.Fatal("a Jungle tank showed AP during Desert's turn")
+	if ft.count(`b {"cmd":"set_ap"`) != 0 {
+		t.Fatal("Alice's other tank should keep its blue HP bar")
+	}
+	for _, id := range []string{"c", "d"} {
+		if ft.count(id+` {"cmd":"set_ap","max":0,"wait":1}`) != 1 {
+			t.Fatalf("Jungle tank %s should show its HP in red-orange", id)
+		}
 	}
 	g.tick(200 * time.Millisecond)
 	if ft.count(`a {"cmd":"set_ap"`) != 1 {
-		t.Fatal("set_ap should only be sent when the AP changes")
+		t.Fatal("set_ap should only be sent when the bar changes")
 	}
 	g.mu.Lock()
 	g.fighter("a").turn.ap = 6.04
@@ -727,9 +744,19 @@ func TestTurnsApShowsOnTheTankDuringItsTurn(t *testing.T) {
 	if ft.count(`a {"cmd":"set_ap","ap":6.0,"max":10}`) != 1 {
 		t.Fatal("the bar should follow the AP")
 	}
+	// Switching: the AP bar moves to b (before its select flash), a goes blue.
+	a.send(inMsg{T: "select_tank", Tank: "b"})
+	if ft.count(`b {"cmd":"set_ap","ap":10.0,"max":10}`) != 1 || ft.count(`a {"cmd":"set_ap","max":0}`) != 1 {
+		t.Fatal("the AP bar should move to the tank Alice selected")
+	}
+	if ft.last("b") != `{"cmd":"flash_select"}` {
+		t.Fatal("the select flash should come after the bar it uncovers")
+	}
+	// Handover: Jungle is next, so its tanks go blue and Desert's red-orange.
 	a.send(inMsg{T: "end_turn", On: true})
 	g.tick(200 * time.Millisecond)
-	if ft.count(`a {"cmd":"set_ap","max":0}`) != 1 {
-		t.Fatal("the bar should go back to HP when the turn ends")
+	if ft.count(`c {"cmd":"set_ap","max":0}`) != 1 || ft.count(`a {"cmd":"set_ap","max":0,"wait":1}`) != 1 ||
+		ft.count(`b {"cmd":"set_ap","max":0,"wait":1}`) != 1 {
+		t.Fatal("in the handover the next alliance should go blue and the other red-orange")
 	}
 }

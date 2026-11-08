@@ -528,6 +528,7 @@ func (g *game) selectTank(device, tankID string) {
 		g.haltTank(old, time.Now())
 	}
 	p.tank = tankID
+	g.syncApLeds() // the bar the flash uncovers: AP on this one, blue HP on the one left
 	g.tanks.sendTo(c.tank, `{"cmd":"flash_select"}`)
 }
 
@@ -696,47 +697,78 @@ func (g *game) rechargeShield(cl *client) {
 
 // ── The tanks' LED bars ──────────────────────────────────────────────────────
 
-// apLed is what a tank's LED bar shows: its HP (blue, the firmware's
-// default) or, during its alliance's turn, its action points (green).
+// What a tank's LED bar shows in a turn-based game.
+const (
+	barHp   = iota // HP in blue (the firmware's default)
+	barAp          // action points in green: the selected tank of the alliance whose turn it is
+	barWait        // HP in red-orange: an alliance waiting for its turn
+)
+
 type apLed struct {
-	shown  bool // the AP bar is on
-	tenths int  // the AP it shows, in tenths
+	mode   int // barHp, barAp or barWait
+	tenths int // barAp: the AP it shows, in tenths
 }
 
-// syncApLeds puts each tank's action points on its LED bar during its
-// alliance's turn (set_ap, green), so the players can see them drain as
-// the tank drives; the rest of the time the bar shows HP again. Sent only
-// when the shown value changes (at most every tick, 200 ms).
+// syncApLeds keeps each tank's LED bar showing (set_ap):
+//   - the selected tank of each army whose turn it is: its action points in
+//     green, so the players see them drain as it drives;
+//   - their other tanks: HP in blue;
+//   - every tank of the other alliances: HP in red-orange.
+//
+// During the handover the alliance about to play shows blue, the rest
+// red-orange. Sent only when the shown bar changes (at most every tick,
+// 200 ms).
 func (g *game) syncApLeds() {
 	m := g.match
 	if m == nil || m.turns == nil {
 		return
 	}
 	ts := m.turns
-	playing := g.phase == phasePlaying && len(ts.order) > 0 && !ts.handover
+	playing := g.phase == phasePlaying && len(ts.order) > 0
+	active := ts.active
+	if playing && ts.handover {
+		pos, _ := g.nextTurnPos()
+		active = ts.order[pos]
+	}
 	apMax := g.settings.Turns.ApPerTurn
 	for _, c := range m.fighters {
-		want := playing && c.alliance == ts.active && c.life == alive
-		tenths := int(math.Round(c.turn.ap * 10))
+		want := apLed{mode: barHp}
 		switch {
-		case want && (!c.apLed.shown || c.apLed.tenths != tenths):
-			c.apLed = apLed{shown: true, tenths: tenths}
-			g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"set_ap","ap":%.1f,"max":%g}`, float64(tenths)/10, apMax))
-		case !want && c.apLed.shown:
-			c.apLed.shown = false
+		case !playing || c.life != alive:
+		case c.alliance != active:
+			want.mode = barWait
+		case !ts.handover && g.selectedTank(c):
+			want = apLed{mode: barAp, tenths: int(math.Round(c.turn.ap * 10))}
+		}
+		if want == c.apLed {
+			continue
+		}
+		c.apLed = want
+		switch want.mode {
+		case barAp:
+			g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"set_ap","ap":%.1f,"max":%g}`, float64(want.tenths)/10, apMax))
+		case barWait:
+			g.tanks.sendTo(c.tank, `{"cmd":"set_ap","max":0,"wait":1}`)
+		default:
 			g.tanks.sendTo(c.tank, `{"cmd":"set_ap","max":0}`)
 		}
 	}
 }
 
-// apLedsOff: every tank's bar back to HP (the game is over).
+// selectedTank: is this the tank its player controls now?
+func (g *game) selectedTank(c *combatant) bool {
+	p := g.players[c.driver.device]
+	return p != nil && p.tank == c.tank
+}
+
+// apLedsOff: every tank's bar back to HP in blue (the game is over).
 func (g *game) apLedsOff() {
 	if g.match == nil {
 		return
 	}
 	for _, c := range g.match.fighters {
-		if c.apLed.shown {
-			c.apLed.shown = false
+		if c.apLed.mode != barHp {
+			c.apLed = apLed{}
 			g.tanks.sendTo(c.tank, `{"cmd":"set_ap","max":0}`)
 		}
 	}

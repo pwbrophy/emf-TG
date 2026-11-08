@@ -822,7 +822,7 @@ func (g *game) tankConnected(id string) {
 				g.tanks.sendTo(id, `{"cmd":"motors_on"}`)
 			}
 			g.sendSetHp(c)
-			c.apLed.shown = false // it starts with its HP bar: syncApLeds puts the AP bar back
+			c.apLed = apLed{} // it starts with its blue HP bar: syncApLeds puts the right bar back
 			log.Printf("[Game] %s's tank reconnected mid-game", c.crewNames())
 		}
 	}

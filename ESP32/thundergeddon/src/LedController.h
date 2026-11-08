@@ -8,8 +8,10 @@
 //   selectSequence()     — turn-based tank selected: white, going out from the
 //                          ends in to uncover the bar (300 ms)
 //   HP bar               — blue pixels proportional to remaining HP (default)
-//   AP bar               — turn-based games, during the tank's turn: green
-//                          pixels for its action points instead (setAp)
+//   AP bar               — turn-based games, the selected tank during its
+//                          turn: green pixels for its action points instead
+//                          (setAp); tanks waiting for their alliance's turn
+//                          show the HP bar in red-orange instead of blue
 //
 // A hit arriving during a fire flash immediately overrides it.
 // After any timed effect expires, the HP bar is automatically redrawn.
@@ -116,12 +118,14 @@ public:
 
     // ---- Action points (turn-based games) ----
 
-    // During its turn the server shows the tank's action points in green in
-    // place of the HP bar (set_ap); maxAp <= 0 goes back to the HP bar.
-    void setAp(float ap, float maxAp)
+    // During its turn the server shows the selected tank's action points in
+    // green in place of the HP bar (set_ap); maxAp <= 0 goes back to the HP
+    // bar, in red-orange when waiting (the tank's alliance isn't playing).
+    void setAp(float ap, float maxAp, bool waiting = false)
     {
-        _ap    = (ap < 0) ? 0 : ap;
-        _apMax = maxAp;
+        _ap      = (ap < 0) ? 0 : ap;
+        _apMax   = maxAp;
+        _waiting = maxAp <= 0 && waiting;
         if (_effect == Effect::None && !_playerColorActive) _drawHpBar();
     }
 
@@ -251,6 +255,7 @@ public:
         _hp                = 0;
         _maxHp             = 100;
         _apMax             = 0;
+        _waiting           = false;
         _effect            = Effect::None;
         _playerColorActive = false;
         _invulnActive      = false;
@@ -529,7 +534,7 @@ private:
             bool warning = (ledsF <= 1.0f);
             if (warning) {
                 if (_pulseOn)
-                    _strip.setPixelColor(LED_STRIP_COUNT - 1, _strip.Color(0, 0, DIM_BRIGHTNESS));
+                    _strip.setPixelColor(LED_STRIP_COUNT - 1, _hpColor(DIM_BRIGHTNESS));
             } else {
                 int fullLeds = (int)ledsF;
                 uint8_t partialBright = (uint8_t)((ledsF - fullLeds) * (float)DIM_BRIGHTNESS);
@@ -537,14 +542,22 @@ private:
                 // Full LEDs at the front (high indices: 5, 4, ... down)
                 int firstFull = LED_STRIP_COUNT - fullLeds;
                 for (int i = firstFull; i < LED_STRIP_COUNT; i++)
-                    _strip.setPixelColor(i, _strip.Color(0, 0, DIM_BRIGHTNESS));
+                    _strip.setPixelColor(i, _hpColor(DIM_BRIGHTNESS));
                 // Partial LED just below the full ones
                 int partialIdx = firstFull - 1;
                 if (partialBright > 0 && partialIdx >= 0)
-                    _strip.setPixelColor(partialIdx, _strip.Color(0, 0, partialBright));
+                    _strip.setPixelColor(partialIdx, _hpColor(partialBright));
             }
         }
         if (show) _strip.show();
+    }
+
+    // HP colour at a brightness: blue, or red-orange while waiting for the
+    // alliance's turn (turn-based games).
+    uint32_t _hpColor(uint8_t level)
+    {
+        if (_waiting) return _strip.Color(level, level / 4, 0);
+        return _strip.Color(0, 0, level);
     }
 
     // The action-point bar: green, filled from the front like the HP bar,
@@ -731,6 +744,7 @@ private:
     int               _maxHp             = 100;
     float             _ap                = 0;     // action points shown while _apMax > 0 (set_ap)
     float             _apMax             = 0;     // 0 = show the HP bar
+    bool              _waiting           = false; // HP bar in red-orange (set_ap wait)
     bool              _pulseOn           = true;  // warning-pulse display state
     uint32_t          _nextPulseToggle   = 0;
 

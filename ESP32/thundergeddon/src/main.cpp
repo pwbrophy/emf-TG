@@ -1336,10 +1336,11 @@ static void handleWsText(const String& s)
         return;
     }
 
-    // Turn-based games: action points in green during the tank's turn
-    // (max 0 = back to the HP bar).
+    // Turn-based games: action points in green for the selected tank during
+    // its turn (max 0 = back to the HP bar; wait 1 = HP in red-orange, the
+    // tank's alliance is waiting for its turn).
     if (strcmp(cmd, "set_ap") == 0) {
-        leds.setAp(doc["ap"] | 0.0f, doc["max"] | 0.0f);
+        leds.setAp(doc["ap"] | 0.0f, doc["max"] | 0.0f, (doc["wait"] | 0) != 0);
         return;
     }
 
