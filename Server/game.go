@@ -1114,6 +1114,7 @@ func (g *game) endGame(code string) {
 	}
 
 	g.apLedsOff()
+	g.ir.setProbing(false) // turn-based overwatch probes end with the game
 	g.results = g.combatResults()
 	for _, p := range g.players {
 		if p.status != stPlaying {

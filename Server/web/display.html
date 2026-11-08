@@ -1490,18 +1490,20 @@ function updateGrid() {
     hpBar.style.width = pct + '%';
     hpBar.classList.toggle('hp-critical', !isDead && r.hp > 0 && pct < 15);
     hpNum.textContent = isDead ? 'DEAD' : String(r.hp);
+    // Turn-based games: action points (green) and overwatch beside the HP.
+    // Made only when a turn-based game sends AP; emptied again in realtime.
     let apEl = document.getElementById(`grid-apnum-${i}`);
-    if (!apEl) { // turn-based: action points in green beside the (blue) HP
+    if (!apEl && r.ap != null) {
       apEl = document.createElement('span');
       apEl.id = `grid-apnum-${i}`;
       apEl.style.color = '#5fe07a';
       hpNum.insertAdjacentElement('afterend', apEl);
     }
-    apEl.textContent = !isDead && r.ap != null ? ` ${r.ap} AP${r.overwatch ? ' · OW' : ''}` : '';
-    // Turn-based: action points and overwatch beside the HP.
+    if (apEl) apEl.textContent = !isDead && r.ap != null ? ` ${r.ap} AP${r.overwatch ? ' · OW' : ''}` : '';
 
     if (deadMsg) deadMsg.classList.toggle('hidden', !isDead);
-    if (deadMsg && state.mode === 'turns') deadMsg.querySelector('.grid-dead-sub').textContent = 'Out of the game';
+    if (deadMsg) deadMsg.querySelector('.grid-dead-sub').textContent =
+      state.mode === 'turns' ? 'Out of the game' : 'Return to base to respawn';
 
     if (isDead && !cell.classList.contains('dead')) {
       // Transition → dead

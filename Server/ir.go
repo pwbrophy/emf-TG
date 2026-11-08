@@ -55,8 +55,11 @@ type irScheduler struct {
 	inbox chan irReply
 
 	// probing is set while a turn-based game has tanks on overwatch: the
-	// scheduler then asks for a probe whenever no shot is waiting.
+	// scheduler then asks for a probe whenever no shot is waiting. wake
+	// rouses it when probing starts. In the realtime game neither is used:
+	// the scheduler just waits for shots.
 	probing atomic.Bool
+	wake    chan struct{}
 }
 
 // probeIdle is how often the scheduler looks for an overwatch probe to send
@@ -64,12 +67,20 @@ type irScheduler struct {
 const probeIdle = 20 * time.Millisecond
 
 func newIrScheduler(g *game) *irScheduler {
-	return &irScheduler{g: g, shots: make(chan shotRequest, 32), inbox: make(chan irReply, 128)}
+	return &irScheduler{g: g, shots: make(chan shotRequest, 32), inbox: make(chan irReply, 128), wake: make(chan struct{}, 1)}
+}
+
+// setProbing switches overwatch probing on or off (turns.go).
+func (s *irScheduler) setProbing(on bool) {
+	if s.probing.Swap(on) != on && on {
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (s *irScheduler) run(stop <-chan struct{}) {
-	idle := time.NewTicker(probeIdle)
-	defer idle.Stop()
 	for {
 		// Shots first: a probe only runs when none is waiting.
 		select {
@@ -86,12 +97,17 @@ func (s *irScheduler) run(stop <-chan struct{}) {
 				continue
 			}
 		}
+		var idle <-chan time.Time // nil (never) unless probing
+		if s.probing.Load() {
+			idle = time.After(probeIdle)
+		}
 		select {
 		case <-stop:
 			return
 		case r := <-s.shots:
 			s.execute(r)
-		case <-idle.C:
+		case <-idle:
+		case <-s.wake:
 		}
 	}
 }

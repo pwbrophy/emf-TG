@@ -820,7 +820,7 @@ func (g *game) updateProbing() {
 			}
 		}
 	}
-	g.ir.probing.Store(on)
+	g.ir.setProbing(on)
 }
 
 // movingTarget: an enemy overwatch can catch (one that has just moved).
@@ -835,7 +835,7 @@ func (g *game) nextProbe() (shotRequest, bool) {
 	defer g.mu.Unlock()
 	m := g.match
 	if m == nil || m.turns == nil || g.phase != phasePlaying {
-		g.ir.probing.Store(false)
+		g.ir.setProbing(false)
 		return shotRequest{}, false
 	}
 	ts := m.turns

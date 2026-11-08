@@ -651,6 +651,77 @@ func TestRealtimeSnapshotsHaveNoTurnFields(t *testing.T) {
 	}
 }
 
+// A realtime game straight after a turn-based one (with a tank left on
+// overwatch) is exactly the realtime game: its own rules, no action points,
+// no turn-based tank commands or probes, no turn fields.
+func TestRealtimeAfterATurnBasedGame(t *testing.T) {
+	g, ft, _, h, a, b, _ := turnGame(t, func(s *Settings) {
+		s.Turns.DamagePerHit, s.Turns.MaxHp, s.Turns.DriveApPerSec = 7, 33, 100
+		s.CountdownSeconds = 0
+	})
+	forceTurn(g, 1)
+	b.send(inMsg{T: "overwatch", On: true})
+	if !g.ir.probing.Load() {
+		t.Fatal("set-up: Bob should be on overwatch")
+	}
+	h.send(inMsg{T: "host_end"})
+	st := g.settings
+	st.GameMode = modeRealtime
+	h.send(inMsg{T: "host_settings", Settings: &st})
+	h.send(inMsg{T: "host_lobby"})
+	a.send(inMsg{T: "play_again"})
+	b.send(inMsg{T: "play_again"})
+	a.send(inMsg{T: "pick_tank", Tank: "a"})
+	b.send(inMsg{T: "pick_tank", Tank: "c"})
+	ft.mu.Lock()
+	mark := len(ft.sent)
+	ft.mu.Unlock()
+	h.send(inMsg{T: "host_start", Force: true})
+	if g.phase != phasePlaying || g.match.turns != nil || g.turnBased() || g.ir.probing.Load() {
+		t.Fatalf("not a realtime game: phase %s turns %v probing %v", g.phase, g.match.turns, g.ir.probing.Load())
+	}
+	if len(g.match.fighters) != 2 || g.hpOf("a") != 100 || g.hpOf("c") != 100 {
+		t.Fatalf("realtime fighters/HP wrong: %d fighters, HP %d", len(g.match.fighters), g.hpOf("a"))
+	}
+	h.send(inMsg{T: "host_damage", Tank: "c", Dir: "N"})
+	if hp := g.hpOf("c"); hp != 75 {
+		t.Fatalf("realtime damage: HP %d, want 75", hp)
+	}
+	for i := 0; i < 20; i++ { // 0.2 s: far more than 10 AP at 100 AP/s
+		a.send(inMsg{T: "drive", L: 1, R: 1})
+		time.Sleep(10 * time.Millisecond)
+	}
+	a.send(inMsg{T: "select_tank", Tank: "b"})
+	b.send(inMsg{T: "overwatch", On: true})
+	b.send(inMsg{T: "recharge"})
+	b.send(inMsg{T: "end_turn", On: true})
+	g.tick(200 * time.Millisecond)
+	ft.mu.Lock()
+	sent := append([]string(nil), ft.sent[mark:]...)
+	ft.mu.Unlock()
+	drives := 0
+	for _, m := range sent {
+		if strings.Contains(m, "set_ap") || strings.Contains(m, "flash_select") || strings.Contains(m, "ir_") {
+			t.Errorf("realtime game sent a turn-based command: %s", m)
+		}
+		if strings.HasPrefix(m, `a {"cmd":"drive","l":1.000`) {
+			drives++
+		}
+	}
+	if drives != 20 {
+		t.Fatalf("%d of Alice's 20 drive commands reached her tank", drives)
+	}
+	if g.match.fighters["a"].invulnerable(time.Now()) || g.phase != phasePlaying || a.state().Me.Tank != "a" {
+		t.Fatal("realtime state changed by turn-based messages")
+	}
+	raw := rawState(a)
+	for _, k := range []string{"mode", "turn", "turnRules"} {
+		if _, ok := raw[k]; ok {
+			t.Errorf("realtime snapshot has %q", k)
+		}
+	}
+}
+
 func TestChangingModeClearsLobbyChoices(t *testing.T) {
 	g, _ := newTestGame(t, "Desert-01", "Jungle-02")
 	h := hostUp(t, g)

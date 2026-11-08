@@ -516,7 +516,7 @@
     #tb-ap-wrap, #tb-banner, #tb-tanks, #tb-actions { zoom: var(--ui-scale, 1); }
     body:not(.tb-mode) #tb-ap-wrap, body:not(.tb-mode) #tb-banner,
     body:not(.tb-mode) #tb-tanks, body:not(.tb-mode) #tb-actions,
-    body:not(.tb-mode) #tb-fire-cost { display: none !important; }
+    body:not(.tb-mode) #tb-fire-cost, body:not(.tb-mode) #tb-dim { display: none !important; }
     body.tb-mode #timer-label { display: none; }
     #tb-ap-wrap {
       position: absolute;
@@ -2638,7 +2638,16 @@ function tbAlliance(i) {
 function tbOnState(m) {
   const on = m.mode === 'turns';
   document.body.classList.toggle('tb-mode', on);
-  if (!on) return;
+  if (!on) {
+    // Realtime: nothing of a turn-based game may be left on the controls.
+    if (tbWait !== null) {
+      tbWait = null;
+      document.getElementById('controls').classList.remove('tb-wait');
+      document.getElementById('fire-btn').classList.remove('tb-noap');
+      document.body.classList.remove('tb-notmine');
+    }
+    return;
+  }
   const me = m.me;
   const rules = m.turnRules || {};
   if (tbSel === null) tbSel = me.tank;
