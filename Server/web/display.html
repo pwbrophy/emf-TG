@@ -41,6 +41,9 @@
   #version { position: fixed; bottom: 6px; right: 10px; font-size: 0.65em;
     color: #444; pointer-events: none; z-index: 9999; }
   #timer.urgent { color: #ff4444; animation: flash 0.5s infinite alternate; }
+  /* Turn-based games (Go server addition): whose turn it is. */
+  #tb-turn { font-size: 1.8em; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+  #tb-turn:empty { display: none; }
   @keyframes flash { from { opacity: 1; } to { opacity: 0.3; } }
 
   /* Team points bar */
@@ -372,6 +375,7 @@
   <!-- Header -->
   <div id="header">
     <div id="title">&#9889; <span>THUNDERGEDDON</span></div>
+    <div id="tb-turn"></div>
     <div id="timer">--:--</div>
     <button id="mute-btn" onclick="toggleMute()" title="Toggle announcer">&#128266;</button>
   </div>
@@ -1486,7 +1490,10 @@ function updateGrid() {
     hpBar.style.width = pct + '%';
     hpBar.classList.toggle('hp-critical', !isDead && r.hp > 0 && pct < 15);
     hpNum.textContent = isDead ? 'DEAD' : String(r.hp);
+    // Turn-based: action points and overwatch beside the HP.
+    if (!isDead && r.ap != null) hpNum.textContent += ` · ${r.ap} AP${r.overwatch ? ' · OW' : ''}`;
     if (deadMsg) deadMsg.classList.toggle('hidden', !isDead);
+    if (deadMsg && state.mode === 'turns') deadMsg.querySelector('.grid-dead-sub').textContent = 'Out of the game';
 
     if (isDead && !cell.classList.contains('dead')) {
       // Transition → dead
@@ -1642,6 +1649,7 @@ function applyDisplayUpdate(data) {
   }
 
   state = Object.assign(state, data);
+  if (!data.mode) { state.mode = ''; state.turn = null; } // realtime: no turn-based leftovers
   const nowPlaying = (state.phase === 'playing');
 
   document.getElementById('paused-overlay')
@@ -1695,6 +1703,7 @@ function applyDisplayUpdate(data) {
 // ── Render ────────────────────────────────────────────────────────────────
 function render() {
   renderLobbyOverlay();
+  renderTurn();
   renderTimer();
   renderTeamBar();
   renderCapturePoints();
@@ -1799,12 +1808,24 @@ function renderLobbyNames(container, list) {
   });
 }
 
+// renderTurn (turn-based games): "Round 2 · Desert Squad's turn".
+function renderTurn() {
+  const el = document.getElementById('tb-turn');
+  const tn = state.mode === 'turns' && state.phase === 'playing' ? state.turn : null;
+  if (!tn) { el.textContent = ''; return; }
+  const names = state.allianceNames || [], colors = state.allianceColors || [];
+  const i = tn.handover ? tn.nextIndex : tn.allianceIndex;
+  el.textContent = `Round ${tn.round}${tn.maxRounds ? '/' + tn.maxRounds : ''} · ${names[i] || '?'}${tn.handover ? ' next' : '\u2019s turn'}`;
+  el.style.color = colors[i] || '#fff';
+}
+
 function renderTimer() {
   const el = document.getElementById('timer');
   const s  = Math.ceil(state.timer);
   const m  = Math.floor(s / 60);
   const ss = String(s % 60).padStart(2, '0');
   el.textContent = (state.phase === 'playing') ? `${m}:${ss}` : '--:--';
+  if (state.mode === 'turns' && state.turn && state.turn.noLimit && state.phase === 'playing') el.textContent = '--:--';
   el.classList.toggle('urgent', state.phase === 'playing' && s <= 10 && s > 0);
 }
 

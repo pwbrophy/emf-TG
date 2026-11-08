@@ -357,6 +357,65 @@ function renderWait() {
 
 // ── Client Lobby ─────────────────────────────────────────────────────────────
 
+// Turn-based games: each player is an army in an alliance and claims tanks.
+function turnBased() {
+  return !!state && state.mode === 'turns';
+}
+
+// armyCard (turn-based): your alliance, your tanks (tap one to give it
+// back), their lobby colour, and the free tanks you can still claim.
+function armyCard() {
+  const me = state.me;
+  const mine = me.tanks || [];
+  const limit = (state.turnRules || {}).maxTanksPerArmy || 0;
+  const full = limit > 0 && mine.length >= limit;
+  const tankBtn = (t) => `<button type="button" class="tank-card mine" data-action="unclaim-tank" data-tank="${esc(t.id)}"
+      ${mine.length === 1 ? 'disabled' : ''}>
+      <span class="name">${esc(t.name)}</span>
+      <span class="sub">${t.online ? (mine.length === 1 ? 'Your tank' : 'Tap to give back') : 'Offline'}</span></button>`;
+  const free = state.tanks.filter((t) => t.online && !t.player && t.allianceIndex === me.allianceIndex);
+  const freeBtn = (t) => `<button type="button" class="tank-card join" data-action="claim-tank" data-tank="${esc(t.id)}" ${full ? 'disabled' : ''}>
+      <span class="name">${esc(t.name)}</span><span class="sub">Tap to claim</span></button>`;
+  const glow = me.tankColor
+    ? `<div class="glow-line" style="color:${esc(me.tankColorCss)};text-shadow:0 0 12px ${esc(me.tankColorCss)}88">Your tanks are glowing ${esc(me.tankColor)}!</div>` : '';
+  return `<div class="card"><div class="timer-row"><div>
+      <div style="font-size:1.3rem;font-weight:800">Your army</div>
+      <div class="sub" style="font-weight:700" ${allianceStyle(me.allianceIndex)}>${esc(me.alliance || 'No alliance')}</div></div>
+      <div class="end" style="text-align:right;color:var(--muted);font-size:.9rem">${mine.length} ${mine.length === 1 ? 'tank' : 'tanks'}${limit ? ` of ${limit}` : ''}</div></div>
+      ${glow}
+      <div class="tank-grid" style="margin-top:8px">${mine.map(tankBtn).join('')}</div>
+      ${free.length ? `<h3 class="section-h">Free tanks in ${esc(me.alliance)}${full ? ' &middot; your army is full' : ''}</h3>
+        <div class="tank-grid">${free.map(freeBtn).join('')}</div>` : ''}
+      <div class="btn-row" style="margin-top:8px"><button class="btn small secondary" type="button" data-action="give-up-tank">Leave alliance</button></div></div>`;
+}
+
+// armyAllianceCards (turn-based): each alliance with its armies and free tanks.
+function armyAllianceCards() {
+  const me = state.me;
+  const cards = state.alliances.map((a, i) => {
+    const tanks = state.tanks.filter((t) => t.online && t.allianceIndex === i);
+    const free = tanks.filter((t) => !t.player).length;
+    const armies = state.players.filter((p) => p.alliance === a.name && p.tanks && p.tanks.length).length;
+    const mine = (me.tanks || []).length > 0 && me.allianceIndex === i;
+    const sub = mine ? 'Your alliance' : free ? `${free} free ${free === 1 ? 'tank' : 'tanks'}` : tanks.length ? 'All tanks taken' : 'No tanks';
+    return `<button type="button" class="alliance-pick ${mine ? 'mine' : ''}" style="--ac:${esc(a.color)}"
+        data-action="${mine ? '' : 'pick-alliance'}" data-alliance="${esc(a.id)}" ${!mine && !free ? 'disabled' : ''}>
+      <span class="name">${esc(a.name)}</span>
+      <span class="sub">${sub}</span>
+      <span class="sub">${armies} ${armies === 1 ? 'army' : 'armies'}</span></button>`;
+  }).join('');
+  return `<div class="alliance-grid">${cards}</div>`;
+}
+
+function lobbyBody() {
+  if (turnBased()) {
+    return (state.me.tanks || []).length ? armyCard() + armyAllianceCards()
+      : `<div class="big-status"><div class="title">Choose your alliance</div>
+        <div class="detail">You command an army: you get one of its tanks and can claim more</div></div>${armyAllianceCards()}`;
+  }
+  return myTankCard() + allianceCards();
+}
+
 // allianceCards: players choose a side and are given one of its free tanks
 // (all tanks are the same).
 function allianceCards() {
@@ -421,9 +480,10 @@ function myTankCard() {
 function playerRows(players, extra) {
   if (!players.length) return emptyNote('Nobody yet.');
   return '<div class="list">' + players.map((p) => {
-    let sub = p.tank ? esc(p.tank) : p.status === 'lobby' && state.phase !== 'lobby' && state.phase !== 'idle' ? 'Next game' : 'Choosing&hellip;';
+    const tanks = p.tanks && p.tanks.length ? p.tanks.join(', ') : p.tank;
+    let sub = tanks ? esc(tanks) : p.status === 'lobby' && state.phase !== 'lobby' && state.phase !== 'idle' ? 'Next game' : 'Choosing&hellip;';
     if (p.role) sub += ` &middot; ${p.role}${p.partner ? ' with ' + esc(p.partner) : ''}`;
-    if (p.status === 'playing' && p.life) {
+    if (p.status === 'playing' && p.life && !(p.tanks && p.tanks.length)) {
       sub += ' &middot; ' + (p.life === 'dead' ? 'Destroyed' : p.life === 'returning' ? 'Returning to base' : `${p.hp} HP`);
     }
     return `<div class="item"><span class="dot ${p.online ? '' : 'off'}" title="${p.online ? 'Connected' : 'Disconnected'}"></span>
@@ -441,10 +501,9 @@ function renderLobby() {
   const tab = currentTab('lobby', tabs);
   renderTabs($('lobby-tabs'), 'lobby', tabs, tab);
   $('lobby-info').textContent = me.name;
-  setHTML($('lobby-body'), tab === 'tanks'
-    ? `${myTankCard()}${allianceCards()}`
-    : playerRows(state.players));
-  $('lobby-mid').textContent = me.tank ? 'Waiting for the host to start' : 'Choose an alliance';
+  setHTML($('lobby-body'), tab === 'tanks' ? lobbyBody() : playerRows(state.players));
+  const ready = me.tank || (me.tanks || []).length;
+  $('lobby-mid').textContent = ready ? 'Waiting for the host to start' : 'Choose an alliance';
 }
 
 // ── Game Over / Stats ────────────────────────────────────────────────────────
@@ -505,8 +564,8 @@ function setHostPage(p) {
 }
 
 const CONFIG_PAGES = [
-  ['config-server', 'Server Settings', 'Game password, players before queuing, debug menu, 2-player tanks, buzzer, airtime fairness'],
-  ['config-gameplay', 'Gameplay Settings', 'Match length, points, damage, reload, dead time'],
+  ['config-server', 'Server Settings', ''], // its line depends on the game (configPageSub)
+  ['config-gameplay', 'Gameplay Settings', ''], // its line depends on the game (configPageSub)
   ['config-advanced', 'Advanced Settings', 'Motor, control and video tuning, shot timing, presets'],
   ['config-alliances', 'Alliances', 'Names, colours, add and remove'],
   ['config-tags', 'Tags and Capture Points', 'RFID tags for bases and capture points'],
@@ -518,7 +577,7 @@ const CONFIG_PAGES_BETWEEN_GAMES = ['config-alliances', 'config-tags', 'config-s
 // Settings that only matter when joining or starting a game: greyed out during
 // a game (the hub keeps their old values then too, applySettings).
 const SETTINGS_BETWEEN_GAMES = ['clientPassword', 'maxPlayers', 'twoPlayerTanks', 'matchSeconds',
-  'countdownSeconds', 'pointsToWin'];
+  'countdownSeconds', 'pointsToWin', 'gameMode', 'turns.countdownSeconds', 'turns.pointsToWin', 'turns.maxTanksPerArmy'];
 
 function hostInGame() {
   return state.phase === 'countdown' || state.phase === 'playing';
@@ -581,7 +640,7 @@ function renderHost() {
   const back = ph === 'lobby'
     ? '<button class="nav-btn back danger" type="button" data-action="host-close">Close Game</button>'
     : '<button class="nav-btn back" type="button" data-action="host-menu">Menu</button>';
-  const ready = state.players.filter((p) => p.tank).length;
+  const ready = state.players.filter((p) => p.tank || (p.tanks && p.tanks.length)).length;
   let mid = '', right = '';
   switch (ph) {
     case 'idle':
@@ -630,6 +689,27 @@ function playersLinkCard() {
     The spectator display is at <b>http://${esc(location.host)}/display.html</b>.</p></div>`;
 }
 
+// turnCard (turn-based): whose turn it is, each army's state, and End Turn
+// Now.
+function turnCard() {
+  const tn = state.turn;
+  if (!tn) return '';
+  const ac = (i) => state.alliances[i] || { name: '?', color: '#888' };
+  const who = tn.handover ? `${esc(ac(tn.nextIndex).name)} next` : `${esc(ac(tn.allianceIndex).name)}&rsquo;s turn`;
+  const color = esc(ac(tn.handover ? tn.nextIndex : tn.allianceIndex).color);
+  const armies = tn.armies.map((a) => {
+    const active = !tn.handover && a.allianceIndex === tn.allianceIndex;
+    const st = a.tanksLeft === 0 ? 'Destroyed' : !active ? '' : a.done ? 'Done' : a.online ? 'Playing' : 'Disconnected';
+    return `<div class="srow" style="padding:4px 0;border:0"><span ${allianceStyle(a.allianceIndex)}>${esc(a.player)}</span>
+      <span class="value">${a.tanksLeft} ${a.tanksLeft === 1 ? 'tank' : 'tanks'}${st ? ' &middot; ' + st : ''}</span></div>`;
+  }).join('');
+  const end = state.phase === 'playing' && !tn.handover
+    ? '<button class="btn secondary" type="button" data-action="host-end-turn">End Turn Now</button>' : '';
+  return `<div class="card"><h3>Round ${tn.round}${tn.maxRounds ? ` of ${tn.maxRounds}` : ''}</h3>
+    <div style="font-size:1.3rem;font-weight:800;color:${color}">${who}</div>
+    ${armies}${end ? `<div class="btn-row" style="margin-top:8px">${end}</div>` : ''}</div>`;
+}
+
 function hostBattleTab() {
   const ph = state.phase;
   const drive = state.me.status === 'playing'
@@ -637,11 +717,13 @@ function hostBattleTab() {
   const pause = ph === 'playing'
     ? `<button class="btn ${state.paused ? 'primary' : 'secondary'}" type="button" data-action="host-pause" data-on="${!state.paused}">${state.paused ? 'Resume' : 'Pause Game'}</button>` : '';
   const close = '<button class="btn danger" type="button" data-action="host-close">Close Game</button>';
+  const tn = turnBased() && ph === 'playing' ? state.turn : null;
+  const label = ph === 'countdown' ? 'Starting in' : !tn ? 'Time left' : tn.handover ? 'Next turn in' : 'Turn time left';
   return `<div class="card"><div class="timer-row">
-      <div><h3 style="margin:0">${ph === 'countdown' ? 'Starting in' : 'Time left'}</h3>
-      <div class="timer-big" id="host-timer-big">${fmtClock(remainingMs())}</div>
+      <div><h3 style="margin:0">${label}</h3>
+      <div class="timer-big" id="host-timer-big">${tn && tn.noLimit ? 'No limit' : fmtClock(remainingMs())}</div>
       ${state.paused ? '<div class="paused-tag">PAUSED</div>' : ''}</div><div class="battle-btns">${pause}${close}</div></div></div>
-    ${drive}
+    ${drive}${tn ? turnCard() : ''}
     <div class="two-col">${scoreCard()}${pointsCard()}</div>`;
 }
 
@@ -663,8 +745,9 @@ function hostTankRow(t) {
   const crew = t.player ? (t.gunner ? `${esc(t.player)} + ${esc(t.gunner)}` : esc(t.player)) : 'free';
   let status = '';
   if (inGame && t.life) {
-    status = t.life === 'dead' ? 'Destroyed' : t.life === 'returning' ? 'Returning' : `${t.hp || 0} HP`;
+    status = t.life === 'dead' || t.life === 'destroyed' ? 'Destroyed' : t.life === 'returning' ? 'Returning' : `${t.hp || 0} HP`;
     status += t.invulnerable ? ' &middot; shielded' : '';
+    if (t.ap != null && t.life === 'alive') status += ` &middot; ${t.ap} AP${t.overwatch ? ' &middot; overwatch' : ''}`;
   } else if (t.pingMs) {
     status = `${t.pingMs} ms`;
   }
@@ -701,8 +784,9 @@ function hostTankRow(t) {
         <button class="btn small secondary" type="button" data-hold="turret" data-tank="${esc(t.id)}" data-s="-0.5">Turret &#9654;</button>`}
         <button class="btn small secondary" type="button" data-action="tank-resync" data-tank="${esc(t.id)}">Reset</button>
         <button class="btn small secondary" type="button" data-action="tank-restart" data-tank="${esc(t.id)}" data-name="${esc(t.name)}">Restart</button>
-        ${state.phase === 'lobby' && t.player ? `<button class="btn small danger" type="button" data-action="tank-free" data-tank="${esc(t.id)}">Remove Player</button>` : ''}
+        ${state.phase === 'lobby' && t.player ? `<button class="btn small danger" type="button" data-action="tank-free" data-tank="${esc(t.id)}">${turnBased() ? 'Remove from army' : 'Remove Player'}</button>` : ''}
       </div>
+      ${turnBased() && state.phase === 'lobby' ? `<h4>Army</h4><div class="inline-form">${armySelect(t)}</div>` : ''}
       <h4>Name and default alliance</h4>
       <div class="inline-form">
         <input type="text" maxlength="16" value="${esc(t.name)}" id="rename-${esc(t.id)}" aria-label="Robot name">
@@ -751,6 +835,14 @@ function allianceSelect(t) {
     ${opt('', 'From its name' + fromName)}${state.alliances.map((a) => opt(a.id, a.name)).join('')}</select>`;
 }
 
+// armySelect (turn-based lobby): give a robot to a player's army.
+function armySelect(t) {
+  const opt = (v, label, sel) => `<option value="${esc(v)}" ${sel ? 'selected' : ''}>${esc(label)}</option>`;
+  const players = state.players.filter((p) => p.status === 'lobby' && p.device);
+  return `<select data-action="tank-army" data-tank="${esc(t.id)}" aria-label="Army">
+    ${opt('', 'No army', !t.player)}${players.map((p) => opt(p.device, p.name, p.name === t.player)).join('')}</select>`;
+}
+
 function hostTanksTab() {
   if (!state.tanks.length) return emptyNote('No robots are switched on. They join by themselves when they power up on the Thundergeddon Wi-Fi.');
   return `<div class="list">${state.tanks.map(hostTankRow).join('')}</div>`;
@@ -781,7 +873,7 @@ function hostPlayCard() {
   const me = state.me;
   const playing = !!me.status;
   const body = playing
-    ? (state.phase === 'lobby' ? `${myTankCard()}${allianceCards()}` : `<p class="hint">Playing as <b>${esc(me.name)}</b>.</p>`)
+    ? (state.phase === 'lobby' ? lobbyBody() : `<p class="hint">Playing as <b>${esc(me.name)}</b>.</p>`)
     : `<label class="field">Your player name<input type="text" id="host-play-name" maxlength="16" value="${esc(store('tg_player_name') || '')}"></label>`;
   return `<div class="card">
     <div class="srow" style="padding:0 0 8px;border:0"><span>Server as player</span>
@@ -818,7 +910,7 @@ function renderHostConfig() {
     default:
       html = `<div class="list">${CONFIG_PAGES.filter(([id]) => !hostInGame() || !CONFIG_PAGES_BETWEEN_GAMES.includes(id)).map(([id, title, sub]) =>
         `<button type="button" class="item menu-row" data-action="host-page" data-page="${id}">
-          <div class="main"><div class="name">${title}</div><div class="sub">${sub}</div></div><span class="chev">&rsaquo;</span></button>`).join('')}</div>`;
+          <div class="main"><div class="name">${title}</div><div class="sub">${sub || configPageSub(id)}</div></div><span class="chev">&rsaquo;</span></button>`).join('')}</div>`;
   }
   if (!tabs.length) renderTabs($('host-tabs'), 'none', [], '');
   setHTML($('host-body'), html);
@@ -827,6 +919,15 @@ function renderHostConfig() {
     ? '<button class="nav-btn back" type="button" data-action="host-page" data-page="">Back</button>'
     : '<button class="nav-btn back" type="button" data-action="host-page" data-page="config">Back</button>';
   nav($('host-nav'), back, hostPage.startsWith('config-') && hostPage !== 'config-tags' && hostPage !== 'config-alliances' ? 'Changes save straight away' : '', '');
+}
+
+function configPageSub(id) {
+  if (id === 'config-server') {
+    return `Game (realtime or turn-based), game password, players before queuing, debug menu, ${turnBased() ? '' : '2-player tanks, '}buzzer, airtime fairness`;
+  }
+  if (id !== 'config-gameplay') return '';
+  return turnBased() ? 'Turn-based: action points, turns, overwatch, points, damage'
+    : 'Match length, points, damage, reload, dead time';
 }
 
 // Settings fields: each saves as soon as it changes.
@@ -882,13 +983,21 @@ document.addEventListener('change', (e) => {
   toast('Saved');
 });
 
+// select: a labelled drop-down bound to one text setting.
+function select(label, path, options, wide = false) {
+  const v = getPath(state.settings, path);
+  const locked = lockedNow(path);
+  return `<label class="field ${wide ? 'wide' : ''} ${locked ? 'locked' : ''}">${label}<select data-set="${path}" data-kind="text" ${locked ? 'disabled' : ''}>
+    ${options.map(([val, text]) => `<option value="${esc(val)}" ${v === val ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select></label>`;
+}
+
 function serverSettingsForm() {
-  return `<div class="settings-grid">${lockedNote(['clientPassword'])}
-    <label class="field wide">Game<select disabled><option>Realtime</option><option>Turn-based (coming later)</option></select></label>
+  return `<div class="settings-grid">${lockedNote(['clientPassword', 'gameMode'])}
+    ${select('Game', 'gameMode', [['realtime', 'Realtime'], ['turns', 'Turn-based']], true)}
     ${field('Game password for players (blank = none)', 'clientPassword', 'text', 'maxlength="32" autocomplete="off"', true)}
     ${field('Players in lobby before queuing (0 = one per robot)', 'maxPlayers', 'int', 'min="0" max="40"', true)}
     <div class="wide chk-grid">${check('Debug menu on players&rsquo; phones', 'debugConsole')}
-      ${check('2-player tanks (driver + gunner)', 'twoPlayerTanks')}${check('Tank buzzers on', 'tuning.buzzer')}</div>
+      ${turnBased() ? '' : check('2-player tanks (driver + gunner)', 'twoPlayerTanks')}${check('Tank buzzers on', 'tuning.buzzer')}</div>
     <div class="wide">${check('Router airtime fairness (both Wi-Fi bands)', 'airtimeFairness')}
       <p class="hint">Leave off: with it on, several tanks switching off or dying within seconds can slow every other tank for about 8 minutes.
       With it off, a phone with a poor signal on the tanks&rsquo; 2.4&nbsp;GHz network can slow them more, so keep phones on 5&nbsp;GHz.
@@ -896,7 +1005,44 @@ function serverSettingsForm() {
   </div>`;
 }
 
+// The turn-based game's own rules (Settings.Turns): nothing here changes the
+// realtime game, and the realtime rules aren't shown in turn-based mode.
+function turnSettingsForm() {
+  const ow = getPath(state.settings, 'turns.overwatch');
+  return `<div class="settings-grid">${lockedNote(['turns.pointsToWin'])}
+    <h4 class="wide">Turns</h4>
+    ${field('Turn time (seconds, 0 = no limit)', 'turns.turnSeconds', 'int', 'min="0" max="3600"')}
+    ${field('Pause between turns (seconds)', 'turns.handoverSeconds', 'int', 'min="0" max="30"')}
+    ${field('Rounds (0 = no limit)', 'turns.maxRounds', 'int', 'min="0" max="1000"')}
+    ${field('Tanks per army (0 = no limit)', 'turns.maxTanksPerArmy', 'int', 'min="0" max="40"')}
+    ${field('Start countdown (seconds)', 'turns.countdownSeconds', 'int', 'min="0" max="30"')}
+    <h4 class="wide">Action points</h4>
+    ${field('Action points per turn', 'turns.apPerTurn', 'num', 'min="0.5" max="1000" step="0.5"')}
+    ${field('Driving: points per second', 'turns.driveApPerSec', 'num', 'min="0" max="100" step="0.1"')}
+    ${field('Turret: points per second', 'turns.turretApPerSec', 'num', 'min="0" max="100" step="0.1"')}
+    ${field('Firing: points per shot', 'turns.fireAp', 'num', 'min="0" max="1000" step="0.5"')}
+    <p class="hint wide">Driving costs its points per second with both tracks at full speed, half that on one track.</p>
+    <h4 class="wide">Shots</h4>
+    ${field('Hit points', 'turns.maxHp', 'int', 'min="1" max="10000"')}
+    ${field('Damage per hit', 'turns.damagePerHit', 'int', 'min="0" max="10000"')}
+    ${field('Side multiplier', 'turns.sideMultiplier', 'num', 'min="0" max="20" step="0.1"')}
+    ${field('Rear multiplier', 'turns.rearMultiplier', 'num', 'min="0" max="20" step="0.1"')}
+    ${field('Firing cooldown (seconds)', 'turns.fireCooldownMs', 'ms', 'min="0.25" max="30" step="0.25"')}
+    ${field('Shot IR listen window (ms)', 'turns.shotWindowMs', 'int', 'min="5" max="1000"')}
+    <div class="wide">${check('Overwatch', 'turns.overwatch')}
+      <p class="hint">A tank with enough points for a shot can go on overwatch: during enemy turns it fires once, by itself,
+      at the first enemy that moves into its line of fire. More than 4 tanks on overwatch at once makes each one check less often.</p></div>
+    ${ow ? field('Overwatch IR listen window (ms)', 'turns.overwatchWindowMs', 'int', 'min="5" max="1000"') : ''}
+    <h4 class="wide">Points</h4>
+    ${field('Victory points to win', 'turns.pointsToWin', 'int', 'min="1"')}
+    ${field('Points per kill', 'turns.pointsPerKill', 'int', 'min="0"')}
+    ${field('Points per capture point held, each turn', 'turns.capturePointsPerTurn', 'int', 'min="0"')}
+    <p class="hint wide">Destroyed tanks are out for the rest of the game. Scanning your own base during your turn repairs a tank and uses its points.</p>
+  </div>`;
+}
+
 function gameplaySettingsForm() {
+  if (turnBased()) return turnSettingsForm();
   return `<div class="settings-grid">${lockedNote(['matchSeconds'])}
     ${field('Match duration (minutes)', 'matchSeconds', 'min', 'min="0.5" max="60" step="0.5"')}
     ${field('Start countdown (seconds)', 'countdownSeconds', 'int', 'min="0" max="30"')}
@@ -1103,11 +1249,12 @@ function fmtClock(ms) {
 setInterval(() => {
   if (shownScreen !== 'host') return;
   const ms = remainingMs();
-  const urgent = state && state.phase === 'playing' && !state.paused && ms <= 10000;
+  const noLimit = turnBased() && state.turn && state.turn.noLimit && state.phase === 'playing';
+  const urgent = state && state.phase === 'playing' && !state.paused && ms <= 10000 && !noLimit;
   for (const id of ['host-timer', 'host-timer-big']) {
     const el = $(id);
     if (!el) continue;
-    el.textContent = fmtClock(ms);
+    el.textContent = noLimit ? (id === 'host-timer' ? 'Round ' + state.turn.round : 'No limit') : fmtClock(ms);
     el.classList.toggle('urgent', urgent);
   }
 }, 250);
@@ -1165,6 +1312,9 @@ document.addEventListener('click', (e) => {
     case 'host-pause': send({ t: 'host_pause', on: el.dataset.on === 'true' }); break;
     case 'host-damage': send({ t: 'host_damage', tank, dir: el.dataset.dir }); break;
     case 'host-heal': send({ t: 'host_heal', tank }); break;
+    case 'host-end-turn': send({ t: 'host_end_turn' }); break;
+    case 'claim-tank': send({ t: 'claim_tank', tank }); break;
+    case 'unclaim-tank': send({ t: 'unclaim_tank', tank }); break;
     case 'host-close':
       if (confirm('Close the game? Players go back to the queue.')) {
         send({ t: 'host_close' });
@@ -1267,6 +1417,7 @@ document.addEventListener('change', (e) => {
   const d = el.dataset || {};
   switch (d.action) {
     case 'tank-alliance': send({ t: 'host_tank_alliance', tank: d.tank, alliance: el.value }); break;
+    case 'tank-army': send({ t: 'host_tank_army', tank: d.tank, target: el.value }); break;
     case 'tag-use': send({ t: 'host_tag_use', uid: d.uid, use: el.value }); toast(el.value ? 'Saved: ' + tagUseLabel(el.value) : 'Saved: not used'); break;
     case 'point-beacon': send({ t: 'host_point_edit', id: d.id, beacon: +el.value }); break;
     case 'point-name': if (el.value.trim()) send({ t: 'host_point_edit', id: d.id, name: el.value.trim(), beacon: -1 }); break;

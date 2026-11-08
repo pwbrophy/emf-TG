@@ -65,11 +65,28 @@ is under Server Config (the sliders button).
 
 Combat follows the Unity version: 25 damage a hit (rear ×3, side ×1.5), a
 5 s explosion on death, then "return to base" until the tank scans its own
-alliance's base tag, 25 points a kill and 300 to win. "Alliance" is the
-realtime game's side (the planned turn-based mode can have several teams in
-an alliance). The host can add, remove, rename and recolour alliances; a
-tank is in the alliance its name starts with (Desert-01 → Desert Squad)
-unless the host chooses another.
+alliance's base tag, 25 points a kill and 300 to win. "Alliance" is a
+side; the host can add, remove, rename and recolour alliances; a tank is in
+the alliance its name starts with (Desert-01 → Desert Squad) unless the host
+chooses another.
+
+Turn-based game (Server Settings → Game: Turn-based; `turns.go`), in the
+style of X-COM. Each player is an army in an alliance and claims tanks of it
+in the lobby (one at first, more by tapping free ones; the host can move
+tanks between armies). Alliances take turns, the first at random; all of an
+alliance's armies play their turn at once, each player switching between
+their own tanks. Every tank gets action points at the start of its turn:
+driving spends them per second (metered on the hub from the drive commands,
+with the tank's 500 ms watchdog), the turret too if the host wants, a shot a
+fixed amount. A turn ends when every army taps END TURN (or can't act) or
+its time runs out, then a short handover. Overwatch (host toggle): a tank
+keeps its points and, during enemy turns, sends silent IR probes while
+enemies move; the first moving enemy it hits takes one shot. Destroyed tanks
+are out for the game; an alliance wins by being the last with tanks, by
+points (kills, and capture points held at the start of each of its turns),
+or on points at the round limit. The turn-based game has its own copies of
+the game rules (`Settings.Turns`: HP, damage, cooldown, points...), so the
+two games never share a value; only one game's settings are shown at a time.
 
 RFID tags: every tag a tank reads is listed in Server Config → Tags and
 Capture Points, where the host makes it an alliance's base or a capture

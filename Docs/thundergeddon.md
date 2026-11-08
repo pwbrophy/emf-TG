@@ -16,7 +16,7 @@
 
 * **Digital side (game server on the hub):** a Go program running on a GL.iNet GL-MT3000 router. Tanks find it on the network by themselves and are controlled over WebSocket. Players open the join link (e.g. from a QR code), enter a name, wait in the queue, choose an alliance in the lobby and are given a tank. In the game they drive with a joystick, aim the turret with a slider and fire, while watching the tank's live camera. The host runs everything from a phone too, and a spectator display shows every tank's camera, the score and a spoken commentary on a big screen.
 
-  The realtime game has directional damage (rear hits do 3×), capture points, return-to-base respawns via RFID, and optional two-player crews (driver + gunner). A turn-based mode similar to X-COM is planned.
+  The realtime game has directional damage (rear hits do 3×), capture points, return-to-base respawns via RFID, and optional two-player crews (driver + gunner). A turn-based mode similar to X-COM (host setting): alliances take turns; each player commands an army of several tanks with action points for driving and shooting, and can leave tanks on overwatch to fire at enemies that move during their turn. Destroyed tanks are out for the game.
 
 ## Events
 
@@ -57,7 +57,7 @@
 - [ ] Run a public event on the hub server
 - [ ] Some iPhones can't reach the lobby ("server is http, should be https" error)
 - [ ] Controls guide for players before the game starts
-- [ ] Turn-based game mode (X-COM style)
+- [x] Turn-based game mode (X-COM style)
 
 ### Next hardware revision (v2)
 

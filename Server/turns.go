@@ -750,7 +750,7 @@ func (g *game) overwatchFires(c *combatant) bool {
 		p.shots++
 	}
 	g.tanks.sendTo(c.tank, `{"cmd":"flash_fire"}`)
-	g.sendCrew(c, map[string]any{"t": "fired"})
+	g.sendCrew(c, map[string]any{"t": "fired", "tank": c.tank}) // tank: the player may be watching another of theirs
 	g.displaySend(map[string]any{"cmd": "fire_event", "robotId": c.tank, "callsign": c.tankName})
 	g.displayEvent(c.crewNames() + "'s overwatch fires!")
 	log.Printf("[Turns] %s fired on overwatch", c.tankName)

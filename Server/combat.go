@@ -383,7 +383,7 @@ func (g *game) applyHit(shooter, target *combatant, mask byte, dir string) (int,
 	}
 
 	// The target crew's phones: directional hit flash and "Hit by …".
-	g.sendCrew(target, map[string]any{"t": "hit_taken", "shooter": shooterName, "dir": dir})
+	g.sendCrew(target, map[string]any{"t": "hit_taken", "shooter": shooterName, "dir": dir, "tank": target.tank})
 	g.announceHit(shooter, target, dir)
 
 	if target.hp > 0 {

@@ -507,6 +507,121 @@
       letter-spacing: 0.06em;
     }
     #ui-menu[hidden] { display: none; }
+
+    /* ── Turn-based game (Go server addition) ──
+       Only shown when the game is turn-based (body.tb-mode); the realtime
+       game's screen is unchanged. Under the HP bar: the selected tank's action
+       points, then whose turn it is, then the player's tanks (tap to switch).
+       Right side: END TURN and OVERWATCH. */
+    #tb-ap-wrap, #tb-banner, #tb-tanks, #tb-actions { zoom: var(--ui-scale, 1); }
+    body:not(.tb-mode) #tb-ap-wrap, body:not(.tb-mode) #tb-banner,
+    body:not(.tb-mode) #tb-tanks, body:not(.tb-mode) #tb-actions,
+    body:not(.tb-mode) #tb-fire-cost { display: none !important; }
+    body.tb-mode #timer-label { display: none; }
+    #tb-ap-wrap {
+      position: absolute;
+      top: 12.4vmin;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 36vmax;
+      height: 5.4vmin;
+      border-radius: 2.7vmin;
+      border: 2px solid rgba(120,200,255,0.9);
+      background: rgba(10,10,16,0.65);
+      overflow: hidden;
+      z-index: 10;
+    }
+    #tb-ap-fill { height: 100%; width: 100%; background: #2f8fff; transition: width 0.2s linear; }
+    #tb-ap-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3vmin;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    #tb-banner {
+      position: absolute;
+      top: 19.2vmin;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.8vmin 3.2vmin;
+      border-radius: 3.2vmin;
+      border: 2px solid rgba(255,255,255,0.3);
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: 3.4vmin;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+      pointer-events: none;
+      z-index: 10;
+    }
+    #tb-banner .tb-score { font-weight: 700; margin-left: 0.4em; }
+    #tb-tanks {
+      position: absolute;
+      top: 26.4vmin;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 1.6vmin;
+      z-index: 12;
+    }
+    .tb-chip {
+      min-width: 17vmin;
+      padding: 1vmin 1.6vmin;
+      background: rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 2.4vmin;
+      color: #fff;
+      font-size: 2.6vmin;
+      font-weight: 700;
+      text-align: left;
+      cursor: pointer;
+      pointer-events: all;
+      touch-action: manipulation;
+    }
+    .tb-chip.sel { border-color: #fff; background: rgba(255,255,255,0.2); }
+    .tb-chip.out { opacity: 0.45; cursor: default; }
+    .tb-chip.out .tb-name { text-decoration: line-through; }
+    .tb-chip .tb-info { display: block; font-size: 2.2vmin; font-weight: 600; opacity: 0.85; margin-top: 0.4vmin; }
+    .tb-chip .tb-hp { display: block; height: 0.9vmin; margin-top: 0.6vmin; border-radius: 0.45vmin; background: rgba(255,255,255,0.2); overflow: hidden; }
+    .tb-chip .tb-hp > i { display: block; height: 100%; background: var(--hp-fill); }
+    #tb-actions {
+      position: absolute;
+      right: 2vmax;
+      top: 30vmin;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 1.6vmin;
+      z-index: 20;
+    }
+    #tb-actions button {
+      padding: 1.6vmin 3.2vmin;
+      background: rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.4);
+      border-radius: 4.8vmin;
+      color: #fff;
+      font-size: 3.2vmin;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      pointer-events: all;
+      touch-action: manipulation;
+    }
+    #tb-actions button.on { background: rgba(255,255,255,0.85); color: #111; border-color: #fff; }
+    #tb-actions button:disabled { opacity: 0.4; cursor: default; }
+    #tb-actions button.tb-hide { display: none; }
+    /* Not this player's turn (or the tank is on overwatch): controls greyed out. */
+    #controls.tb-wait { opacity: 0.35; }
+    #controls.tb-wait * { pointer-events: none !important; }
+    #fire-btn.tb-noap { opacity: 0.4; pointer-events: none; }
+    #tb-fire-cost { display: block; font-size: 2.4vmin; font-weight: 800; opacity: 0.9; }
     #ui-menu .ui-row { display: flex; align-items: center; gap: 1.6vmin; }
     #ui-menu button {
       min-width: 9.6vmin;
@@ -1524,6 +1639,16 @@
     <button id="ui-fx" type="button" onclick="setSimpleFx(!_simpleFx)" title="Simple effects run smoother on old phones and tablets">FULL</button>
   </div>
   </div>
+
+  <!-- Turn-based game (Go server addition): shown only when the game is
+       turn-based (body.tb-mode, see tbOnState). -->
+  <div id="tb-ap-wrap"><div id="tb-ap-fill"></div><div id="tb-ap-text">AP</div></div>
+  <div id="tb-banner"></div>
+  <div id="tb-tanks"></div>
+  <div id="tb-actions">
+    <button id="tb-endturn" type="button" onclick="tbEndTurn()">END TURN</button>
+    <button id="tb-overwatch" type="button" onclick="tbOverwatch()">OVERWATCH</button>
+  </div>
 </div>
 
 <!-- ── Game paused overlay ─────────────────────────────────────────── -->
@@ -2303,6 +2428,10 @@ class TGHub {
     else if (method === 'SendTurret') this._raw({ t: 'turret', s: a[0] });
     else if (method === 'Fire')       this._raw({ t: 'fire' });
     else if (method === 'SetStabilise') this._raw({ t: 'stabilise', on: !!a[0] });
+    // Turn-based games (Go server addition).
+    else if (method === 'SelectTank') this._raw({ t: 'select_tank', tank: a[0] });
+    else if (method === 'EndTurn')    this._raw({ t: 'end_turn', on: !!a[0] });
+    else if (method === 'Overwatch')  this._raw({ t: 'overwatch', on: !!a[0] });
     // What this phone drew, for the server's video log (/api/video-log).
     else if (method === 'ReportVideoStats') this._raw({ t: 'vstats', vstats: a[0] });
     return Promise.resolve();
@@ -2360,10 +2489,18 @@ function tgOnMessage(hub, m) {
   switch (m.t) {
     case 'kicked':       returnToJoin('The host removed you from the game.'); return;
     case 'error':        dbg('server: ' + m.msg); return;
-    case 'fired':        hub.emit('FireEvent', { robotId: myRobotId, callsign: myRobotId }); return;
+    case 'fired':
+      if (tbOtherTank(m.tank)) { showFireToast(tbTankName(m.tank) + ' fired on overwatch!'); return; }
+      hub.emit('FireEvent', { robotId: myRobotId, callsign: myRobotId }); return;
     case 'fire_result':  hub.emit('FireResult', m.text); return;
-    case 'hit_taken':    hub.emit('HitTaken', { shooter: m.shooter, dir: m.dir }); return;
-    case 'you_are_dead': hub.emit('YouAreDead'); return;
+    case 'hit_taken':
+      // Turn-based: one of this player's other tanks was hit.
+      if (tbOtherTank(m.tank)) { showFireToast(tbTankName(m.tank) + ' was hit!'); haptic([60]); return; }
+      hub.emit('HitTaken', { shooter: m.shooter, dir: m.dir }); return;
+    case 'tank_destroyed': tbTankDestroyed(m); return;
+    case 'you_are_dead':
+      if (tbMode()) { tbArmyDestroyed(); return; } // turn-based: the whole army is gone
+      hub.emit('YouAreDead'); return;
     case 'you_are_alive': hub.emit('YouAreAlive'); return;
     case 'rfid':         hub.emit('RfidTag', m.text); return;
   }
@@ -2419,7 +2556,7 @@ function tgOnMessage(hub, m) {
         cooldownDuration: m.fireCooldownMs / 1000,
       });
       // Page reopened while dead: show the death screen.
-      if (me.life === 'dead' || me.life === 'returning') hub.emit('YouAreDead');
+      if (m.mode !== 'turns' && (me.life === 'dead' || me.life === 'returning')) hub.emit('YouAreDead');
     } else if (me.hp !== tgLastHp) {
       tgLastHp = me.hp;
       hub.emit('StateUpdate', { hp: me.hp, maxHp: me.maxHp });
@@ -2428,12 +2565,14 @@ function tgOnMessage(hub, m) {
       tgPaused = !!m.paused;
       hub.emit(tgPaused ? 'GamePaused' : 'GameResumed');
     }
+    tbOnState(m);
     tgTick();
     return;
   }
   if (me.status === 'finished' && tgStarted) {
     if (!tgOver) {
       tgOver = true;
+      document.body.classList.remove('tb-mode'); // turn-based HUD off for the game-over sequence
       // A game the host ended has no winner: the page goes straight on to
       // the stats; otherwise the victory/defeat sequence plays first.
       const mine = (m.results || []).find(r => r.name === me.name) || {};
@@ -2461,6 +2600,200 @@ function tgTick() {
   }
 }
 setInterval(tgTick, 200);
+
+// ── Turn-based game (Go server addition) ────────────────────────────────────
+// The player commands an army: several tanks, one controlled at a time (the
+// server's me.tank), each with action points for the turn. Only the active
+// alliance can act; the others watch their own tanks' cameras.
+let tbSel = null;          // the tank whose video and controls are shown
+let tbArmyGone = false;    // every tank in the army destroyed
+let tbWatching = '';       // army destroyed: the ally tank being watched
+let tbWait = null;         // controls greyed out (not this player's turn)
+
+function tbMode() { return !!tgState && tgState.mode === 'turns'; }
+
+function tbOtherTank(id) {
+  return tbMode() && !!id && !!tgState.me && id !== tgState.me.tank;
+}
+
+function tbTankName(id) {
+  const t = ((tgState && tgState.tanks) || []).find(x => x.id === id);
+  return t ? t.name : id;
+}
+
+function tbAlliance(i) {
+  return ((tgState && tgState.alliances) || [])[i] || { name: '?', color: '#888' };
+}
+
+// tbOnState: every snapshot while playing.
+function tbOnState(m) {
+  const on = m.mode === 'turns';
+  document.body.classList.toggle('tb-mode', on);
+  if (!on) return;
+  const me = m.me;
+  const rules = m.turnRules || {};
+  if (tbSel === null) tbSel = me.tank;
+  if (me.tank && me.tank !== tbSel && !tbArmyGone) tbShow(me.tank, me.tankName, me.hp, me.maxHp);
+
+  // Action points of the selected tank.
+  const ap = me.ap || 0, apMax = me.apMax || rules.apPerTurn || 1;
+  document.getElementById('tb-ap-fill').style.width = Math.max(0, Math.min(100, ap / apMax * 100)) + '%';
+  document.getElementById('tb-ap-text').textContent =
+    me.overwatch ? 'ON OVERWATCH · ' + ap.toFixed(1) + ' AP' : ap.toFixed(1) + ' / ' + apMax + ' AP';
+
+  // FIRE shows its cost and greys out without the points for it.
+  let cost = document.getElementById('tb-fire-cost');
+  if (!cost) {
+    cost = document.createElement('span');
+    cost.id = 'tb-fire-cost';
+    document.getElementById('fire-btn-text').appendChild(cost);
+  }
+  cost.textContent = (rules.fireAp || 0) + ' AP';
+  const canFire = !!me.myTurn && !me.overwatch && !me.turnDone && ap + 1e-9 >= (rules.fireAp || 0);
+  document.getElementById('fire-btn').classList.toggle('tb-noap', !canFire);
+
+  // Controls only on this player's turn, for a tank that can act.
+  const wait = !me.myTurn || !!me.overwatch || !!me.turnDone || tbArmyGone;
+  if (wait !== tbWait) {
+    tbWait = wait;
+    if (wait) dropControls();
+    document.getElementById('controls').classList.toggle('tb-wait', wait);
+  }
+
+  // END TURN (tap again to take it back) and OVERWATCH.
+  const end = document.getElementById('tb-endturn');
+  end.classList.toggle('tb-hide', !me.myTurn || tbArmyGone);
+  end.classList.toggle('on', !!me.turnDone);
+  end.textContent = me.turnDone ? 'WAITING… (UNDO)' : 'END TURN';
+  const ow = document.getElementById('tb-overwatch');
+  ow.classList.toggle('tb-hide', !rules.overwatch || tbArmyGone || (!me.myTurn && !me.overwatch));
+  ow.classList.toggle('on', !!me.overwatch);
+  ow.textContent = me.overwatch ? 'ON OVERWATCH' : 'OVERWATCH';
+  ow.disabled = !me.myTurn || !!me.turnDone || (!me.overwatch && ap + 1e-9 < (rules.fireAp || 0));
+
+  // A page reopened after the whole army was destroyed.
+  const mine = me.tanks || [];
+  if (!tbArmyGone && mine.length && mine.every(t => t.life && t.life !== 'alive')) tbArmyDestroyed();
+
+  tbRenderTanks();
+  tbRenderBanner();
+}
+
+// tbShow: the video, name and HP bar follow the tank now controlled.
+function tbShow(id, name, hp, max) {
+  tbSel = id;
+  dropControls();
+  document.getElementById('robot-label').textContent = name || id;
+  if (hp !== undefined) {
+    currentHp = hp; maxHp = max || maxHp; tgLastHp = hp;
+    updateHpBar();
+  }
+  startGameStream(id);
+}
+
+// tbRenderTanks: the army's tanks (tap to control one); once the army is
+// destroyed, the allies' tanks (tap to watch one).
+function tbRenderTanks() {
+  const me = tgState.me;
+  let html = '';
+  if (tbArmyGone) {
+    const allies = (tgState.tanks || []).filter(t => t.allianceIndex === me.allianceIndex && t.life === 'alive');
+    html = allies.map(t => `<button type="button" class="tb-chip ${t.id === tbWatching ? 'sel' : ''}" onclick="tbWatch('${t.id}')">
+      <span class="tb-name">${escHtml(t.name)}</span><span class="tb-info">${escHtml(t.player || '')}</span></button>`).join('');
+  } else if ((me.tanks || []).length > 1) {
+    html = me.tanks.map((t, i) => {
+      const out = t.life && t.life !== 'alive';
+      const hp = Math.max(0, Math.min(100, (t.hp || 0) / (me.maxHp || 100) * 100));
+      const info = out ? 'DESTROYED' : (t.overwatch ? 'OVERWATCH' : (t.ap != null ? t.ap.toFixed(1) + ' AP' : ''));
+      return `<button type="button" class="tb-chip ${t.id === me.tank ? 'sel' : ''} ${out ? 'out' : ''}" ${out ? 'disabled' : ''}
+        onclick="tbSelect('${t.id}')"><span class="tb-name">${i < 9 ? (i + 1) + '. ' : ''}${escHtml(t.name)}</span>
+        <span class="tb-hp"><i style="width:${hp}%"></i></span><span class="tb-info">${info}</span></button>`;
+    }).join('');
+  }
+  const el = document.getElementById('tb-tanks');
+  if (el._html !== html) { el.innerHTML = html; el._html = html; }
+}
+
+function tbRenderBanner() {
+  const tn = tgState && tgState.turn;
+  const el = document.getElementById('tb-banner');
+  if (!tn) { el.textContent = ''; return; }
+  const me = tgState.me;
+  const secs = Math.ceil(tgRemainingMs() / 1000);
+  const clock = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
+  let text, color;
+  if (tn.handover) {
+    const next = tbAlliance(tn.nextIndex);
+    color = next.color;
+    text = escHtml(next.name.toUpperCase()) + '&rsquo;S TURN IN ' + secs;
+  } else {
+    const a = tbAlliance(tn.allianceIndex);
+    color = a.color;
+    const time = tn.noLimit ? '' : ' · ' + clock;
+    text = me.myTurn ? 'YOUR TURN' + time + (me.turnDone ? ' · WAITING FOR ALLIES' : '')
+      : escHtml(a.name.toUpperCase()) + ' IS MOVING' + time;
+  }
+  const round = ' · ROUND ' + tn.round + (tn.maxRounds ? '/' + tn.maxRounds : '');
+  const scores = (tgState.alliancePoints || []).map((p, i) =>
+    `<span class="tb-score" style="color:${tbAlliance(i).color}">${p}</span>`).join('');
+  const html = text + round + scores;
+  if (el._html !== html) { el.innerHTML = html; el._html = html; }
+  el.style.borderColor = color;
+}
+setInterval(() => { if (tbMode() && tgStarted && !tgOver) tbRenderBanner(); }, 250);
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function tbSelect(id) {
+  if (!tbMode() || tbArmyGone || id === tgState.me.tank) return;
+  if (connection) connection.send('SelectTank', id).catch(() => {});
+}
+
+function tbWatch(id) {
+  tbWatching = id;
+  document.getElementById('robot-label').textContent = tbTankName(id);
+  startGameStream(id);
+  tbRenderTanks();
+}
+
+function tbEndTurn() {
+  if (connection && tgState) connection.send('EndTurn', !tgState.me.turnDone).catch(() => {});
+}
+
+function tbOverwatch() {
+  if (connection && tgState) connection.send('Overwatch', !tgState.me.overwatch).catch(() => {});
+}
+
+function tbTankDestroyed(m) {
+  showFireToast((m.name || 'A tank') + ' DESTROYED');
+  if (m.tank === tbSel) { triggerShake('destroy'); haptic([150, 80, 250]); }
+}
+
+// The whole army is gone: no controls, but the allies' cameras to watch.
+function tbArmyDestroyed() {
+  if (tbArmyGone) return;
+  tbArmyGone = true;
+  isDead = true; // no firing
+  dropControls();
+  triggerShake('destroy');
+  haptic([150, 80, 250, 80, 400]);
+  const overlay = document.getElementById('screen-dead');
+  overlay.classList.add('active', 'walkmode'); // see-through: the allies' tanks stay tappable
+  document.getElementById('dead-title').textContent = 'ARMY DESTROYED';
+  document.getElementById('dead-subtitle').textContent = 'TAP AN ALLY TO WATCH';
+  document.getElementById('dead-countdown').textContent = '';
+  if (tgState) tbOnState(tgState);
+}
+
+// Keys 1-9 switch tanks on a computer.
+document.addEventListener('keydown', e => {
+  if (!tbMode() || e.repeat || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) return;
+  const n = parseInt(e.key, 10);
+  const tanks = (tgState.me && tgState.me.tanks) || [];
+  if (n >= 1 && n <= 9 && tanks[n - 1]) tbSelect(tanks[n - 1].id);
+});
 
 function buildConnection() {
   // The Go server's WebSocket, behind the same interface the SignalR hub had.
@@ -4433,6 +4766,7 @@ function stopFireFx() {
 // ════════════════════════════════════════════════════════
 function onFire() {
   if (isDead || isDeadWalk) return;
+  if (tbMode() && document.getElementById('fire-btn').classList.contains('tb-noap')) return; // turn-based: not now
   const now = Date.now();
   if (now < fireCooldownUntil) return;
 
