@@ -19,8 +19,8 @@ package main
 //     PointsToWin wins at once. When time runs out the alliance with more
 //     points wins; on a tie, more tanks still in the fight, then more damage.
 //
-// "Alliance" is the realtime game's side (the planned turn-based mode can
-// have several teams in an alliance). A tank's crew is its driver and, on a
+// "Alliance" is a side; in the turn-based game (turns.go) an alliance holds
+// several armies. A tank's crew is its driver and, on a
 // 2-player tank, a gunner. The gunner fires (and gets the kills); both share
 // the tank's deaths.
 //
@@ -41,6 +41,7 @@ const (
 	alive     lifeState = iota
 	exploding           // just died: motors off
 	returning           // "return to base": can drive, can't fire, can't be hurt
+	destroyed           // turn-based: out for the rest of the game
 )
 
 func (l lifeState) String() string {
@@ -49,6 +50,8 @@ func (l lifeState) String() string {
 		return "dead"
 	case returning:
 		return "returning"
+	case destroyed:
+		return "destroyed"
 	}
 	return "alive"
 }
@@ -151,6 +154,8 @@ type combatant struct {
 	lastHitMask byte
 
 	stab stabState // turret stabilisation (stabilise.go)
+
+	turn turnTank // turn-based games: action points and overwatch (turns.go)
 }
 
 func (c *combatant) invulnerable(now time.Time) bool {
@@ -211,6 +216,8 @@ type match struct {
 
 	lastCountdownTick int // last countdown number sent to the tanks
 
+	turns *turnState // turn-based games (turns.go); nil in realtime
+
 	// Announcer bookkeeping (display.go).
 	firstBlood   bool
 	killStreak   map[string]int
@@ -237,13 +244,34 @@ func (g *game) newMatch(players []*player) {
 	for i := range m.cpOwners {
 		m.cpOwners[i] = -1
 	}
+	maxHp := g.rules().MaxHp
+	if g.turnBased() {
+		// Every tank in each player's army.
+		m.turns = &turnState{}
+		for _, p := range players {
+			for _, id := range p.army {
+				m.fighters[id] = &combatant{
+					tank: id, tankName: g.tankNames[id], alliance: g.allianceOf(id),
+					driver: crewMember{p.device, p.name}, hp: maxHp,
+				}
+			}
+			names := make([]string, len(p.army))
+			for i, id := range p.army {
+				names[i] = g.tankNames[id]
+			}
+			m.stats[p.name] = &playerStats{name: p.name, tankName: strings.Join(names, ", "),
+				alliance: g.allianceIndex(p.armyAlliance), damageFrom: map[string]int{}}
+		}
+		g.match = m
+		return
+	}
 	for _, p := range players {
 		if p.role == roleGunner {
 			continue
 		}
 		m.fighters[p.tank] = &combatant{
 			tank: p.tank, tankName: g.tankNames[p.tank], alliance: g.allianceOf(p.tank),
-			driver: crewMember{p.device, p.name}, hp: g.settings.MaxHp,
+			driver: crewMember{p.device, p.name}, hp: maxHp,
 		}
 	}
 	for _, p := range players {
@@ -315,15 +343,16 @@ func resolveCardinal(mask byte) string {
 }
 
 func (g *game) damageFor(dir string) int {
+	r := g.rules()
 	mult := 1.0
 	switch dir {
 	case "S":
-		mult = g.settings.RearMultiplier
+		mult = r.RearMultiplier
 	case "E", "W":
-		mult = g.settings.SideMultiplier
+		mult = r.SideMultiplier
 	}
 	// Unity's Mathf.RoundToInt rounds halves to even; so does this.
-	return int(math.RoundToEven(float64(g.settings.DamagePerHit) * mult))
+	return int(math.RoundToEven(float64(r.DamagePerHit) * mult))
 }
 
 // applyHit damages target and returns the damage done (0 if it couldn't be
@@ -367,6 +396,11 @@ func (g *game) applyHit(shooter, target *combatant, mask byte, dir string) (int,
 func (g *game) kill(target, shooter *combatant) {
 	m := g.match
 	target.life = exploding
+	if m.turns != nil {
+		target.life = destroyed // turn-based: out for the rest of the game
+		g.stopAp(target, time.Now())
+		target.turn.overwatch = false
+	}
 	target.diedAt = time.Now()
 	for _, cm := range target.crew() {
 		if st := m.stats[cm.name]; st != nil {
@@ -376,19 +410,27 @@ func (g *game) kill(target, shooter *combatant) {
 	g.tanks.sendTo(target.tank, `{"cmd":"drive","l":0,"r":0}`)
 	g.tanks.sendTo(target.tank, `{"cmd":"motors_off"}`)
 	g.tanks.sendTo(target.tank, `{"cmd":"flash_death"}`)
-	g.sendCrew(target, map[string]any{"t": "you_are_dead"})
+	if m.turns != nil {
+		g.tankDestroyed(target) // turns.go: tells the player; you_are_dead once the whole army is gone
+	} else {
+		g.sendCrew(target, map[string]any{"t": "you_are_dead"})
+	}
 	g.announceKill(shooter, target)
+	if m.turns != nil {
+		defer g.checkElimination() // after the kill points: they may win first
+	}
 
 	if shooter == nil || shooter.alliance < 0 {
 		log.Printf("[Combat] %s destroyed", target.crewNames())
 		return
 	}
 	log.Printf("[Combat] %s destroyed %s", shooter.crewNames(), target.crewNames())
+	pts := g.rules().PointsPerKill
 	if st := m.stats[shooter.shooter().name]; st != nil {
 		st.kills++
-		st.vpFromKills += g.settings.PointsPerKill
+		st.vpFromKills += pts
 	}
-	g.addPoints(shooter.alliance, g.settings.PointsPerKill)
+	g.addPoints(shooter.alliance, pts)
 }
 
 // addPoints scores for an alliance and ends the game if it reached the
@@ -400,7 +442,7 @@ func (g *game) addPoints(alliance, pts int) {
 	}
 	m.alliancePoints[alliance] += pts
 	g.announcePoints()
-	if m.alliancePoints[alliance] >= g.settings.PointsToWin && g.phase == phasePlaying {
+	if m.alliancePoints[alliance] >= g.rules().PointsToWin && g.phase == phasePlaying {
 		m.winner = alliance
 		g.endGame("points")
 	}
@@ -505,7 +547,7 @@ func (g *game) rfidScanned(tankID, uid string) {
 		return
 	}
 	switch c.life {
-	case exploding:
+	case exploding, destroyed:
 		return // ignores everything while exploding
 	case returning:
 		if base >= 0 && base == c.alliance {
@@ -525,11 +567,13 @@ func (g *game) rfidScanned(tankID, uid string) {
 		}
 	}
 	switch {
+	case base >= 0 && base == c.alliance && g.match.turns != nil:
+		g.repairAtBase(c) // turns.go
 	case base >= 0 && base == c.alliance:
 		if c.invulnerable(time.Now()) {
 			return // healed moments ago: repeated scans of the same tag
 		}
-		c.hp = g.settings.MaxHp
+		c.hp = g.rules().MaxHp
 		g.tanks.sendTo(c.tank, `{"cmd":"flash_heal"}`)
 		g.sendSetHp(c)
 		g.grantInvulnerability(c)
@@ -556,11 +600,13 @@ func (g *game) capture(point, alliance int, captor string) {
 
 func (g *game) respawn(c *combatant) {
 	c.life = alive
-	c.hp = g.settings.MaxHp
+	c.hp = g.rules().MaxHp
 	g.tanks.sendTo(c.tank, `{"cmd":"flash_heal"}`)
 	g.tanks.sendTo(c.tank, `{"cmd":"motors_on"}`)
 	g.sendSetHp(c)
-	g.grantInvulnerability(c)
+	if g.match.turns == nil {
+		g.grantInvulnerability(c) // turn-based games have no invulnerability
+	}
 	g.sendCrew(c, map[string]any{"t": "you_are_alive"})
 	g.match.lowHpWarned[c.tank] = false
 	g.displayEvent(c.crewNames() + " have returned to battle!")
@@ -568,7 +614,7 @@ func (g *game) respawn(c *combatant) {
 }
 
 func (g *game) sendSetHp(c *combatant) {
-	g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"set_hp","hp":%d,"max":%d}`, c.hp, g.settings.MaxHp))
+	g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"set_hp","hp":%d,"max":%d}`, c.hp, g.rules().MaxHp))
 }
 
 // winnerOnTime: most points; on a tie, more tanks still in the fight (a
@@ -583,7 +629,7 @@ func (g *game) winnerOnTime() int {
 			continue
 		}
 		present[c.alliance] = true
-		if c.life != exploding {
+		if c.life != exploding && c.life != destroyed {
 			surviving[c.alliance]++
 		}
 	}

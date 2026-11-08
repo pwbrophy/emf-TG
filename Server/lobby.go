@@ -49,14 +49,18 @@ func (g *game) colorWanted(id string) int {
 	if p == nil {
 		return -1
 	}
-	idx, ok := g.tankColor[id]
+	key := id
+	if len(p.army) > 0 {
+		key = "army:" + p.device // turn-based: all of an army's tanks show its colour
+	}
+	idx, ok := g.tankColor[key]
 	if !ok {
 		if g.phase != phaseLobby {
 			return -1
 		}
 		idx = g.nextColor % len(tankColors)
 		g.nextColor++
-		g.tankColor[id] = idx
+		g.tankColor[key] = idx
 	}
 	return idx
 }
@@ -106,6 +110,10 @@ func (g *game) pickAlliance(c *client, allianceID string) {
 	if a < 0 {
 		return
 	}
+	if g.turnBased() {
+		g.joinArmy(c, p, allianceID) // turns.go
+		return
+	}
 	if p.tank != "" && p.role != roleGunner && g.allianceOf(p.tank) == a {
 		return // already in it
 	}
@@ -135,7 +143,8 @@ func (g *game) cameraWanted(id string) bool {
 	if g.paused || g.match == nil || !inGame {
 		return false
 	}
-	return g.match.fighters[id] != nil
+	c := g.match.fighters[id]
+	return c != nil && c.life != destroyed // a tank out of a turn-based game stops streaming
 }
 
 // syncCameras switches every tank's camera on or off as needed.

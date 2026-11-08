@@ -16,11 +16,17 @@ package main
 //
 // Dead enemies still listen, so the shooter can be told "That tank is
 // already dead!" (their camera can't show the tank's lights).
+//
+// Turn-based games (turns.go): shots listen for longer (Turns.ShotWindowMs),
+// and tanks on overwatch send silent probes whenever no shot is waiting:
+// the same handshake with a short window, where only moving enemies listen.
+// A probe that hits becomes the overwatch tank's one shot.
 
 import (
 	"fmt"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,9 +35,11 @@ import (
 const maxShotAge = 2 * time.Second
 
 type shotRequest struct {
-	shooter string // tank id
-	at      time.Time
-	gen     int // match it belongs to
+	shooter  string // tank id
+	at       time.Time
+	gen      int  // match it belongs to
+	windowMs int  // how long enemies listen for each barrel; 0 = Settings.IrWindowMs
+	probe    bool // an overwatch probe (turns.go)
 }
 
 // irReply is a tank's answer during a shot.
@@ -45,19 +53,45 @@ type irScheduler struct {
 	g     *game
 	shots chan shotRequest
 	inbox chan irReply
+
+	// probing is set while a turn-based game has tanks on overwatch: the
+	// scheduler then asks for a probe whenever no shot is waiting.
+	probing atomic.Bool
 }
+
+// probeIdle is how often the scheduler looks for an overwatch probe to send
+// while no shot is waiting.
+const probeIdle = 20 * time.Millisecond
 
 func newIrScheduler(g *game) *irScheduler {
 	return &irScheduler{g: g, shots: make(chan shotRequest, 32), inbox: make(chan irReply, 128)}
 }
 
 func (s *irScheduler) run(stop <-chan struct{}) {
+	idle := time.NewTicker(probeIdle)
+	defer idle.Stop()
 	for {
+		// Shots first: a probe only runs when none is waiting.
 		select {
 		case <-stop:
 			return
 		case r := <-s.shots:
 			s.execute(r)
+			continue
+		default:
+		}
+		if s.probing.Load() {
+			if r, ok := s.g.nextProbe(); ok { // turns.go
+				s.execute(r)
+				continue
+			}
+		}
+		select {
+		case <-stop:
+			return
+		case r := <-s.shots:
+			s.execute(r)
+		case <-idle.C:
 		}
 	}
 }
@@ -106,13 +140,13 @@ func (s *irScheduler) execute(r shotRequest) {
 		return
 	}
 	shooter := m.fighters[r.shooter]
-	if shooter == nil || shooter.alliance < 0 {
+	if shooter == nil || shooter.alliance < 0 || (r.probe && !shooter.turn.overwatch) {
 		g.mu.Unlock()
 		return
 	}
 	var enemies []string
 	for id, c := range m.fighters {
-		if c.alliance >= 0 && c.alliance != shooter.alliance {
+		if c.alliance >= 0 && c.alliance != shooter.alliance && (!r.probe || g.movingTarget(c, time.Now())) {
 			enemies = append(enemies, id)
 		}
 	}
@@ -122,10 +156,14 @@ func (s *irScheduler) execute(r shotRequest) {
 		return // nobody to hit (Unity aborts silently too)
 	}
 
-	window := time.Duration(st.IrWindowMs) * time.Millisecond
+	windowMs := st.IrWindowMs
+	if r.windowMs > 0 {
+		windowMs = r.windowMs
+	}
+	window := time.Duration(windowMs) * time.Millisecond
 	ackTimeout := time.Duration(st.IrAckTimeoutMs) * time.Millisecond
 	windowWait := window + time.Duration(st.IrWindowTimeoutMs)*time.Millisecond
-	listen := fmt.Sprintf(`{"cmd":"ir_listen_window","ms":%d}`, st.IrWindowMs)
+	listen := fmt.Sprintf(`{"cmd":"ir_listen_window","ms":%d}`, windowMs)
 	send := g.tanks.sendTo
 
 	s.drain()
@@ -175,6 +213,21 @@ func (s *irScheduler) execute(r shotRequest) {
 	if g.match != m || g.phase != phasePlaying {
 		return // the game ended while this shot was in the air
 	}
+	if r.probe {
+		// Only a moving enemy that saw both barrels counts; then the probe
+		// becomes the overwatch tank's one shot.
+		var hit []string
+		now := time.Now()
+		for _, id := range enemies {
+			if b1[id] != 0 && b2[id] != 0 && m.fighters[id].life == alive && g.movingTarget(m.fighters[id], now) {
+				hit = append(hit, id)
+			}
+		}
+		if len(hit) == 0 || !g.overwatchFires(shooter) { // turns.go
+			return
+		}
+		enemies = hit
+	}
 	var parts []string
 	hitDead := false
 	for _, id := range enemies {
@@ -221,6 +274,9 @@ func (s *irScheduler) execute(r shotRequest) {
 	} else if hitDead {
 		text = "That tank is already dead!"
 	}
+	if r.probe {
+		text = "Overwatch: " + text
+	}
 	if c := m.fighters[r.shooter]; c != nil {
 		g.sendTo(c.shooter().device, map[string]any{"t": "fire_result", "text": text})
 	}
@@ -266,6 +322,9 @@ func (s *irScheduler) collect(tanks []string, timeout time.Duration) map[string]
 }
 
 func (s *irScheduler) fireResult(r shotRequest, text string) {
+	if r.probe {
+		return // probes that miss are silent
+	}
 	g := s.g
 	g.mu.Lock()
 	defer g.mu.Unlock()

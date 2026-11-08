@@ -93,7 +93,7 @@ func (g *game) tickStabiliser(now time.Time, dt time.Duration) {
 // the stabilised speed when that has changed. dt = 0 just re-sends at once.
 func (g *game) stepStabiliser(c *combatant, now time.Time, dt time.Duration) {
 	s := &c.stab
-	if g.paused || c.life == exploding {
+	if g.paused || c.life == exploding || c.life == destroyed {
 		// Motors are off: the hull isn't turning. Start again from rest.
 		s.rampL, s.rampR, s.yaw, s.active = 0, 0, 0, false
 		return

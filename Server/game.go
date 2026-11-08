@@ -21,6 +21,7 @@ import (
 	"log"
 	"math"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -78,6 +79,12 @@ type player struct {
 	// driver lets someone join as gunner.
 	role        string
 	allowGunner bool
+
+	// Turn-based games (turns.go): the player is an army in an alliance and
+	// holds the tanks they claimed; tank is the one they control now.
+	armyAlliance string   // alliance id, "" = none
+	army         []string // tank ids
+	turnDone     bool     // tapped END TURN this turn
 
 	stabilise bool // turret stabilisation on (stabilise.go); kept between games
 
@@ -311,6 +318,18 @@ func (g *game) handle(c *client, m inMsg) {
 	case "play_again":
 		g.playAgain(c.device)
 
+	// Turn-based games (turns.go).
+	case "claim_tank":
+		g.claimTank(c, m.Tank)
+	case "unclaim_tank":
+		g.unclaimTank(c, m.Tank)
+	case "select_tank":
+		g.selectTank(c.device, m.Tank)
+	case "end_turn":
+		g.setTurnDone(c.device, m.On)
+	case "overwatch":
+		g.setOverwatch(c, m.On)
+
 	case "host_login":
 		g.hostLogin(c)
 	default:
@@ -395,8 +414,24 @@ func (g *game) applySettings(s Settings) {
 		s.MatchSeconds = old.MatchSeconds
 		s.CountdownSeconds = old.CountdownSeconds
 		s.PointsToWin = old.PointsToWin
+		s.GameMode = old.GameMode
+		s.Turns.CountdownSeconds = old.Turns.CountdownSeconds
+		s.Turns.PointsToWin = old.Turns.PointsToWin
+		s.Turns.MaxTanksPerArmy = old.Turns.MaxTanksPerArmy
 	}
+	oldMode := g.settings.GameMode
 	g.saveNewSettings(s)
+	if g.settings.GameMode != oldMode {
+		// Tanks chosen for one game don't carry over to the other: everyone
+		// in the lobby chooses again.
+		for _, p := range g.players {
+			if p.status == stLobby {
+				p.clearTanks()
+			}
+		}
+		g.syncTankColors()
+		log.Printf("[Game] game mode is now %s", g.settings.GameMode)
+	}
 }
 
 // saveNewSettings saves new settings and sends tanks any tuning that
@@ -447,12 +482,15 @@ func (g *game) clientGone(c *client) {
 		p.clients = 0
 		p.disconnectedAt = time.Now()
 		// A tank whose crew vanished must not keep driving.
-		if p.status == stPlaying && p.tank != "" {
-			g.tanks.sendTo(p.tank, `{"cmd":"drive","l":0,"r":0}`)
-			g.tanks.sendTo(p.tank, `{"cmd":"turret","speed":0}`)
-			if g.match != nil {
-				if c := g.match.fighters[p.tank]; c != nil {
-					c.stab.driveL, c.stab.driveR, c.stab.turretIn = 0, 0, 0
+		if p.status == stPlaying {
+			for _, id := range p.tanksHeld() {
+				g.tanks.sendTo(id, `{"cmd":"drive","l":0,"r":0}`)
+				g.tanks.sendTo(id, `{"cmd":"turret","speed":0}`)
+				if g.match != nil {
+					if c := g.match.fighters[id]; c != nil {
+						c.stab.driveL, c.stab.driveR, c.stab.turretIn = 0, 0, 0
+						g.stopAp(c, time.Now())
+					}
 				}
 			}
 		}
@@ -514,8 +552,10 @@ func (g *game) removePlayer(device string) {
 	}
 	switch p.status {
 	case stPlaying:
-		if p.tank != "" && p.role != roleGunner {
-			g.stopTank(p.tank)
+		if p.role != roleGunner {
+			for _, id := range p.tanksHeld() {
+				g.stopTank(id)
+			}
 		}
 	case stLobby:
 		g.releaseTank(p) // their gunner takes the tank over
@@ -527,7 +567,7 @@ func (g *game) removePlayer(device string) {
 
 func (g *game) playAgain(device string) {
 	if p := g.players[device]; p != nil && p.status == stFinished {
-		p.tank, p.role, p.allowGunner = "", "", false
+		p.clearTanks()
 		g.enqueue(p) // back of the queue: people already waiting go first
 	}
 }
@@ -555,7 +595,7 @@ func (g *game) capacity() int {
 		return g.settings.MaxPlayers
 	}
 	n := len(g.tanks.list())
-	if g.settings.TwoPlayerTanks {
+	if g.settings.TwoPlayerTanks && !g.turnBased() {
 		n *= 2
 	}
 	return max(1, n)
@@ -617,6 +657,10 @@ func (g *game) pickTank(c *client, tankID string) {
 		g.releaseTank(p)
 		return
 	}
+	if g.turnBased() {
+		g.claimTank(c, tankID)
+		return
+	}
 	if p.tank == tankID && p.role != roleGunner {
 		return
 	}
@@ -639,7 +683,7 @@ func (g *game) allowGunner(c *client, on bool) {
 	if p == nil || p.tank == "" || p.role == roleGunner {
 		return
 	}
-	if on && !g.settings.TwoPlayerTanks {
+	if on && (!g.settings.TwoPlayerTanks || g.turnBased()) {
 		g.sendError(c, "2-player tanks are switched off.")
 		return
 	}
@@ -656,7 +700,7 @@ func (g *game) joinGunner(c *client, tankID string) {
 	if p == nil {
 		return
 	}
-	if !g.settings.TwoPlayerTanks {
+	if !g.settings.TwoPlayerTanks || g.turnBased() {
 		g.sendError(c, "2-player tanks are switched off.")
 		return
 	}
@@ -696,6 +740,16 @@ func (g *game) swapRoles(c *client) {
 // releaseTank takes a player off their tank. A driver's gunner takes the
 // tank over (in the lobby).
 func (g *game) releaseTank(p *player) {
+	if p.armyAlliance != "" || len(p.army) > 0 {
+		// Turn-based: the player leaves their alliance with all their tanks.
+		if p.status == stPlaying {
+			for _, id := range p.army {
+				g.stopTank(id)
+			}
+		}
+		p.clearTanks()
+		return
+	}
 	if p.tank == "" {
 		p.role = ""
 		return
@@ -715,7 +769,10 @@ func (g *game) releaseTank(p *player) {
 // tankOwner is the player driving (or who chose) a tank.
 func (g *game) tankOwner(tankID string) *player {
 	for _, p := range g.players {
-		if p.tank == tankID && p.role != roleGunner && (p.status == stLobby || p.status == stPlaying) {
+		if p.status != stLobby && p.status != stPlaying {
+			continue
+		}
+		if (p.tank == tankID && p.role != roleGunner) || slices.Contains(p.army, tankID) {
 			return p
 		}
 	}
@@ -759,7 +816,7 @@ func (g *game) tankConnected(id string) {
 	if g.phase == phasePlaying && g.match != nil {
 		if c := g.match.fighters[id]; c != nil {
 			// Exploding (and paused) tanks stay still; everyone else can drive.
-			if c.life != exploding && !g.paused {
+			if c.life != exploding && c.life != destroyed && !g.paused {
 				g.tanks.sendTo(id, `{"cmd":"motors_on"}`)
 			}
 			g.sendSetHp(c)
@@ -787,15 +844,18 @@ func (g *game) drive(device string, l, r float64) {
 	if c == nil || c.driver.device != device {
 		return // the gunner doesn't drive
 	}
-	if c.life == exploding {
+	if c.life == exploding || c.life == destroyed {
 		return // no driving while exploding
 	}
 	l, r = clampUnit(l), clampUnit(r)
+	now := time.Now()
+	if g.turnBased() && !g.chargeDrive(c, l, r, now) {
+		return // not this tank's turn, or out of action points (turns.go)
+	}
 	g.tanks.sendTo(c.tank, fmt.Sprintf(`{"cmd":"drive","l":%.3f,"r":%.3f}`, l, r))
-	c.stab.driveL, c.stab.driveR, c.stab.driveAt = l, r, time.Now() // the stabiliser follows the hull
+	c.stab.driveL, c.stab.driveR, c.stab.driveAt = l, r, now // the stabiliser follows the hull
 
 	p := g.players[device]
-	now := time.Now()
 	if l*l+r*r > 0.0025 && !p.lastDriveAt.IsZero() && now.Sub(p.lastDriveAt) < 250*time.Millisecond {
 		p.driveTime += now.Sub(p.lastDriveAt)
 	}
@@ -811,8 +871,11 @@ func (g *game) turret(device string, s float64) {
 	if t := g.settings.Tuning; t.SlowTurretEnabled {
 		s = max(-t.SlowTurretSpeed, min(s, t.SlowTurretSpeed))
 	}
+	if g.turnBased() && !g.chargeTurret(c, s, time.Now()) {
+		return // not this tank's turn, or out of action points (turns.go)
+	}
 	c.stab.turretIn = s
-	if g.stabWanted(c) && c.life != exploding {
+	if g.stabWanted(c) && c.life != exploding && c.life != destroyed {
 		g.stepStabiliser(c, time.Now(), 0) // the player's speed plus the correction, sent now
 		return
 	}
@@ -825,9 +888,16 @@ func (g *game) fire(device string) {
 		return // dead tanks can't fire; on a 2-player tank only the gunner does
 	}
 	p := g.players[device]
-	cooldown := time.Duration(g.settings.FireCooldownMs) * time.Millisecond
+	cooldown := time.Duration(g.rules().FireCooldownMs) * time.Millisecond
 	if time.Since(p.lastFire) < cooldown {
 		return
+	}
+	window := 0 // the realtime game's IrWindowMs
+	if g.turnBased() {
+		if !g.payForShot(c) { // turns.go
+			return
+		}
+		window = g.settings.Turns.ShotWindowMs
 	}
 	p.lastFire = time.Now()
 	p.shots++
@@ -835,7 +905,7 @@ func (g *game) fire(device string) {
 	// The shooter's page plays its fire beam / muzzle flash on this.
 	g.sendCrew(c, map[string]any{"t": "fired"})
 	g.displaySend(map[string]any{"cmd": "fire_event", "robotId": c.tank, "callsign": c.tankName})
-	if !g.ir.enqueue(shotRequest{shooter: c.tank, at: time.Now(), gen: g.match.gen}) {
+	if !g.ir.enqueue(shotRequest{shooter: c.tank, at: time.Now(), gen: g.match.gen, windowMs: window}) {
 		g.sendTo(device, map[string]any{"t": "fire_result", "text": "Miss (lag)"})
 	}
 }
@@ -862,9 +932,11 @@ func (g *game) checkPlayingTanks(ready []*player) []tankWarning {
 	var ids []string
 	seen := map[string]bool{}
 	for _, p := range ready {
-		if !seen[p.tank] {
-			seen[p.tank] = true
-			ids = append(ids, p.tank)
+		for _, id := range p.tanksHeld() {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
 		}
 	}
 	caps := map[string]int{}
@@ -882,12 +954,16 @@ func (g *game) start(c *client, force bool) {
 	if g.phase != phaseLobby {
 		return
 	}
+	turns := g.turnBased()
+	if turns {
+		g.fixArmies() // turns.go: drop tanks that changed alliance or went offline
+	}
 	var ready, without []*player
 	for _, p := range g.players {
 		if p.status != stLobby {
 			continue
 		}
-		if p.tank != "" {
+		if len(p.tanksHeld()) > 0 {
 			ready = append(ready, p)
 		} else {
 			without = append(without, p)
@@ -895,6 +971,10 @@ func (g *game) start(c *client, force bool) {
 	}
 	if len(ready) == 0 {
 		g.sendError(c, "Nobody has chosen a tank yet.")
+		return
+	}
+	if turns && g.armyAlliances(ready) < 2 {
+		g.sendError(c, "A turn-based game needs armies in at least two alliances.")
 		return
 	}
 	if g.sigtest.active() {
@@ -924,7 +1004,7 @@ func (g *game) start(c *client, force bool) {
 		}
 		g.dequeue(p.device)
 		p.status = stQueued
-		p.role, p.allowGunner = "", false
+		p.clearTanks()
 		front = append(front, p.device)
 	}
 	g.queue = append(front, g.queue...)
@@ -932,14 +1012,19 @@ func (g *game) start(c *client, force bool) {
 		p.status = stPlaying
 		p.shots, p.driveTime = 0, 0
 		p.lastFire, p.lastDriveAt = time.Time{}, time.Time{}
+		p.turnDone = false
+		if turns {
+			g.sortArmy(p)
+			p.tank = p.army[0] // the tank they control first
+		}
 	}
 	g.results = nil
 	g.paused = false
 	g.newMatch(ready)
 	log.Printf("[Game] starting with %d players", len(ready))
-	if g.settings.CountdownSeconds > 0 {
+	if countdown := g.rules().CountdownSeconds; countdown > 0 {
 		g.setPhase(phaseCountdown)
-		g.phaseEndsAt = time.Now().Add(time.Duration(g.settings.CountdownSeconds) * time.Second)
+		g.phaseEndsAt = time.Now().Add(time.Duration(countdown) * time.Second)
 		g.countdownTick()
 	} else {
 		g.beginPlay()
@@ -954,27 +1039,36 @@ func (g *game) countdownTick() {
 		return
 	}
 	g.match.lastCountdownTick = n
-	msg := fmt.Sprintf(`{"cmd":"countdown_tick","count":%d,"total":%d}`, n, g.settings.CountdownSeconds)
+	total := g.rules().CountdownSeconds
+	msg := fmt.Sprintf(`{"cmd":"countdown_tick","count":%d,"total":%d}`, n, total)
 	for _, t := range g.tanks.list() {
 		g.tanks.sendTo(t.ID, msg)
 	}
-	g.displaySend(map[string]any{"cmd": "countdown_tick", "count": n, "total": g.settings.CountdownSeconds})
+	g.displaySend(map[string]any{"cmd": "countdown_tick", "count": n, "total": total})
 }
 
 func (g *game) beginPlay() {
 	g.setPhase(phasePlaying)
 	g.phaseEndsAt = time.Now().Add(time.Duration(g.settings.MatchSeconds) * time.Second)
+	if g.turnBased() {
+		g.phaseEndsAt = time.Time{} // turn-based games end by winning or the round limit
+	}
 	for _, t := range g.tanks.list() {
 		g.tanks.sendTo(t.ID, `{"cmd":"game_start_fanfare"}`) // also clears the lobby colours
 	}
 	// Colours are given out afresh in the next lobby.
 	g.tankColor, g.nextColor, g.colorShown = map[string]int{}, 0, map[string]int{}
 	for _, p := range g.players {
-		if p.status == stPlaying && p.tank != "" && p.role != roleGunner {
-			g.tanks.sendTo(p.tank, `{"cmd":"motors_on"}`)
+		if p.status == stPlaying && p.role != roleGunner {
+			for _, id := range p.tanksHeld() {
+				g.tanks.sendTo(id, `{"cmd":"motors_on"}`)
+			}
 		}
 	}
 	g.beaconsForPhase() // all points unlit: nobody owns them yet
+	if g.turnBased() {
+		g.startTurns() // turns.go
+	}
 }
 
 // endGame finishes the game. code is "time" (time ran out), "points" (a
@@ -986,7 +1080,7 @@ func (g *game) endGame(code string) {
 	g.paused = false
 	if m != nil {
 		m.endCode = code
-		if code == "time" {
+		if code == "time" || code == "rounds" {
 			m.winner = g.winnerOnTime()
 		}
 		winner = m.winner
@@ -1001,7 +1095,14 @@ func (g *game) endGame(code string) {
 	case "time":
 		g.endReason = "Time's up"
 	case "points":
-		g.endReason = fmt.Sprintf("%s reached %d points", g.allianceName(winner), g.settings.PointsToWin)
+		g.endReason = fmt.Sprintf("%s reached %d points", g.allianceName(winner), g.rules().PointsToWin)
+	case "elimination":
+		g.endReason = "Every enemy tank was destroyed"
+		if winner < 0 {
+			g.endReason = "Every tank was destroyed"
+		}
+	case "rounds":
+		g.endReason = "The last round is over"
 	default:
 		g.endReason = "The host ended the game"
 	}
@@ -1014,9 +1115,11 @@ func (g *game) endGame(code string) {
 		if p.status != stPlaying {
 			continue
 		}
-		if p.tank != "" && p.role != roleGunner {
-			g.stopTank(p.tank)
-			g.tanks.sendTo(p.tank, `{"cmd":"reset_idle"}`)
+		if p.role != roleGunner {
+			for _, id := range p.tanksHeld() {
+				g.stopTank(id)
+				g.tanks.sendTo(id, `{"cmd":"reset_idle"}`)
+			}
 		}
 		for i := range g.results {
 			if g.results[i].Name == p.name {
@@ -1040,7 +1143,7 @@ func (g *game) closeGame() {
 	var back []string
 	for _, p := range g.sortedPlayers() {
 		if p.status == stLobby && !p.isHost {
-			p.tank, p.role, p.allowGunner = "", "", false
+			p.clearTanks()
 			p.status = stQueued
 			back = append(back, p.device)
 		}
@@ -1066,7 +1169,7 @@ func (g *game) setPhase(ph phase) {
 		// never let into a lobby again and sat on old results for good.
 		for _, p := range g.sortedPlayers() {
 			if p.status == stFinished {
-				p.tank, p.role, p.allowGunner = "", "", false
+				p.clearTanks()
 				if p.isHost {
 					p.status = stLobby // the host playing too is back in the lobby
 				} else {
@@ -1107,15 +1210,18 @@ func (g *game) setPaused(on bool) {
 	g.paused = false
 	g.phaseEndsAt = g.phaseEndsAt.Add(d)
 	for _, c := range g.match.fighters {
-		if c.life == exploding {
+		switch c.life {
+		case exploding:
 			c.diedAt = c.diedAt.Add(d)
-		} else {
+		case destroyed:
+		default:
 			g.tanks.sendTo(c.tank, `{"cmd":"motors_on"}`)
 		}
 		if !c.invulnUntil.IsZero() {
 			c.invulnUntil = c.invulnUntil.Add(d)
 		}
 	}
+	g.resumeTurns(now, d) // turns.go
 	g.syncCameras()
 	g.displayEvent("Game resumed")
 	log.Printf("[Game] resumed after %.0fs", d.Seconds())
@@ -1136,6 +1242,8 @@ func (g *game) tick(dt time.Duration) {
 	case g.phase == phaseCountdown:
 		g.countdownTick()
 	case g.phase == phasePlaying && g.paused:
+	case g.phase == phasePlaying && g.match != nil && g.match.turns != nil:
+		changed = g.tickTurns(now) // turns.go
 	case g.phase == phasePlaying && !now.Before(g.phaseEndsAt):
 		g.endGame("time")
 		changed = true
@@ -1185,6 +1293,9 @@ func (g *game) remaining() time.Duration {
 	if g.phase != phaseCountdown && g.phase != phasePlaying {
 		return 0
 	}
+	if g.phase == phasePlaying && g.match != nil && g.match.turns != nil {
+		return g.turnRemaining() // turns.go: the turn's time left
+	}
 	if g.paused {
 		return max(0, g.phaseEndsAt.Sub(g.pausedAt))
 	}
@@ -1208,6 +1319,10 @@ type tankView struct {
 	// In a game:
 	Hp   int    `json:"hp,omitempty"`
 	Life string `json:"life,omitempty"`
+
+	// In a turn-based game (turns.go):
+	Ap        *float64 `json:"ap,omitempty"`
+	Overwatch bool     `json:"overwatch,omitempty"`
 
 	// Host only:
 	IP               string     `json:"ip,omitempty"`
@@ -1234,6 +1349,8 @@ type playerView struct {
 	Host     bool   `json:"host"`
 	Hp       int    `json:"hp,omitempty"`   // in a game
 	Life     string `json:"life,omitempty"` // in a game: alive, dead, returning
+
+	Tanks []string `json:"tanks,omitempty"` // turn-based: the army's tank names
 }
 
 type meView struct {
@@ -1255,8 +1372,17 @@ type meView struct {
 	// In a game:
 	Hp           int    `json:"hp"`
 	MaxHp        int    `json:"maxHp"`
-	Life         string `json:"life"` // "alive", "dead" (exploding), "returning" (to base)
+	Life         string `json:"life"` // "alive", "dead" (exploding), "returning" (to base), "destroyed" (turn-based: out)
 	Invulnerable bool   `json:"invulnerable"`
+
+	// Turn-based games (turns.go): the army's tanks, and the selected
+	// tank's action points.
+	Tanks     []myTankView `json:"tanks,omitempty"`
+	Ap        *float64     `json:"ap,omitempty"`
+	ApMax     float64      `json:"apMax,omitempty"`
+	Overwatch bool         `json:"overwatch,omitempty"`
+	MyTurn    bool         `json:"myTurn,omitempty"`   // my alliance's turn (and not the handover)
+	TurnDone  bool         `json:"turnDone,omitempty"` // I tapped END TURN
 }
 
 type pointView struct {
@@ -1316,11 +1442,18 @@ type snapshot struct {
 	Settings         *Settings    `json:"settings,omitempty"` // host only
 	RfidTags         []tagView    `json:"rfidTags,omitempty"` // host only: every known tag
 	Presets          []string     `json:"presets,omitempty"`  // host only: saved tuning presets
+
+	// Turn-based games only (turns.go); left out in realtime.
+	Mode      string         `json:"mode,omitempty"` // "turns"
+	Turn      *turnView      `json:"turn,omitempty"`
+	TurnRules *turnRulesView `json:"turnRules,omitempty"`
 }
 
 func (g *game) snapshot(device string) snapshot {
 	isHost := device != "" && device == g.hostDevice
 	t := g.settings.Tuning
+	turns := g.turnBased()
+	rules := g.rules()
 	s := snapshot{
 		T:                "state",
 		Phase:            g.phase,
@@ -1328,13 +1461,13 @@ func (g *game) snapshot(device string) snapshot {
 		Hosted:           g.hostDevice != "",
 		PasswordRequired: g.settings.ClientPassword != "",
 		Capacity:         g.capacity(),
-		FireCooldownMs:   g.settings.FireCooldownMs,
-		TwoPlayer:        g.settings.TwoPlayerTanks,
+		FireCooldownMs:   rules.FireCooldownMs,
+		TwoPlayer:        g.settings.TwoPlayerTanks && !turns,
 		Alliances:        g.settings.Alliances,
 		AlliancePoints:   make([]int, len(g.settings.Alliances)),
 		EndReason:        g.endReason,
 		RemainingMs:      g.remaining().Milliseconds(),
-		PointsToWin:      g.settings.PointsToWin,
+		PointsToWin:      rules.PointsToWin,
 		Controls: controlsView{
 			Deadzone: t.JoyDeadzone, StartSpeed: t.JoyStartSpeed, FullAt: t.JoyFullAt, Curve: t.JoyCurve,
 			AxisSnap: t.JoyAxisSnap, TurnSpeed: t.JoyTurnSpeed, SlowTurretSpeed: t.SlowTurretSpeed,
@@ -1390,6 +1523,10 @@ func (g *game) snapshot(device string) snapshot {
 		if g.match != nil && (g.phase == phasePlaying || g.phase == phaseCountdown) {
 			if c := g.match.fighters[id]; c != nil {
 				tv.Hp, tv.Life = c.hp, c.life.String()
+				if g.match.turns != nil {
+					ap := roundAp(c.turn.ap)
+					tv.Ap, tv.Overwatch = &ap, c.turn.overwatch
+				}
 				if isHost {
 					tv.Invulnerable = c.invulnerable(time.Now())
 					if c.lastHitDir != "" {
@@ -1419,8 +1556,14 @@ func (g *game) snapshot(device string) snapshot {
 		s.Tanks = append(s.Tanks, tv)
 	}
 	for _, p := range g.players {
-		if p.tank != "" && p.role != roleGunner && !online[p.tank] && (p.status == stLobby || p.status == stPlaying) {
-			s.Tanks = append(s.Tanks, viewTank(p.tank, g.tankNames[p.tank], false))
+		if p.role == roleGunner || (p.status != stLobby && p.status != stPlaying) {
+			continue
+		}
+		for _, id := range p.tanksHeld() {
+			if !online[id] {
+				online[id] = true // listed once
+				s.Tanks = append(s.Tanks, viewTank(id, g.tankNames[id], false))
+			}
 		}
 	}
 	sort.Slice(s.Tanks, func(i, j int) bool { return naturalLess(s.Tanks[i].Name, s.Tanks[j].Name) })
@@ -1430,6 +1573,12 @@ func (g *game) snapshot(device string) snapshot {
 		if p.tank != "" {
 			v.Alliance = g.allianceName(g.allianceOf(p.tank))
 			v.Role, v.Partner = g.crewOf(p)
+		}
+		if p.armyAlliance != "" {
+			v.Alliance = g.allianceName(g.allianceIndex(p.armyAlliance))
+			for _, id := range p.army {
+				v.Tanks = append(v.Tanks, g.tankNames[id])
+			}
 		}
 		if isHost {
 			v.Device = p.device
@@ -1467,12 +1616,19 @@ func (g *game) snapshot(device string) snapshot {
 			s.Me.Alliance = g.allianceName(s.Me.AllianceIndex)
 			s.Me.Role, s.Me.Partner = g.crewOf(p)
 		}
+		if p.armyAlliance != "" {
+			s.Me.AllianceIndex = g.allianceIndex(p.armyAlliance)
+			s.Me.Alliance = g.allianceName(s.Me.AllianceIndex)
+			if p.tank == "" && len(p.army) > 0 {
+				s.Me.TankColor, s.Me.TankColorCSS = g.lobbyColor(p.army[0])
+			}
+		}
 		for i, d := range g.queue {
 			if d == device {
 				s.Me.QueuePos = i + 1
 			}
 		}
-		s.Me.MaxHp = g.settings.MaxHp
+		s.Me.MaxHp = rules.MaxHp
 		if g.match != nil && (p.status == stPlaying || p.status == stFinished) {
 			if c := g.match.fighters[p.tank]; c != nil {
 				s.Me.Hp = c.hp
@@ -1483,6 +1639,9 @@ func (g *game) snapshot(device string) snapshot {
 	}
 	if g.phase == phaseEnded || s.Me.Status == string(stFinished) {
 		s.Results = g.results
+	}
+	if turns {
+		g.turnSnapshot(&s, g.players[device]) // turns.go
 	}
 	return s
 }

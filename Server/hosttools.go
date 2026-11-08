@@ -78,9 +78,12 @@ func (g *game) hostTool(c *client, m inMsg) {
 				s.TankAlliances[m.Tank] = m.Alliance
 			}
 		})
+		g.fixArmies() // turn-based: an army keeps only its own alliance's tanks
 	case "host_tank_free":
 		// Takes the players off a tank in the lobby (they stay in the lobby).
-		if g.phase == phaseLobby {
+		if g.phase == phaseLobby && g.turnBased() {
+			g.hostTankArmy(c, m.Tank, "") // off its army; the player keeps the rest
+		} else if g.phase == phaseLobby {
 			if gu := g.gunnerOf(m.Tank); gu != nil {
 				g.releaseTank(gu)
 			}
@@ -93,6 +96,13 @@ func (g *game) hostTool(c *client, m inMsg) {
 	// listToolLocked).
 	case "host_alliance_add", "host_alliance_remove", "host_point_add", "host_point_remove":
 		g.changeSettings(func(s *Settings) { listChange(s, m) })
+		g.fixArmies()
+
+	// Turn-based games (turns.go).
+	case "host_end_turn":
+		g.hostEndTurn(c)
+	case "host_tank_army":
+		g.hostTankArmy(c, m.Tank, m.Target)
 	case "host_alliance_edit":
 		g.changeSettings(func(s *Settings) {
 			for i := range s.Alliances {
@@ -267,7 +277,7 @@ func (g *game) hostHeal(c *client, tankID string) {
 		g.respawn(t)
 		return
 	}
-	t.hp = g.settings.MaxHp
+	t.hp = g.rules().MaxHp
 	g.match.lowHpWarned[t.tank] = false
 	g.tanks.sendTo(tankID, `{"cmd":"flash_heal"}`)
 	g.sendSetHp(t)

@@ -63,10 +63,111 @@ type Settings struct {
 	Tuning Tuning `json:"tuning"` // Advanced: how tanks and controls behave
 
 	SignalTest SignalTestSettings `json:"signalTest"` // Server Config → Signal Quality Test (signaltest.go)
+
+	// Realtime or turn-based (turns.go). The realtime game's rules are the
+	// fields above; the turn-based game has its own copies in Turns, so
+	// changing one game never changes the other.
+	GameMode string       `json:"gameMode"` // modeRealtime or modeTurns
+	Turns    TurnSettings `json:"turns"`
 }
 
-// Alliance is one side in a realtime game. (In the planned turn-based mode
-// an alliance can hold several teams; in realtime each player has one tank.)
+const (
+	modeRealtime = "realtime"
+	modeTurns    = "turns"
+)
+
+// TurnSettings are the turn-based game's rules (turns.go).
+type TurnSettings struct {
+	// The game rules the realtime game has too, with separate values.
+	MaxHp            int     `json:"maxHp"`
+	DamagePerHit     int     `json:"damagePerHit"`
+	RearMultiplier   float64 `json:"rearMultiplier"`
+	SideMultiplier   float64 `json:"sideMultiplier"`
+	FireCooldownMs   int     `json:"fireCooldownMs"`
+	PointsPerKill    int     `json:"pointsPerKill"`
+	PointsToWin      int     `json:"pointsToWin"`
+	CountdownSeconds int     `json:"countdownSeconds"`
+
+	// Action points: every tank gets ApPerTurn at the start of its
+	// alliance's turn. Driving costs DriveApPerSec per second with both
+	// tracks at full speed (one track: half), the turret TurretApPerSec, a
+	// shot FireAp.
+	ApPerTurn      float64 `json:"apPerTurn"`
+	DriveApPerSec  float64 `json:"driveApPerSec"`
+	TurretApPerSec float64 `json:"turretApPerSec"`
+	FireAp         float64 `json:"fireAp"`
+	ShotWindowMs   int     `json:"shotWindowMs"` // how long enemies listen for each barrel of a shot
+
+	// Overwatch: a tank keeps its AP and fires once, by itself, at the
+	// first enemy that moves into its line of fire during an enemy turn.
+	Overwatch         bool `json:"overwatch"`
+	OverwatchWindowMs int  `json:"overwatchWindowMs"` // the probes' listen window: short, so they can run back to back
+
+	TurnSeconds          int `json:"turnSeconds"`          // 0 = no time limit
+	HandoverSeconds      int `json:"handoverSeconds"`      // pause between turns
+	MaxRounds            int `json:"maxRounds"`            // 0 = no limit
+	CapturePointsPerTurn int `json:"capturePointsPerTurn"` // per point held, at the start of the alliance's turn
+	MaxTanksPerArmy      int `json:"maxTanksPerArmy"`      // 0 = no limit
+}
+
+func defaultTurnSettings() TurnSettings {
+	return TurnSettings{
+		MaxHp: 100, DamagePerHit: 25, RearMultiplier: 3, SideMultiplier: 1.5, FireCooldownMs: 1000,
+		PointsPerKill: 25, PointsToWin: 300, CountdownSeconds: 5,
+		ApPerTurn: 10, DriveApPerSec: 1, TurretApPerSec: 0, FireAp: 4, ShotWindowMs: 250,
+		Overwatch: true, OverwatchWindowMs: 40,
+		TurnSeconds: 90, HandoverSeconds: 3, CapturePointsPerTurn: 10,
+	}
+}
+
+func (t *TurnSettings) clamp() {
+	t.MaxHp = max(1, min(t.MaxHp, 10000))
+	t.DamagePerHit = max(0, min(t.DamagePerHit, 10000))
+	t.RearMultiplier = max(0, min(t.RearMultiplier, 20))
+	t.SideMultiplier = max(0, min(t.SideMultiplier, 20))
+	t.FireCooldownMs = max(250, min(t.FireCooldownMs, 30000))
+	t.PointsPerKill = max(0, min(t.PointsPerKill, 100000))
+	t.PointsToWin = max(1, min(t.PointsToWin, 1000000))
+	t.CountdownSeconds = max(0, min(t.CountdownSeconds, 30))
+	t.ApPerTurn = max(0.5, min(t.ApPerTurn, 1000))
+	t.DriveApPerSec = max(0, min(t.DriveApPerSec, 100))
+	t.TurretApPerSec = max(0, min(t.TurretApPerSec, 100))
+	t.FireAp = max(0, min(t.FireAp, 1000))
+	t.ShotWindowMs = max(5, min(t.ShotWindowMs, 1000))
+	t.OverwatchWindowMs = max(5, min(t.OverwatchWindowMs, 1000))
+	t.TurnSeconds = max(0, min(t.TurnSeconds, 60*60))
+	t.HandoverSeconds = max(0, min(t.HandoverSeconds, 30))
+	t.MaxRounds = max(0, min(t.MaxRounds, 1000))
+	t.CapturePointsPerTurn = max(0, min(t.CapturePointsPerTurn, 100000))
+	t.MaxTanksPerArmy = max(0, min(t.MaxTanksPerArmy, 40))
+}
+
+// Rules are the game rules both games have, read through game.rules() so
+// each game uses its own values.
+type Rules struct {
+	MaxHp            int
+	DamagePerHit     int
+	RearMultiplier   float64
+	SideMultiplier   float64
+	FireCooldownMs   int
+	PointsPerKill    int
+	PointsToWin      int
+	CountdownSeconds int
+}
+
+func (s *Settings) rules(turns bool) Rules {
+	if turns {
+		t := s.Turns
+		return Rules{t.MaxHp, t.DamagePerHit, t.RearMultiplier, t.SideMultiplier, t.FireCooldownMs,
+			t.PointsPerKill, t.PointsToWin, t.CountdownSeconds}
+	}
+	return Rules{s.MaxHp, s.DamagePerHit, s.RearMultiplier, s.SideMultiplier, s.FireCooldownMs,
+		s.PointsPerKill, s.PointsToWin, s.CountdownSeconds}
+}
+
+// Alliance is one side in a game. In the turn-based game an alliance holds
+// several armies (one player each, with several tanks); in realtime each
+// player has one tank.
 type Alliance struct {
 	ID    string `json:"id"`    // stable: tank names and tags refer to it
 	Name  string `json:"name"`  // "Desert Squad"
@@ -183,6 +284,8 @@ func defaultSettings() Settings {
 		DebugConsole: true,
 		Tuning:       defaultTuning(),
 		SignalTest:   defaultSignalTest(),
+		GameMode:     modeRealtime,
+		Turns:        defaultTurnSettings(),
 	}
 	// The tags in the Unity scene.
 	add := func(use string, uids ...string) {
@@ -225,6 +328,10 @@ func (s *Settings) clamp() {
 	s.clampPoints()
 	s.clampTags()
 	s.SignalTest.clamp()
+	if s.GameMode != modeTurns {
+		s.GameMode = modeRealtime
+	}
+	s.Turns.clamp()
 
 	t := &s.Tuning
 	unit := func(v float64) float64 { return max(0, min(v, 1)) }

@@ -57,6 +57,10 @@ type displayRobot struct {
 	MaxHp        int    `json:"maxHp"`
 	Dead         bool   `json:"dead"`
 	VideoURL     string `json:"videoUrl"` // the tank id: display.html asks /api/video-ws?url=<id>
+
+	// Turn-based games only.
+	Ap        *float64 `json:"ap,omitempty"`
+	Overwatch bool     `json:"overwatch,omitempty"`
 }
 
 type displayPoint struct {
@@ -81,6 +85,10 @@ type displayUpdate struct {
 	Players        []displayPlayer `json:"players"`
 	Robots         []displayRobot  `json:"robots"`
 	CapturePoints  []displayPoint  `json:"capturePoints"`
+
+	// Turn-based games only (turns.go).
+	Mode string    `json:"mode,omitempty"`
+	Turn *turnView `json:"turn,omitempty"`
 }
 
 func (g *game) displayState() displayUpdate {
@@ -94,7 +102,7 @@ func (g *game) displayState() displayUpdate {
 		Timer:         math.Round(g.remaining().Seconds()*10) / 10,
 		MatchDuration: g.settings.MatchSeconds,
 		MaxPlayers:    g.capacity(),
-		MaxTeamPoints: g.settings.PointsToWin,
+		MaxTeamPoints: g.rules().PointsToWin,
 		TeamPoints:    make([]int, len(g.settings.Alliances)),
 		Players:       []displayPlayer{},
 		Robots:        []displayRobot{},
@@ -116,6 +124,9 @@ func (g *game) displayState() displayUpdate {
 			dp.Alliance = g.allianceOf(p.tank)
 			dp.Role, dp.Partner = g.crewOf(p)
 		}
+		if p.armyAlliance != "" {
+			dp.Alliance = g.allianceIndex(p.armyAlliance)
+		}
 		d.Players = append(d.Players, dp)
 	}
 	if inMatch {
@@ -133,9 +144,13 @@ func (g *game) displayState() displayUpdate {
 		for _, id := range ids {
 			c := g.match.fighters[id]
 			r := displayRobot{Callsign: c.tankName, Player: c.driver.name, Alliance: c.alliance,
-				Hp: c.hp, MaxHp: g.settings.MaxHp, Dead: c.life == exploding, VideoURL: id}
+				Hp: c.hp, MaxHp: g.rules().MaxHp, Dead: c.life == exploding || c.life == destroyed, VideoURL: id}
 			if c.gunner != nil {
 				r.GunnerPlayer = c.gunner.name
+			}
+			if g.match.turns != nil {
+				ap := roundAp(c.turn.ap)
+				r.Ap, r.Overwatch = &ap, c.turn.overwatch
 			}
 			d.Robots = append(d.Robots, r)
 		}
@@ -146,6 +161,11 @@ func (g *game) displayState() displayUpdate {
 			owner = g.match.cpOwners[i]
 		}
 		d.CapturePoints = append(d.CapturePoints, displayPoint{Name: cp.Name, Owner: owner})
+	}
+	if g.turnBased() {
+		var s snapshot
+		g.turnSnapshot(&s, nil)
+		d.Mode, d.Turn = s.Mode, s.Turn
 	}
 	return d
 }
@@ -173,7 +193,7 @@ func (g *game) announceHit(shooter, target *combatant, dir string) {
 		g.displayEvent("Rear hit! " + shooter.crewNames() + " hits " + target.crewNames() + " from behind!")
 	}
 	// Critical: once per life, at a quarter of full HP or less.
-	if target.hp > 0 && target.hp <= g.settings.MaxHp/4 && !m.lowHpWarned[target.tank] {
+	if target.hp > 0 && target.hp <= g.rules().MaxHp/4 && !m.lowHpWarned[target.tank] {
 		m.lowHpWarned[target.tank] = true
 		g.displayEvent("Warning — " + target.crewNames() + "'s tank is critical!")
 	}
@@ -210,7 +230,7 @@ func (g *game) announceKill(shooter, target *combatant) {
 		alliance = shooter.alliance
 	}
 	g.displaySend(map[string]any{"cmd": "kill_event", "teamIndex": alliance, "targetCallsign": target.tankName,
-		"points": g.settings.PointsPerKill})
+		"points": g.rules().PointsPerKill})
 }
 
 func (g *game) announceCapture(point, alliance int, captor string) {
@@ -238,7 +258,7 @@ func (g *game) announceCapture(point, alliance int, captor string) {
 // the running must have scored).
 func (g *game) announcePoints() {
 	m := g.match
-	target := g.settings.PointsToWin
+	target := g.rules().PointsToWin
 	for a, pts := range m.alliancePoints {
 		if !m.half[a] && pts >= target/2 {
 			m.half[a] = true
