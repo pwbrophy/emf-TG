@@ -513,7 +513,8 @@ func (g *game) setTurnDone(device string, on bool) {
 }
 
 // selectTank: the player controls another of their tanks. The one they
-// leave stops.
+// leave stops; the new one says so on the table (flash_select: a "pip poop"
+// and its lights flash white, then go out from the ends in to show its bar).
 func (g *game) selectTank(device, tankID string) {
 	p := g.players[device]
 	if p == nil || p.status != stPlaying || g.match == nil || g.match.turns == nil || p.tank == tankID {
@@ -527,6 +528,7 @@ func (g *game) selectTank(device, tankID string) {
 		g.haltTank(old, time.Now())
 	}
 	p.tank = tankID
+	g.tanks.sendTo(c.tank, `{"cmd":"flash_select"}`)
 }
 
 // turnCanAct: may this tank move or fire now?

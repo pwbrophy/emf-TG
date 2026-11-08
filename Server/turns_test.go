@@ -191,6 +191,9 @@ func TestTurnsOnlyActiveAllianceActs(t *testing.T) {
 	if ft.count(`a {"cmd":"drive","l":0,"r":0}`) == 0 {
 		t.Fatal("Desert-01 wasn't stopped when Alice switched")
 	}
+	if ft.count(`b {"cmd":"flash_select"}`) != 1 || ft.count(`a {"cmd":"flash_select"}`) != 0 {
+		t.Fatal("only the tank Alice switched to should flash and beep")
+	}
 	a.send(inMsg{T: "drive", L: -1, R: 1})
 	if ft.count(`b {"cmd":"drive","l":-1.000,"r":1.000}`) != 1 {
 		t.Fatal("Alice's drive didn't go to Desert-02")

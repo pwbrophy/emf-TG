@@ -5,6 +5,8 @@
 //                          Rear hits blink rapidly instead of solid, to stand
 //                          out as the 3x-damage direction.
 //   flashFire(ms)        — all white for ms, then restore HP bar
+//   selectSequence()     — turn-based tank selected: white, going out from the
+//                          ends in to uncover the bar (300 ms)
 //   HP bar               — blue pixels proportional to remaining HP (default)
 //   AP bar               — turn-based games, during the tank's turn: green
 //                          pixels for its action points instead (setAp)
@@ -211,6 +213,17 @@ public:
         _strip.show();
     }
 
+    // Tank selected (turn-based games, flash_select): all white, then the
+    // white goes out pair by pair from the ends in (0&5 → 1&4 → 2&3),
+    // uncovering the bar underneath (AP during the tank's turn). 300 ms.
+    void selectSequence()
+    {
+        if (_isHitEffect(_effect) || _effect == Effect::DeathExplosion || _effect == Effect::DeadBlink) return;
+        _effect   = Effect::SelectSeq;
+        _seqStart = millis();
+        _fillStrip(255, 255, 255);
+    }
+
     // Death explosion: red/orange/yellow burst outward from center, then fire flicker
     // fading over 5 s, then auto-transition to alternating dim-red dead blink.
     void deathExplosion()
@@ -280,7 +293,7 @@ public:
     }
 
 private:
-    enum class Effect : uint8_t { None, Fire, Hit, HitRear, FireSeq, HealCharge, CaptureSeq, DeathExplosion, DeadBlink };
+    enum class Effect : uint8_t { None, Fire, Hit, HitRear, FireSeq, HealCharge, CaptureSeq, SelectSeq, DeathExplosion, DeadBlink };
 
     static bool _isHitEffect(Effect e) { return e == Effect::Hit || e == Effect::HitRear; }
 
@@ -355,6 +368,24 @@ private:
                 // Phase 2: all six gold
                 _fillStrip(255, 165, 0);
             }
+            return;
+        }
+
+        if (_effect == Effect::SelectSeq) {
+            // 0–100 ms all white; a pair goes out every 100 ms from the ends,
+            // showing the bar beneath; at 300 ms only the bar is left.
+            uint32_t elapsed = now - _seqStart;
+            if (elapsed >= 300) {
+                _effect = Effect::None;
+                _restoreBackground();
+                return;
+            }
+            int pairsOut = (int)(elapsed / 100u); // 0, 1 or 2
+            if (_playerColorActive) _drawPlayerBar(false);
+            else                    _drawHpBar(false);
+            for (int i = pairsOut; i < LED_STRIP_COUNT - pairsOut; i++)
+                _strip.setPixelColor(i, _strip.Color(255, 255, 255));
+            _strip.show();
             return;
         }
 
@@ -487,9 +518,9 @@ private:
     // the exact remaining fraction — fading here made the "on" phase get
     // dimmer as HP approached 0, until it was indistinguishable from "off"
     // and the whole strip looked dead well before HP actually hit 0.
-    void _drawHpBar()
+    void _drawHpBar(bool show = true)
     {
-        if (_apMax > 0) { _drawApBar(); return; }
+        if (_apMax > 0) { _drawApBar(show); return; }
         _strip.clear();
         if (_hp > 0 && _maxHp > 0) {
             float ledsF = (float)_hp * LED_STRIP_COUNT / _maxHp;
@@ -513,12 +544,12 @@ private:
                     _strip.setPixelColor(partialIdx, _strip.Color(0, 0, partialBright));
             }
         }
-        _strip.show();
+        if (show) _strip.show();
     }
 
     // The action-point bar: green, filled from the front like the HP bar,
     // the last LED dimming smoothly as the points run down (no warning pulse).
-    void _drawApBar()
+    void _drawApBar(bool show = true)
     {
         _strip.clear();
         float ledsF = _ap * LED_STRIP_COUNT / _apMax;
@@ -532,7 +563,7 @@ private:
         int partialIdx = firstFull - 1;
         if (partialBright > 0 && partialIdx >= 0)
             _strip.setPixelColor(partialIdx, _strip.Color(0, partialBright, 0));
-        _strip.show();
+        if (show) _strip.show();
     }
 
     // Dim red alternating pattern for dead-walk state.
@@ -554,7 +585,7 @@ private:
     }
 
     // Draw all LEDs in player's solid colour (or countdown bar).
-    void _drawPlayerBar()
+    void _drawPlayerBar(bool show = true)
     {
         _strip.clear();
         int leds = (_countdownLeds < 0) ? LED_STRIP_COUNT : _countdownLeds;
@@ -563,7 +594,7 @@ private:
                 (uint8_t)((uint32_t)_pcR * 200 / 255),
                 (uint8_t)((uint32_t)_pcG * 200 / 255),
                 (uint8_t)((uint32_t)_pcB * 200 / 255)));
-        _strip.show();
+        if (show) _strip.show();
     }
 
     // Called when a timed effect expires to restore whatever was showing before it.

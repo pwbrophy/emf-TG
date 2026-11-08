@@ -880,6 +880,61 @@ static void updateBuzzerBootBlip(uint32_t now)
     }
 }
 
+// ---- Buzzer select effect ("pip poop") ----
+// Turn-based games: the player switched to this tank. A short high pip, a
+// gap, then a lower, longer "poop" that fades out. 170 ms in all, inside the
+// 300 ms select light sequence. Gives way to any other buzzer effect.
+static const uint32_t SELECT_PIP_HZ   = 1900u;
+static const uint32_t SELECT_POOP_HZ  = 950u;
+static const uint32_t SELECT_PIP_MS   = 45u;
+static const uint32_t SELECT_GAP_MS   = 25u;
+static const uint32_t SELECT_POOP_MS  = 100u;
+static uint8_t  g_buzzerSelectPhase = 0; // 0=off 1=pip 2=gap 3=poop
+static uint32_t g_buzzerSelectStart = 0;
+
+static void startBuzzerSelectEffect()
+{
+    if (!g_buzzerEnabled) return;
+    if (g_buzzerFirePhase || g_buzzerHitPhase || g_buzzerRearHitPhase || g_buzzerHealPhase ||
+        g_buzzerDeathPhase || g_buzzerCapturePhase || g_buzzerFanfarePhase) return; // don't cut those off
+    g_buzzerActive        = false;
+    g_buzzerBootBlipPhase = 0;
+    ledcSetup(BUZZER_LEDC_CH, SELECT_PIP_HZ, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+    ledcWrite(BUZZER_LEDC_CH, 128);
+    g_buzzerSelectStart = millis();
+    g_buzzerSelectPhase = 1;
+}
+
+static void updateBuzzerSelectEffect(uint32_t now)
+{
+    if (g_buzzerSelectPhase == 0) return;
+    // Another effect started meanwhile: it has the buzzer now.
+    if (g_buzzerFirePhase || g_buzzerHitPhase || g_buzzerRearHitPhase || g_buzzerHealPhase ||
+        g_buzzerDeathPhase || g_buzzerCapturePhase || g_buzzerFanfarePhase) {
+        g_buzzerSelectPhase = 0;
+        return;
+    }
+    uint32_t elapsed = now - g_buzzerSelectStart;
+    if (g_buzzerSelectPhase == 1) {
+        if (elapsed >= SELECT_PIP_MS) { ledcWrite(BUZZER_LEDC_CH, 0); g_buzzerSelectPhase = 2; }
+        return;
+    }
+    if (g_buzzerSelectPhase == 2) {
+        if (elapsed >= SELECT_PIP_MS + SELECT_GAP_MS) {
+            ledcSetup(BUZZER_LEDC_CH, SELECT_POOP_HZ, 8);
+            ledcAttachPin(BUZZER_PIN, BUZZER_LEDC_CH);
+            ledcWrite(BUZZER_LEDC_CH, 128);
+            g_buzzerSelectPhase = 3;
+        }
+        return;
+    }
+    uint32_t ph3 = elapsed - SELECT_PIP_MS - SELECT_GAP_MS;
+    if (ph3 >= SELECT_POOP_MS) { silenceBuzzer(); g_buzzerSelectPhase = 0; return; }
+    float t = (float)ph3 / (float)SELECT_POOP_MS;
+    ledcWrite(BUZZER_LEDC_CH, (uint8_t)(128.0f * (1.0f - t * t))); // hold, then fall away
+}
+
 // ---- OTA audio/LED callbacks ----
 
 static void otaProgressCb(uint8_t pct)
@@ -1256,6 +1311,13 @@ static void handleWsText(const String& s)
     if (strcmp(cmd, "flash_capture") == 0) {
         leds.captureSequence();
         startBuzzerCaptureEffect();
+        return;
+    }
+
+    // Turn-based games: the player switched to this tank.
+    if (strcmp(cmd, "flash_select") == 0) {
+        leds.selectSequence();
+        startBuzzerSelectEffect();
         return;
     }
 
@@ -1688,6 +1750,7 @@ void loop()
     updateBuzzerCaptureEffect(now);
     updateBuzzerFanfareEffect(now);
     updateBuzzerBootBlip(now);
+    updateBuzzerSelectEffect(now);
 
     // ---- RFID tag scan ----
     {
