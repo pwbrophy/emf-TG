@@ -744,6 +744,8 @@ function hostTankRow(t) {
   const inGame = state.phase === 'playing' || state.phase === 'countdown';
   const crew = t.player ? (t.gunner ? `${esc(t.player)} + ${esc(t.gunner)}` : esc(t.player)) : 'free';
   let status = '';
+  // Out of the fight (exploding, driving back to base, or destroyed): the row is red.
+  const dead = inGame && !!t.life && t.life !== 'alive';
   if (inGame && t.life) {
     status = t.life === 'dead' || t.life === 'destroyed' ? 'Destroyed' : t.life === 'returning' ? 'Returning' : `${t.hp || 0} HP`;
     status += t.invulnerable ? ' &middot; shielded' : '';
@@ -796,7 +798,7 @@ function hostTankRow(t) {
       <p class="hint" style="margin-top:6px">${esc(t.ip || '')}${t.ip ? ' &middot; ' : ''}id ${esc(t.id)}</p>
       ${t.boot ? `<p class="hint">${esc(t.boot.charAt(0).toUpperCase() + t.boot.slice(1))}</p>` : ''}`;
   }
-  return `<details class="item" data-row="tank-${esc(t.id)}" ${openRows.has('tank-' + t.id) ? 'open' : ''}>
+  return `<details class="item${dead ? ' dead' : ''}" data-row="tank-${esc(t.id)}" ${openRows.has('tank-' + t.id) ? 'open' : ''}>
     <summary><span class="dot ${t.online ? '' : 'off'}"></span>
       <div class="main"><div class="name">${esc(t.name)}</div>
       <div class="sub"><span ${allianceStyle(t.allianceIndex)}>${esc(t.alliance || 'No alliance')}</span> &middot; ${crew}${

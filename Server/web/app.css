@@ -802,6 +802,9 @@ details.item > summary {
 details.item > summary::-webkit-details-marker { display: none; }
 details.item > summary::after { content: "\203A"; color: var(--muted); font-size: 1.3rem; transition: transform 0.15s; }
 details.item[open] > summary::after { transform: rotate(90deg); }
+/* A robot that is out of the fight during a game (host's Robots list). */
+details.item.dead { border-color: rgba(255, 77, 77, 0.75); background: rgba(255, 77, 77, 0.16); }
+details.item.dead .end { color: var(--bad); font-weight: 700; }
 .tools { padding: 4px 10px 10px; border-top: 1px solid var(--border); }
 .tools h4 { margin: 10px 0 6px; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
