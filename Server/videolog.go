@@ -146,6 +146,18 @@ func (vl *videoLog) close() {
 	}
 }
 
+// flush writes anything still waiting to the file (before it is read).
+func (vl *videoLog) flush() {
+	if vl == nil {
+		return
+	}
+	vl.mu.Lock()
+	if vl.f != nil {
+		_ = vl.w.Flush()
+	}
+	vl.mu.Unlock()
+}
+
 // handle serves the log: GET /api/video-log (?old=1 for the rotated file).
 func (vl *videoLog) handle(w http.ResponseWriter, r *http.Request) {
 	if vl == nil {
@@ -210,6 +222,15 @@ type phoneVideoStats struct {
 	PageFps  float64 `json:"pageFps"`  // animation frame rate: low = phone struggling
 	Name     string  `json:"name"`
 	Device   string  `json:"device"`
+
+	// For the event log only (the video log's columns stay as they are).
+	RttMs    float64 `json:"rttMs"`    // average round trip to the hub since the last report
+	RttMaxMs float64 `json:"rttMaxMs"` // the longest
+	RttN     int     `json:"rttN"`     // how many were timed (0 = an older page)
+	Cores    int     `json:"cores"`
+	MemoryGb float64 `json:"memoryGb"`
+	Screen   string  `json:"screen"`
+	LowFx    bool    `json:"lowFx"`
 }
 
 func (vl *videoLog) phone(tankLabel string, p phoneVideoStats) {

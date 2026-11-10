@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -152,4 +153,13 @@ func readKBField(path, key string) float64 {
 		}
 	}
 	return 0
+}
+
+// diskFreeMB is the room left on the disk holding path.
+func diskFreeMB(path string) (float64, bool) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, false
+	}
+	return round1(float64(st.Bavail) * float64(st.Bsize) / (1 << 20)), true
 }

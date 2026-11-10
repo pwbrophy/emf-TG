@@ -49,9 +49,21 @@ func main() {
 		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); empty = off")
 	sigtestDir := flag.String("sigtest-dir", "", "where finished signal test runs are kept (default: a sigtest folder next to the settings file)")
 	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
+	logDir := flag.String("log-dir", "", "where the hub log and the event log are kept (default: the temp folder, RAM on the router); \"off\" = don't keep them")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+
+	// Session logs (sessionlog.go): set up first, so everything below is in them.
+	var serverLog *rotFile
+	var events *eventLog
+	if *logDir != "off" {
+		serverPath, eventsPath := sessionLogPaths(*logDir)
+		serverLog = startServerLog(serverPath)
+		events = openEventLog(eventsPath)
+		defer serverLog.close()
+		defer events.close()
+	}
 
 	web, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -77,8 +89,11 @@ func main() {
 	stats := startStats(rl, vlog, startRouterLink(*wifiIface, rl))
 	tanks := newTankManager(rl, *tokenFile, httpPort)
 	tanks.vlog = vlog
+	tanks.events = events
 	g := newGame(tanks, *settingsFile)
 	g.vlog = vlog
+	g.events = events
+	events.add("hub_start", map[string]any{"version": version, "os": runtime.GOOS + "/" + runtime.GOARCH})
 	g.airtime = startAirtimeControl(*wifiIface, g.settings.AirtimeFairness)
 	g.checkTanks = stats.check
 	if *sigtestDir == "" {
@@ -87,6 +102,7 @@ func main() {
 	// Runs used to be saved next to the video log (the router's RAM): keep them.
 	g.sigtest = newSignalTest(tanks, rl, *wifiIface, *sigtestDir, filepath.Dir(*videoLogFile))
 	tanks.fakeNoShots = g.sigtest.active
+	tanks.noPings = g.sigtest.active // the signal test waits for pongs of its own
 	g.sigtest.onDone = func() {
 		g.mu.Lock()
 		g.syncCameras() // back to the phase's cameras
@@ -101,6 +117,8 @@ func main() {
 	go g.runClock(ctx.Done())
 	go g.ir.run(ctx.Done())
 	go g.runStabiliser(ctx.Done())
+	go tanks.runHealth(ctx)
+	go runHubHealth(ctx, events, os.TempDir(), g.healthCounts)
 	for i := 1; i <= *fakeTanks; i++ {
 		team := "Desert"
 		if i%2 == 0 {
@@ -117,6 +135,25 @@ func main() {
 	mux.HandleFunc("/api/info", handleInfo)
 	mux.HandleFunc("GET /api/stats", stats.handle)
 	mux.HandleFunc("GET /api/video-log", vlog.handle)
+	mux.HandleFunc("GET /api/server-log", func(w http.ResponseWriter, r *http.Request) {
+		serverLog.serve(w, r, "thundergeddon-server.log", "text/plain; charset=utf-8")
+	})
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
+		if events == nil {
+			http.Error(w, "the event log is off", http.StatusNotFound)
+			return
+		}
+		events.f.serve(w, r, "thundergeddon-events.jsonl", "application/x-ndjson")
+	})
+	bundle := &logBundle{server: serverLog, events: events, video: vlog, extras: func() map[string]any {
+		return map[string]any{
+			"info.json":     infoNow(),
+			"stats.json":    stats.snapshot(),
+			"tanks.json":    tanks.statusList(),
+			"settings.json": g.settingsForLog(),
+		}
+	}}
+	mux.HandleFunc("GET /api/logs.zip", bundle.handle)
 	mux.HandleFunc("GET /api/sigtest", g.sigtest.handle)
 	mux.HandleFunc("GET /api/sigtest.csv", g.sigtest.handleCSV)
 	mux.HandleFunc("GET /api/sigtest/runs", g.sigtest.handleRuns)
@@ -141,6 +178,9 @@ func main() {
 		Addr:              *addr,
 		Handler:           logRequests(mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		// A phone that walks off leaves its idle connection behind; without
+		// this they are only cleared by TCP keep-alive, minutes later.
+		IdleTimeout: 2 * time.Minute,
 		// Requests share the shutdown signal, so long-lived video and tank
 		// connections end at once on stop instead of holding the server up
 		// until the service manager kills it.
@@ -170,16 +210,23 @@ func main() {
 // handleInfo reports what is running and where, so the settings screen can
 // show whether the page came from the PC or the router.
 func handleInfo(w http.ResponseWriter, r *http.Request) {
-	host, _ := os.Hostname()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(infoNow())
+}
+
+func infoNow() map[string]any {
+	host, _ := os.Hostname()
+	return map[string]any{
 		"version":  version,
 		"os":       runtime.GOOS,
 		"arch":     runtime.GOARCH,
 		"hostname": host,
 		"uptimeS":  int(time.Since(startedAt).Seconds()),
-	})
+		// The hub's clock, which every log line uses: it can be wrong when
+		// the router has no internet to set it from.
+		"time": time.Now().Format("2006-01-02T15:04:05.000"),
+	}
 }
 
 // Phones otherwise cache the HTML heuristically and keep showing a stale page
@@ -201,7 +248,7 @@ func logRequests(next http.Handler) http.Handler {
 		// Status polls arrive every couple of seconds; logging them would
 		// flood the router's small log buffer.
 		switch r.URL.Path {
-		case "/api/stats", "/api/info", "/api/tanks":
+		case "/api/stats", "/api/info", "/api/tanks", "/api/sigtest", "/api/sigtest/history":
 			return
 		}
 		log.Printf("%s %s %s (%s)", r.RemoteAddr, r.Method, r.URL.Path, time.Since(start).Round(time.Microsecond))

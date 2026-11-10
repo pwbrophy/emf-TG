@@ -2230,7 +2230,11 @@ setInterval(() => {
       memoryGb: navigator.deviceMemory || 0,
       screen:   `${screen.width}x${screen.height}@${(window.devicePixelRatio || 1).toFixed(1)}`,
       lowFx:    _lowFx,
+      rttMs:    _rttN ? _rttSum / _rttN : 0,
+      rttMaxMs: _rttMax,
+      rttN:     _rttN,
     })).catch(() => {});
+    _rttSum = 0; _rttN = 0; _rttMax = 0;
   });
 }, VS_REPORT_MS);
 
@@ -2421,7 +2425,10 @@ class TGHub {
     this._onReconnecting = [];
     this._onReconnected = [];
     this._onClose = [];
-    setInterval(() => this._raw({ t: 'ping' }), 5000);
+    // Keep-alive, and a measure of the link to the hub: the hub answers each
+    // one ("pong" with the same n), and the round trip goes in the video
+    // report (rttMs) so a laggy game can be traced to this phone's Wi-Fi.
+    setInterval(() => this._raw({ t: 'ping', n: performance.now() }), 2000);
   }
   on(name, fn)       { this.handlers[name] = fn; }
   onreconnecting(fn) { this._onReconnecting.push(fn); }
@@ -2494,8 +2501,18 @@ function tgRemainingMs() {
   return Math.max(0, tgState.remainingMs - (performance.now() - tgStateAt));
 }
 
+// Round trips to the hub since the last video report (see TGHub's ping).
+let _rttSum = 0, _rttN = 0, _rttMax = 0;
+function tgPong(n) {
+  const ms = performance.now() - n;
+  if (!(ms >= 0 && ms < 60000)) return;
+  _rttSum += ms; _rttN++;
+  if (ms > _rttMax) _rttMax = ms;
+}
+
 function tgOnMessage(hub, m) {
   switch (m.t) {
+    case 'pong':         tgPong(m.n); return;
     case 'kicked':       returnToJoin('The host removed you from the game.'); return;
     case 'error':        dbg('server: ' + m.msg); return;
     case 'fired':

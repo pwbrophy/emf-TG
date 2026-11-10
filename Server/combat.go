@@ -217,6 +217,9 @@ type match struct {
 
 	lastCountdownTick int // last countdown number sent to the tanks
 
+	startedAt, playAt time.Time // when the host tapped Start, and when play began (for the event log)
+	shots             shotTally // how this game's shots went (for the event log)
+
 	turns *turnState // turn-based games (turns.go); nil in realtime
 
 	// Announcer bookkeeping (display.go).
@@ -423,9 +426,12 @@ func (g *game) kill(target, shooter *combatant) {
 
 	if shooter == nil || shooter.alliance < 0 {
 		log.Printf("[Combat] %s destroyed", target.crewNames())
+		g.events.add("kill", map[string]any{"game": m.gen, "victim": target.tankName, "victim_crew": target.crewNames(), "by": "host"})
 		return
 	}
 	log.Printf("[Combat] %s destroyed %s", shooter.crewNames(), target.crewNames())
+	g.events.add("kill", map[string]any{"game": m.gen, "victim": target.tankName, "victim_crew": target.crewNames(),
+		"by": shooter.tankName, "by_crew": shooter.crewNames()})
 	pts := g.rules().PointsPerKill
 	if st := m.stats[shooter.shooter().name]; st != nil {
 		st.kills++
@@ -539,6 +545,22 @@ func (g *game) rfidScanned(tankID, uid string) {
 		name = tankID
 	}
 	g.rfidSeen[uid] = rfidScan{At: time.Now(), Tank: name}
+	if g.match != nil && g.phase == phasePlaying {
+		use := "unknown tag"
+		switch {
+		case base >= 0:
+			use = "base " + g.allianceName(base)
+		case point >= 0:
+			use = "point " + g.pointName(point)
+		case known:
+			use = "no use set"
+		}
+		life := ""
+		if c := g.match.fighters[tankID]; c != nil {
+			life = c.life.String()
+		}
+		g.events.add("rfid", map[string]any{"game": g.match.gen, "tank": name, "uid": uid, "use": use, "life": life, "paused": g.paused})
+	}
 
 	if g.match == nil || g.phase != phasePlaying || g.paused {
 		return
@@ -597,6 +619,7 @@ func (g *game) capture(point, alliance int, captor string) {
 	}
 	g.beaconShowOwner(point, alliance, true)
 	g.announceCapture(point, alliance, captor)
+	g.events.add("capture", map[string]any{"game": m.gen, "point": g.pointName(point), "alliance": g.allianceName(alliance), "by": captor})
 }
 
 func (g *game) respawn(c *combatant) {
@@ -612,6 +635,7 @@ func (g *game) respawn(c *combatant) {
 	g.match.lowHpWarned[c.tank] = false
 	g.displayEvent(c.crewNames() + " have returned to battle!")
 	log.Printf("[Combat] %s respawned", c.crewNames())
+	g.events.add("respawn", map[string]any{"game": g.match.gen, "tank": c.tankName, "crew": c.crewNames()})
 }
 
 func (g *game) sendSetHp(c *combatant) {

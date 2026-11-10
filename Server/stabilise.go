@@ -72,7 +72,7 @@ func (g *game) runStabiliser(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case now := <-t.C:
-			g.tickStabiliser(now, now.Sub(last))
+			guard("the turret stabiliser", g.events, func() { g.tickStabiliser(now, now.Sub(last)) })
 			last = now
 		}
 	}

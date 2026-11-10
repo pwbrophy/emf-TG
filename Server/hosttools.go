@@ -220,6 +220,7 @@ func (g *game) hostTool(c *client, m inMsg) {
 		// through discovery about 10 s later; older firmware ignores it.
 		if g.tanks.sendTo(m.Tank, `{"cmd":"reboot"}`) {
 			log.Printf("[Game] host restarted tank %s", cmp.Or(g.tankNames[m.Tank], m.Tank))
+			g.events.add("host_tank_restart", map[string]any{"tank": cmp.Or(g.tankNames[m.Tank], m.Tank)})
 		}
 
 	// Advanced tuning presets.
@@ -253,6 +254,7 @@ func (g *game) hostDamage(c *client, tankID, dir string) {
 		return
 	}
 	dmg, killed := g.applyHit(nil, t, mask, dir)
+	g.events.add("host_hit", map[string]any{"game": g.match.gen, "tank": t.tankName, "dir": dir, "dmg": dmg, "killed": killed})
 	if dmg > 0 && !killed {
 		if dir == "S" {
 			g.tanks.sendTo(tankID, `{"cmd":"flash_hit","rear":true}`)

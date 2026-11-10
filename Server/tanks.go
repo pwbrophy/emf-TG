@@ -45,6 +45,9 @@ const (
 	videoStallTimeout = 5 * time.Second
 	// Tanks only send small flat JSON; anything bigger is a stranger.
 	maxTankMessage = 4096
+	// How many times a camera that sends no frames at all is asked to start
+	// again before the hub just keeps trying to connect to it.
+	streamOnRetries = 3
 )
 
 // videoURL is where a tank serves its camera. A variable so tests can point
@@ -72,8 +75,10 @@ type tankManager struct {
 
 	fake        fakeWorld   // pretend IR for -fake-tanks
 	fakeNoShots func() bool // true while a lit fake barrel isn't a shot (the signal test)
+	noPings     func() bool // true while the hub mustn't ping tanks itself (the signal test uses pongs)
 
-	vlog *videoLog // start-up and camera reports go here too; nil = off
+	vlog   *videoLog // start-up and camera reports go here too; nil = off
+	events *eventLog // connects, drops and each tank's health (sessionlog.go); nil = off
 }
 
 type tankSession struct {
@@ -85,6 +90,10 @@ type tankSession struct {
 	lastSeen    atomic.Int64 // unix nanoseconds
 	heap        atomic.Int64 // free heap bytes from the latest heartbeat
 	rssi        atomic.Int32 // Wi-Fi signal (dBm) from the latest heartbeat; 0 = not reported
+	health      tankHealth   // heartbeat figures since the last "tank" event (tankhealth.go)
+	dropped     atomic.Int64 // commands dropped because its queue was full, since the last "tank" event
+	lastDropLog atomic.Int64 // unix nanoseconds: when a dropped command was last logged
+	pingAt      atomic.Int64 // unix nanoseconds: when the hub's own ping went out; 0 = none waiting
 	stop        context.CancelFunc
 	flags       tankFlags  // guarded by tankManager.mu
 	video       [3]int     // saved camera fps, frame size, quality from the hello (0 = unknown)
@@ -105,6 +114,8 @@ type tankSession struct {
 	pullCancel context.CancelFunc
 
 	fake func(msg []byte) // a fake tank's pretend reaction to commands
+
+	events *eventLog // the manager's event log; nil = off
 }
 
 // tankInfo is what the game sees of a connected tank.
@@ -224,6 +235,9 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if sess != nil {
 				log.Printf("[Tanks] %s disconnected: %v", sess.label(), quietErr(err))
+				tm.events.add("tank_disconnect", map[string]any{"tank": sess.label(), "id": sess.id,
+					"why": quietErr(err).Error(), "connected_s": int(time.Since(sess.connectedAt).Seconds()),
+					"silent_ms": time.Since(time.Unix(0, sess.lastSeen.Load())).Milliseconds()})
 			}
 			return
 		}
@@ -241,6 +255,18 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			Name string `json:"name"`
 			IP   string `json:"ip"`
 			Heap int64  `json:"heap"`
+			// Heartbeat: memory and loop health. maxblk = largest free block
+			// (falls as the heap fragments); t = ms since the tank started.
+			// From the November 2026 firmware: hmin = least free heap since it
+			// started, lmax = the longest its main loop was held up (ms),
+			// wsn / wfn = hub connections and Wi-Fi drops since it started.
+			MaxBlk  int64 `json:"maxblk"`
+			UpMs    int64 `json:"t"`
+			HeapMin *int  `json:"hmin"`
+			LoopMax *int  `json:"lmax"`
+			WsN     *int  `json:"wsn"`
+			WifiN   *int  `json:"wfn"`
+			IrStuck *int  `json:"irto"` // times a barrel put itself out: no ir_emit_stop came
 			// Heartbeat: Wi-Fi signal and video sent since the last one
 			// (firmware from October 2026 on; older tanks leave them out).
 			RSSI    *int `json:"rssi"`
@@ -281,6 +307,9 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			if msg.ID == "" {
 				continue
 			}
+			if sess != nil {
+				continue // already registered on this connection (add would close it)
+			}
 			ip := msg.IP
 			if ip == "" {
 				ip, _, _ = net.SplitHostPort(r.RemoteAddr)
@@ -302,6 +331,10 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[Tanks] %s %s", sess.label(), text)
 				tm.vlog.note(sess.label(), "boot", text)
 			}
+			tm.events.add("tank_connect", map[string]any{"tank": sess.label(), "id": sess.id, "ip": ip,
+				"up_s": msg.bootReport.UpMs / 1000, "reset": msg.bootReport.Reset, "fw": msg.bootReport.Firmware,
+				"wifi_tries": msg.bootReport.WifiTries, "wifi_ms": msg.bootReport.WifiMs, "ch": msg.bootReport.Channel,
+				"rssi0": msg.bootReport.RSSI, "crash": msg.bootReport.Crash})
 			if msg.FPS != nil && msg.FSize != nil && msg.FQuality != nil {
 				log.Printf("[Tanks] %s camera settings: max %d fps, frame size %d, JPEG quality %d",
 					sess.label(), *msg.FPS, *msg.FSize, *msg.FQuality)
@@ -311,12 +344,24 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 			if sess != nil && msg.Heap > 0 {
 				sess.heap.Store(msg.Heap)
 			}
+			if sess != nil {
+				sess.health.heartbeat(time.Now(), msg.Heap, msg.MaxBlk, msg.UpMs, msg.RSSI, msg.Temp,
+					msg.HeapMin, msg.LoopMax, msg.WsN, msg.WifiN, msg.IrStuck)
+			}
 			if sess != nil && msg.RSSI != nil {
 				sess.rssi.Store(int32(*msg.RSSI))
 				tm.rl.get(sess.id).setTankHB(tankVideoHB{at: time.Now(), rssi: *msg.RSSI,
 					frames: msg.VFrames, sendMsSum: msg.VSend, sendMsMax: msg.VMax, camMisses: msg.VMiss, chipC: msg.Temp})
 			}
 		case "ir_emit_ack", "ir_window_result", "rfid", "pong":
+			if sess != nil && msg.Cmd == "pong" {
+				// The answer to the hub's own ping (tankhealth.go): time it,
+				// and don't pass it on as the answer to anyone else's.
+				if at := sess.pingAt.Swap(0); at != 0 {
+					sess.health.pong(time.Since(time.Unix(0, at)))
+					continue
+				}
+			}
 			if sess != nil && tm.onReport != nil {
 				tm.onReport(sess.id, msg.tankReport)
 			}
@@ -330,10 +375,12 @@ func (tm *tankManager) handleControl(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[Tanks] %s %s", sess.label(), text)
 				}
 				tm.vlog.note(sess.label(), "camera", text)
+				tm.events.add("camera_start", map[string]any{"tank": sess.label(), "ok": msg.RfidOK != 0, "tries": msg.Tries, "err": msg.Err})
 			}
 		case "rfid_status":
 			if sess != nil {
 				log.Printf("[RFID] %s: reader ok=%d, recovered %d times", sess.label(), msg.RfidOK, msg.Recoveries)
+				tm.events.add("rfid_reader", map[string]any{"tank": sess.label(), "ok": msg.RfidOK != 0, "recoveries": msg.Recoveries})
 			}
 		}
 	}
@@ -354,7 +401,7 @@ type tankReport struct {
 func (tm *tankManager) add(id, name, ip string, c *websocket.Conn) *tankSession {
 	ctx, stop := context.WithCancel(context.Background())
 	sess := &tankSession{id: id, name: name, ip: ip, conn: c, connectedAt: time.Now(), stop: stop,
-		out: make(chan []byte, 64), videoWake: make(chan struct{}, 1)}
+		out: make(chan []byte, 64), videoWake: make(chan struct{}, 1), events: tm.events}
 	sess.lastSeen.Store(time.Now().UnixNano())
 
 	tm.mu.Lock()
@@ -491,6 +538,11 @@ func (tm *tankManager) setStreaming(id string, on bool) {
 }
 
 func (s *tankSession) setStreaming(on bool) {
+	// pullMu keeps this in step with the video puller asking again for a
+	// camera that sent nothing (pullVideo): its stream_on can't land after a
+	// stream_off sent here.
+	s.pullMu.Lock()
+	defer s.pullMu.Unlock()
 	if s.wantVideo.Swap(on) == on {
 		return
 	}
@@ -503,11 +555,9 @@ func (s *tankSession) setStreaming(on bool) {
 		return
 	}
 	s.send(`{"cmd":"stream_off"}`)
-	s.pullMu.Lock()
 	if s.pullCancel != nil {
 		s.pullCancel()
 	}
-	s.pullMu.Unlock()
 }
 
 // sendTo queues a JSON command for a tank. False if the tank isn't connected.
@@ -539,7 +589,13 @@ func (s *tankSession) send(msg string) {
 	select {
 	case s.out <- []byte(msg):
 	default:
-		log.Printf("[Tanks] %s: command queue full, dropped %s", s.label(), msg)
+		// Counted for the tank's health line; logged at most once a second (a
+		// stuck tank is sent 20 or more commands a second until it times out).
+		s.dropped.Add(1)
+		now := time.Now().UnixNano()
+		if last := s.lastDropLog.Load(); now-last > int64(time.Second) && s.lastDropLog.CompareAndSwap(last, now) {
+			log.Printf("[Tanks] %s: command queue full, dropping commands (%s)", s.label(), msg)
+		}
 	}
 }
 
@@ -562,7 +618,11 @@ func (s *tankSession) writeLoop(ctx context.Context) {
 			err := s.conn.Write(wctx, websocket.MessageText, msg)
 			cancel()
 			if err != nil {
+				// Nothing more can be sent on this connection: close it so the
+				// tank's session ends now and it reconnects, instead of staying
+				// listed (and deaf) until its silence timeout.
 				log.Printf("[Tanks] %s: send failed: %v", s.label(), err)
+				s.conn.CloseNow()
 				return
 			}
 		}
@@ -576,8 +636,10 @@ func (s *tankSession) writeLoop(ctx context.Context) {
 // stall or error, until the tank's control session ends.
 func (s *tankSession) pullVideo(ctx context.Context, out *stream) {
 	url := videoURL(s.ip)
+	asked := 0 // times stream_on was sent again since the camera last sent a frame
 	for ctx.Err() == nil {
 		if !s.wantVideo.Load() {
+			asked = 0
 			select {
 			case <-ctx.Done():
 				return
@@ -599,6 +661,23 @@ func (s *tankSession) pullVideo(ctx context.Context, out *stream) {
 			continue
 		}
 		log.Printf("[Video] %s: camera stream ended after %d frames (%v), reconnecting", s.label(), frames, quietErr(err))
+		s.events.add("video_end", map[string]any{"tank": s.label(), "frames": frames, "why": quietErr(err).Error()})
+		// Not one frame: the camera may never have started (it failed, or the
+		// tank missed stream_on). Ask again, a few times: a tank whose camera
+		// is already running just carries on, and one whose camera failed
+		// tries to start it again (which holds its main loop up for a moment,
+		// hence the limit).
+		if frames > 0 {
+			asked = 0
+		} else if asked < streamOnRetries {
+			s.pullMu.Lock()
+			if s.wantVideo.Load() {
+				asked++
+				log.Printf("[Video] %s: no frames at all: asking for its camera again (%d of %d)", s.label(), asked, streamOnRetries)
+				s.send(`{"cmd":"stream_on"}`)
+			}
+			s.pullMu.Unlock()
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -660,6 +739,12 @@ type tankStatus struct {
 
 // handleList reports the connected tanks: GET /api/tanks.
 func (tm *tankManager) handleList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(tm.statusList())
+}
+
+func (tm *tankManager) statusList() []tankStatus {
 	tm.mu.Lock()
 	list := make([]tankStatus, 0, len(tm.tanks))
 	for _, s := range tm.tanks {
@@ -675,9 +760,7 @@ func (tm *tankManager) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	tm.mu.Unlock()
 	sort.Slice(list, func(i, j int) bool { return list[i].Name+list[i].ID < list[j].Name+list[j].ID })
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(list)
+	return list
 }
 
 // quietErr shortens the errors a normal disconnect produces.

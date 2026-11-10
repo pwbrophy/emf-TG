@@ -132,13 +132,19 @@ func (ss *statsSampler) loop() {
 	}
 }
 
-func (ss *statsSampler) handle(w http.ResponseWriter, r *http.Request) {
+// snapshot is the latest sample.
+func (ss *statsSampler) snapshot() statsSnapshot {
 	ss.mu.Lock()
 	snap := ss.latest
 	ss.mu.Unlock()
 	if snap.Streams == nil {
 		snap.Streams = []streamStats{}
 	}
+	return snap
+}
+
+func (ss *statsSampler) handle(w http.ResponseWriter, r *http.Request) {
+	snap := ss.snapshot()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(snap)

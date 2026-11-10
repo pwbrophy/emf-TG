@@ -21,3 +21,5 @@ type systemSampler struct{}
 func newSystemSampler() *systemSampler { return &systemSampler{} }
 
 func (s *systemSampler) sample() *systemStats { return nil }
+
+func diskFreeMB(path string) (float64, bool) { return 0, false }

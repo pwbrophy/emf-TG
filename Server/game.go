@@ -121,6 +121,7 @@ type game struct {
 	tanks   tankControl
 	beacons *beaconManager  // nil in tests
 	vlog    *videoLog       // phones' video reports go here; nil = off
+	events  *eventLog       // what happened, for looking back on a day of games (sessionlog.go); nil = off
 	airtime *airtimeControl // the router's airtime fairness; nil = not controlled
 
 	// The check on Start (health.go): checkTanks is nil in tests that don't
@@ -241,6 +242,7 @@ type inMsg struct {
 	L        float64          `json:"l"`
 	R        float64          `json:"r"`
 	S        float64          `json:"s"`
+	N        float64          `json:"n"` // a ping's number, sent back in the pong
 	On       bool             `json:"on"`
 	Force    bool             `json:"force"`
 	Dir      string           `json:"dir"`      // host test damage: N, E, S
@@ -292,6 +294,15 @@ func (g *game) handle(c *client, m inMsg) {
 				}
 			}
 			g.vlog.phone(tank, *m.VStats)
+			v := *m.VStats
+			name := ""
+			if p := g.players[c.device]; p != nil {
+				name = p.name
+			}
+			g.events.add("phone", map[string]any{"player": name, "tank": tank, "path": v.Path,
+				"shown_fps": round1(v.ShownFps), "recv_fps": round1(v.RecvFps), "decode_ms": round1(v.DecodeMs),
+				"page_fps": round1(v.PageFps), "rtt_ms": round1(v.RttMs), "rtt_max_ms": round1(v.RttMaxMs), "rtt_n": v.RttN,
+				"device": v.Device, "cores": v.Cores, "memory_gb": v.MemoryGb, "screen": v.Screen, "simple_fx": v.LowFx})
 		}
 		return
 
@@ -463,6 +474,10 @@ func (g *game) hello(c *client, device string, display bool) {
 		if p := g.players[device]; p != nil && !display {
 			p.clients++
 			p.disconnectedAt = time.Time{}
+			// Only players' pages: a phone in a game that reconnects is news,
+			// a stranger reading the title screen isn't.
+			g.events.add("phone_connect", map[string]any{"player": p.name, "device": shortDevice(device),
+				"status": string(p.status), "pages": p.clients})
 		}
 	}
 	g.broadcast()
@@ -480,6 +495,11 @@ func (g *game) clientGone(c *client) {
 		return
 	}
 	p.clients--
+	g.events.add("phone_disconnect", map[string]any{"player": p.name, "device": shortDevice(c.device),
+		"status": string(p.status), "pages": max(0, p.clients), "too_slow": c.slow})
+	if c.slow {
+		log.Printf("[Phones] %s's page couldn't keep up with the hub and was disconnected (it reconnects)", p.name)
+	}
 	if p.clients <= 0 {
 		p.clients = 0
 		p.disconnectedAt = time.Now()
@@ -516,6 +536,7 @@ func (g *game) join(c *client, name, password string) {
 		g.players[c.device] = p
 		p.name = g.uniqueName(name, c.device)
 		log.Printf("[Game] %s joined", p.name)
+		g.events.add("player_join", map[string]any{"player": p.name, "device": shortDevice(c.device)})
 		g.enqueue(p)
 		return
 	}
@@ -565,6 +586,7 @@ func (g *game) removePlayer(device string) {
 	g.dequeue(device)
 	delete(g.players, device)
 	log.Printf("[Game] %s left", p.name)
+	g.events.add("player_leave", map[string]any{"player": p.name, "device": shortDevice(device), "status": string(p.status)})
 }
 
 func (g *game) playAgain(device string) {
@@ -824,6 +846,7 @@ func (g *game) tankConnected(id string) {
 			g.sendSetHp(c)
 			c.apLed = apLed{} // it starts with its blue HP bar: syncApLeds puts the right bar back
 			log.Printf("[Game] %s's tank reconnected mid-game", c.crewNames())
+			g.events.add("tank_back_in_game", map[string]any{"game": g.match.gen, "tank": c.tankName, "crew": c.crewNames(), "life": c.life.String()})
 		}
 	}
 }
@@ -891,8 +914,17 @@ func (g *game) fire(device string) {
 		return // dead tanks can't fire; on a 2-player tank only the gunner does
 	}
 	p := g.players[device]
+	// The page times the reload itself, from the tap; the hub times it from
+	// when the message arrives. A shot fired the moment the reload ends can
+	// arrive a little "early" when the one before it was delayed on the way,
+	// and was then dropped without a word: the page showed a shot, nothing
+	// happened. So allow a little early (a tenth of the reload, 200 ms at
+	// most), and note the ones still refused.
 	cooldown := time.Duration(g.rules().FireCooldownMs) * time.Millisecond
-	if time.Since(p.lastFire) < cooldown {
+	grace := min(cooldown/10, 200*time.Millisecond)
+	if since := time.Since(p.lastFire); since < cooldown-grace {
+		g.events.add("shot", map[string]any{"game": g.match.gen, "tank": c.tankName, "player": p.name,
+			"result": "too_soon", "early_ms": (cooldown - since).Milliseconds()})
 		return
 	}
 	window := 0 // the realtime game's IrWindowMs
@@ -910,6 +942,7 @@ func (g *game) fire(device string) {
 	g.displaySend(map[string]any{"cmd": "fire_event", "robotId": c.tank, "callsign": c.tankName})
 	if !g.ir.enqueue(shotRequest{shooter: c.tank, at: time.Now(), gen: g.match.gen, windowMs: window}) {
 		g.sendTo(device, map[string]any{"t": "fire_result", "text": "Miss (lag)"})
+		g.events.add("shot", map[string]any{"game": g.match.gen, "tank": c.tankName, "player": p.name, "result": "queue_full"})
 	}
 }
 
@@ -993,6 +1026,7 @@ func (g *game) start(c *client, force bool) {
 		warnings := g.checkPlayingTanks(ready)
 		if len(names) > 0 || len(warnings) > 0 {
 			g.sendTo(c.device, map[string]any{"t": "confirm_start", "names": names, "warnings": warnings})
+			g.events.add("start_check", map[string]any{"without_tank": names, "warnings": warnings})
 			return
 		}
 	}
@@ -1025,6 +1059,7 @@ func (g *game) start(c *client, force bool) {
 	g.paused = false
 	g.newMatch(ready)
 	log.Printf("[Game] starting with %d players", len(ready))
+	g.logGameStart(force)
 	if countdown := g.rules().CountdownSeconds; countdown > 0 {
 		g.setPhase(phaseCountdown)
 		g.phaseEndsAt = time.Now().Add(time.Duration(countdown) * time.Second)
@@ -1069,6 +1104,10 @@ func (g *game) beginPlay() {
 		}
 	}
 	g.beaconsForPhase() // all points unlit: nobody owns them yet
+	if g.match != nil {
+		g.match.playAt = time.Now()
+		g.events.add("play_begin", map[string]any{"game": g.match.gen})
+	}
 	if g.turnBased() {
 		g.startTurns() // turns.go
 	}
@@ -1137,6 +1176,7 @@ func (g *game) endGame(code string) {
 	g.setPhase(phaseEnded)
 	g.announceGameOver(winner)
 	log.Printf("[Game] game over: %s", g.endReason)
+	g.logGameEnd(code)
 }
 
 // closeGame ends hosting: lobby players go back to the front of the queue
@@ -1208,6 +1248,7 @@ func (g *game) setPaused(on bool) {
 		g.syncCameras()
 		g.displayEvent("Game paused")
 		log.Printf("[Game] paused")
+		g.events.add("pause", map[string]any{"game": g.match.gen})
 		return
 	}
 	// Every timer carries on from where it stopped.
@@ -1230,6 +1271,7 @@ func (g *game) setPaused(on bool) {
 	g.syncCameras()
 	g.displayEvent("Game resumed")
 	log.Printf("[Game] resumed after %.0fs", d.Seconds())
+	g.events.add("resume", map[string]any{"game": g.match.gen, "paused_s": round1(d.Seconds())})
 }
 
 // tick runs the clock: countdown → playing → game over, and forgets
@@ -1287,7 +1329,7 @@ func (g *game) runClock(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case now := <-t.C:
-			g.tick(now.Sub(last))
+			guard("the game clock", g.events, func() { g.tick(now.Sub(last)) })
 			last = now
 		}
 	}

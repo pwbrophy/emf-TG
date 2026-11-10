@@ -161,6 +161,84 @@ ssh root@192.168.8.1 "logread -f -e thundergeddon"             # live log (Ctrl+
 ssh root@192.168.8.1 "/etc/init.d/thundergeddon stop"          # also: start, restart
 ```
 
+## Logs: looking back on a session of games
+
+The router's own log holds only 64 KB (a few minutes of a game), so the hub
+keeps three logs of its own in the temp folder (`/tmp` on the router: RAM, so
+gone after the router reboots, but kept over a hub restart or deploy). Each is
+capped and keeps one older file (`.1`), so all three together stay under
+30 MB of the router's 240 MB.
+
+| File | What | Cap | Alone |
+|---|---|---|---|
+| `thundergeddon-events.jsonl` | One JSON line per thing that happened (below) | 4 MB × 2 | `/api/events` |
+| `thundergeddon-server.log` | Everything the hub printed | 3 MB × 2 | `/api/server-log` |
+| `thundergeddon-video.csv` | Every tank's video and Wi-Fi figures every 2 s (`videolog.go`) | 8 MB × 2 | `/api/video-log` |
+
+(`?old=1` on those addresses gives the older file.)
+
+**Fetch everything in a break:**
+
+```powershell
+cd Server
+.\fetch-logs.ps1                       # → Logs\<date_time>\ at the top of the project
+.\fetch-logs.ps1 -Label "after game 6"
+python logsummary.py                   # summary of the newest fetch: hub, each game, each tank, what's worth a look
+```
+
+That is one download, `http://192.168.8.1:8088/api/logs.zip`: the three logs,
+the hub's state at that moment (`info.json`, `stats.json`, `tanks.json`,
+`settings.json` without the game password), the router's own log
+(`router-system-log.txt`: Wi-Fi driver and kernel lines) and, if the hub ever
+crashed, its last words (`crash-previous.txt`). Fetch as often as you like;
+nothing is cleared.
+
+**Events** (`{"t": hub time, "ev": kind, ...}`):
+
+| `ev` | When | Useful fields |
+|---|---|---|
+| `hub_start` | The hub started (more than one in a session = a deploy or a crash) | `version` |
+| `hub` | Every 30 s | `rss_mb`, `mem_avail_mb`, `tmp_free_mb`, `cpu_pct`, `goroutines`, `go_heap_mb`, `phase`, `pages`, `players`, `tanks` |
+| `tank` | Every 30 s, per connected tank | lowest free memory `heap_low_kb` and largest free block `blk_low_kb` in those 30 s, `rssi_low`, `temp_c`, `up_s`, `hb_gap_max_ms` (heartbeats are 2 s apart), `ping_ms` / `ping_max_ms` / `pings_lost` (the hub pings each tank every 5 s: the command path there and back), `cmds_dropped`; newer firmware: `loop_max_ms`, `heap_ever_low_kb`, `hub_connects`, `wifi_drops`, `ir_barrel_left_on` |
+| `tank_connect` / `tank_disconnect` | A tank joined or dropped | `reset` (why it last started), `up_s`, `fw`, `crash`; `why`, `connected_s`, `silent_ms` |
+| `camera_start`, `video_end` | A camera started; a video stream broke and was reopened | `ok`, `tries`; `frames`, `why` |
+| `game_start` / `play_begin` / `game_end` | A game | who is on which tank, the rules; `code`, `winner`, `points`, `results`, each tank's end state, and `shots` (the game's tally) |
+| `shot` | Every shot | `result` (below), `queued_ms`, `ack_ms`, `left_ms`, `right_ms`, `total_ms`, `saw_left` / `saw_right` (tank → sensor mask), `silent` (tanks that didn't answer in time), `offline`, `hits` |
+| `kill`, `respawn`, `capture`, `rfid`, `host_hit` | Combat | |
+| `pause`, `resume`, `start_check`, `host_tank_restart` | The host | |
+| `phone_connect` / `phone_disconnect` | A player's page | `too_slow` = dropped by the hub for not keeping up |
+| `phone` | Every 30 s from each phone in a game | `shown_fps`, `recv_fps`, `decode_ms`, `page_fps`, `rtt_ms` / `rtt_max_ms` (the phone's link to the hub, there and back), `device` |
+| `player_join` / `player_leave` | | |
+| `panic` | A step of the hub's clock, shot or stabiliser loop failed (it carries on; the stack is in the hub log) | `where`, `error` |
+
+A shot's `result`: `hit`; `miss` (no enemy saw the left barrel); `one_barrel`
+(seen, but nobody saw both); `no_effect` (both seen, but the tank was dead or
+couldn't be hurt); `no_ack` (the shooter's tank never said its barrel was
+lit); `shooter_offline`; `stale` / `queue_full` (waited too long behind other
+shots: "Miss (lag)"); `too_soon` (arrived before the reload time was up).
+
+`-log-dir <folder>` keeps the event and hub logs somewhere else; `-log-dir off`
+switches them off.
+
+## Soak test (many games in a row)
+
+`cmd/soak` plays game after game with bot players and a bot host against a hub
+running pretend tanks, to catch what only goes wrong after many games: leaks,
+players stuck between games, state left over from the game before. **Never
+point it at a hub with real tanks connected: the bots drive.**
+
+```powershell
+cd Server
+# terminal 1: a hub with pretend tanks and its own settings and logs
+go run . -addr 127.0.0.1:8099 -discovery-port 0 -fake-tanks 6 -wifi-iface "" -settings soak/settings.json -log-dir soak -video-log soak/video.csv
+# terminal 2
+go run ./cmd/soak -server 127.0.0.1:8099 -players 6 -games 30
+```
+
+Then look at the `hub` lines in `soak/thundergeddon-events.jsonl`:
+`goroutines` and `go_heap_mb` should be the same after the last game as after
+the first.
+
 ## Video load test (fake tanks)
 
 `cmd/loadtest` pretends to be a fleet of tanks plus the phones and display

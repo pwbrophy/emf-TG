@@ -22,6 +22,7 @@ const clientSilenceTimeout = 15 * time.Second
 type client struct {
 	device  string // set by the page's hello; guarded by game.mu
 	display bool   // the spectator display (display.html): gets display updates, not snapshots
+	slow    bool   // dropped because its queue filled up; guarded by game.mu (for the event log)
 
 	out       chan []byte
 	closeOnce sync.Once
@@ -35,6 +36,7 @@ func (c *client) push(b []byte) {
 	select {
 	case c.out <- b:
 	default:
+		c.slow = true
 		c.close()
 	}
 }
@@ -102,7 +104,15 @@ func (g *game) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if m.T == "ping" {
-			continue // keep-alive from the page
+			// Keep-alive from the page. One with a number is also timing its
+			// link to the hub: send the number straight back.
+			if m.N != 0 {
+				b, _ := json.Marshal(map[string]any{"t": "pong", "n": m.N})
+				g.mu.Lock()
+				c.push(b)
+				g.mu.Unlock()
+			}
+			continue
 		}
 		g.handle(c, m)
 	}

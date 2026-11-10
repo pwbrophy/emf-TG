@@ -29,6 +29,15 @@ static constexpr uint8_t IR_LEDC_BITS  = 8;    // 50% duty = 128/256
 static constexpr int HS_BURST_ON_MS  = 3;
 static constexpr int HS_BURST_OFF_MS = 3;
 
+// A barrel is lit by ir_emit_left / ir_emit_right and put out by ir_emit_stop.
+// If the stop never arrives (the hub dropped the command, or stopped
+// mid-shot without closing the connection) the barrel would stay lit for the
+// rest of the day, and every tank facing it would count as "seen" in every
+// later shot. So a barrel goes out by itself this long after the last emit
+// command: longer than any shot (the hub's longest listen window plus its
+// longest wait for answers is 4 s per barrel).
+static constexpr uint32_t IR_EMIT_MAX_MS = 5000;
+
 // PCA9555 Port 0 bit index → compass string (bit 0=N, clockwise)
 static const char* const IR_DIR_NAMES[8] = {
     "N", "NE", "E", "SE", "S", "SW", "W", "NW"
@@ -64,6 +73,7 @@ public:
         _burstPhase = BurstPhase::On;
         _led1On();
         _emitting   = true;
+        _emitStart  = millis();
     }
 
     // Switch to right barrel (GPIO40). LEDC already set up by beginEmitLeft.
@@ -74,12 +84,20 @@ public:
         _burstEnd   = millis() + (uint32_t)HS_BURST_ON_MS;
         _burstPhase = BurstPhase::On;
         _led2On();
+        _emitStart  = millis();
     }
 
     // Drive the burst state machine. Call every loop tick while emitting.
     void updateEmitBurst(uint32_t now)
     {
         if (_burstPhase == BurstPhase::Idle) return;
+        if (now - _emitStart > IR_EMIT_MAX_MS) {
+            // No ir_emit_stop came (see IR_EMIT_MAX_MS).
+            stopEmit();
+            _emitTimeouts++;
+            Serial.println("[IR] emit left on too long: stopped");
+            return;
+        }
         if ((int32_t)(now - _burstEnd) < 0) return;
         if (_burstPhase == BurstPhase::On) {
             _ledOff();
@@ -101,6 +119,10 @@ public:
     }
 
     bool isEmitting() const { return _emitting; }
+
+    // Times a barrel was put out because no ir_emit_stop came, since start-up
+    // (reported in the heartbeat: it should stay 0).
+    uint16_t emitTimeouts() const { return _emitTimeouts; }
 
     // =========================================================
     // Handshake listen window API
@@ -160,7 +182,9 @@ private:
     uint32_t   _burstEnd   = 0;
     uint8_t    _burstLed   = 0; // 1 = left (GPIO39), 2 = right (GPIO40)
 
-    bool _emitting = false;
+    bool     _emitting     = false;
+    uint32_t _emitStart    = 0; // millis() of the last emit command
+    uint16_t _emitTimeouts = 0;
 
     // ---- Helpers ----
     void _led1On()  { ledcWrite(IR_LEDC_CH1, 128); ledcWrite(IR_LEDC_CH2, 0);   }

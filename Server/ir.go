@@ -25,6 +25,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -87,13 +88,13 @@ func (s *irScheduler) run(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case r := <-s.shots:
-			s.execute(r)
+			s.guarded(r)
 			continue
 		default:
 		}
 		if s.probing.Load() {
 			if r, ok := s.g.nextProbe(); ok { // turns.go
-				s.execute(r)
+				s.guarded(r)
 				continue
 			}
 		}
@@ -105,11 +106,16 @@ func (s *irScheduler) run(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case r := <-s.shots:
-			s.execute(r)
+			s.guarded(r)
 		case <-idle:
 		case <-s.wake:
 		}
 	}
+}
+
+// guarded runs one shot; a panic in it is logged instead of ending the hub.
+func (s *irScheduler) guarded(r shotRequest) {
+	guard("a shot", s.g.events, func() { s.execute(r) })
 }
 
 // enqueue queues a shot without blocking the caller (who holds game.mu).
@@ -140,13 +146,69 @@ func (s *irScheduler) drain() {
 	}
 }
 
-func (s *irScheduler) execute(r shotRequest) {
-	g := s.g
-	if age := time.Since(r.at); age > maxShotAge {
-		log.Printf("[IR] dropped a stale shot from %s (queued %.1fs ago)", r.shooter, age.Seconds())
-		s.fireResult(r, "Miss (lag)")
+// shotRecord is what one shot leaves in the event log: how long each step
+// took and what every tank saw, so a "Miss" can be told apart afterwards: the
+// barrel wasn't seen (aim, range, a dead IR LED), only one barrel was seen, a
+// tank answered late (Wi-Fi), or the shot waited too long behind others.
+type shotRecord struct {
+	result            string
+	shooter, player   string
+	queued, ack       time.Duration // waiting behind other shots; the shooter's "barrel lit"
+	left, right       time.Duration // collecting what the enemies saw of each barrel
+	listeners         int
+	offline, silent   []string       // enemies not connected; enemies that didn't answer in time
+	sawLeft, sawRight map[string]int // tank name → sensor mask (only tanks that saw something)
+	hits              []map[string]any
+}
+
+// logShot writes the shot's event and adds it to the game's tally. Caller
+// holds game.mu.
+func (s *irScheduler) logShot(r shotRequest, m *match, rec shotRecord) {
+	total := time.Since(r.at)
+	if r.probe && rec.result != "hit" {
+		return // overwatch probes run many times a second; only one that fires is news
+	}
+	m.shots.add(rec.result, len(rec.silent), int(total.Milliseconds()))
+	if s.g.events == nil {
 		return
 	}
+	f := map[string]any{
+		"game": m.gen, "tank": rec.shooter, "player": rec.player, "result": rec.result,
+		"queued_ms": rec.queued.Milliseconds(), "total_ms": total.Milliseconds(),
+	}
+	if rec.ack > 0 {
+		f["ack_ms"] = rec.ack.Milliseconds()
+	}
+	if rec.listeners > 0 {
+		f["listeners"], f["left_ms"] = rec.listeners, rec.left.Milliseconds()
+	}
+	if rec.right > 0 {
+		f["right_ms"] = rec.right.Milliseconds()
+	}
+	if len(rec.offline) > 0 {
+		f["offline"] = rec.offline
+	}
+	if len(rec.silent) > 0 {
+		f["silent"] = rec.silent
+	}
+	if len(rec.sawLeft) > 0 {
+		f["saw_left"] = rec.sawLeft
+	}
+	if len(rec.sawRight) > 0 {
+		f["saw_right"] = rec.sawRight
+	}
+	if len(rec.hits) > 0 {
+		f["hits"] = rec.hits
+	}
+	if r.probe {
+		f["overwatch"] = true
+	}
+	s.g.events.add("shot", f)
+}
+
+func (s *irScheduler) execute(r shotRequest) {
+	g := s.g
+	rec := shotRecord{queued: time.Since(r.at)}
 
 	// Who's shooting at whom, read under the lock.
 	g.mu.Lock()
@@ -160,14 +222,37 @@ func (s *irScheduler) execute(r shotRequest) {
 		g.mu.Unlock()
 		return
 	}
+	rec.shooter, rec.player = shooter.tankName, shooter.shooter().name
+	names := map[string]string{} // tank id → name, for the log
 	var enemies []string
 	for id, c := range m.fighters {
 		if c.alliance >= 0 && c.alliance != shooter.alliance && (!r.probe || g.movingTarget(c, time.Now())) {
 			enemies = append(enemies, id)
+			names[id] = c.tankName
 		}
 	}
 	st := g.settings
 	g.mu.Unlock()
+
+	// early ends a shot before anything is resolved.
+	early := func(result, text string) {
+		rec.result = result
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if g.match != m {
+			return
+		}
+		if text != "" && !r.probe {
+			g.sendTo(shooter.shooter().device, map[string]any{"t": "fire_result", "text": text})
+		}
+		s.logShot(r, m, rec)
+	}
+
+	if rec.queued > maxShotAge {
+		log.Printf("[IR] dropped a stale shot from %s (queued %.1fs ago)", rec.shooter, rec.queued.Seconds())
+		early("stale", "Miss (lag)")
+		return
+	}
 	if len(enemies) == 0 {
 		return // nobody to hit (Unity aborts silently too)
 	}
@@ -182,43 +267,86 @@ func (s *irScheduler) execute(r shotRequest) {
 	listen := fmt.Sprintf(`{"cmd":"ir_listen_window","ms":%d}`, windowMs)
 	send := g.tanks.sendTo
 
+	// listenAll asks tanks to listen and returns the ones that will answer: a
+	// tank that isn't connected (flat battery, restarting) is left out, or
+	// every shot at its alliance would wait the whole timeout for it and the
+	// shots behind would back up into "Miss (lag)".
+	listenAll := func(ids []string) (listening []string) {
+		for _, id := range ids {
+			if send(id, listen) {
+				listening = append(listening, id)
+			} else if !slices.Contains(rec.offline, names[id]) {
+				rec.offline = append(rec.offline, names[id])
+			}
+		}
+		return listening
+	}
+	noteSilent := func(asked []string, got map[string]int) {
+		for _, id := range asked {
+			if _, ok := got[id]; !ok && !slices.Contains(rec.silent, names[id]) {
+				rec.silent = append(rec.silent, names[id])
+			}
+		}
+	}
+
 	s.drain()
 
 	// 1. Left barrel.
-	send(r.shooter, `{"cmd":"ir_emit_left"}`)
+	at := time.Now()
+	if !send(r.shooter, `{"cmd":"ir_emit_left"}`) {
+		early("shooter_offline", "Miss")
+		return
+	}
 	if !s.waitAck(r.shooter, ackTimeout) {
 		log.Printf("[IR] %s: no ack for the left barrel", shooter.tankName)
 		send(r.shooter, `{"cmd":"ir_emit_stop"}`)
-		s.fireResult(r, "Miss")
+		rec.ack = time.Since(at)
+		early("no_ack", "Miss")
 		return
 	}
+	rec.ack = time.Since(at)
 
 	// 2. Everyone listens.
-	for _, id := range enemies {
-		send(id, listen)
-	}
-	b1 := s.collect(enemies, windowWait)
+	at = time.Now()
+	listening := listenAll(enemies)
+	rec.listeners = len(listening)
+	b1 := s.collect(listening, windowWait)
+	rec.left = time.Since(at)
+	noteSilent(listening, b1)
 
 	// 3. Early miss.
 	var seen []string
-	for _, id := range enemies {
+	for _, id := range listening {
 		if b1[id] != 0 {
 			seen = append(seen, id)
+			if rec.sawLeft == nil {
+				rec.sawLeft = map[string]int{}
+			}
+			rec.sawLeft[names[id]] = b1[id]
 		}
 	}
 	if len(seen) == 0 {
 		send(r.shooter, `{"cmd":"ir_emit_stop"}`)
-		s.fireResult(r, "Miss")
+		early("miss", "Miss")
 		return
 	}
 
 	// 4. Right barrel, and listen again (no ack wait).
 	s.drain()
+	at = time.Now()
 	send(r.shooter, `{"cmd":"ir_emit_right"}`)
-	for _, id := range seen {
-		send(id, listen)
+	again := listenAll(seen)
+	b2 := s.collect(again, windowWait)
+	rec.right = time.Since(at)
+	noteSilent(again, b2)
+	for _, id := range again {
+		if b2[id] != 0 {
+			if rec.sawRight == nil {
+				rec.sawRight = map[string]int{}
+			}
+			rec.sawRight[names[id]] = b2[id]
+		}
 	}
-	b2 := s.collect(seen, windowWait)
 
 	// 5.
 	send(r.shooter, `{"cmd":"ir_emit_stop"}`)
@@ -246,22 +374,29 @@ func (s *irScheduler) execute(r shotRequest) {
 	}
 	var parts []string
 	hitDead := false
+	both := 0 // enemies that saw both barrels
 	for _, id := range enemies {
 		if b1[id] == 0 || b2[id] == 0 {
 			continue
 		}
+		both++
 		target := m.fighters[id]
 		mask := byte(b1[id] | b2[id])
 		dir := resolveCardinal(mask)
 		log.Printf("[IR] HIT %s -> %s, side %s (mask %08b)", shooter.tankName, target.tankName, dir, mask)
+		hit := map[string]any{"tank": target.tankName, "dir": dir, "mask": int(mask)}
+		rec.hits = append(rec.hits, hit)
 		if target.life != alive {
 			hitDead = true
+			hit["effect"] = "already " + target.life.String()
 			continue
 		}
 		if target.invulnerable(time.Now()) {
+			hit["effect"] = "invulnerable"
 			continue
 		}
 		dmg, killed := g.applyHit(shooter, target, mask, dir)
+		hit["dmg"], hit["killed"], hit["hp_left"] = dmg, killed, target.hp
 		if dmg > 0 && !killed {
 			if dir == "S" {
 				send(id, `{"cmd":"flash_hit","rear":true}`)
@@ -285,10 +420,15 @@ func (s *irScheduler) execute(r shotRequest) {
 		}
 	}
 	text := "Miss"
+	rec.result = "one_barrel"
 	if len(parts) > 0 {
 		text = strings.Join(parts, " · ")
+		rec.result = "hit"
 	} else if hitDead {
 		text = "That tank is already dead!"
+		rec.result = "no_effect"
+	} else if both > 0 {
+		rec.result = "no_effect" // couldn't be hurt just now
 	}
 	if r.probe {
 		text = "Overwatch: " + text
@@ -296,6 +436,7 @@ func (s *irScheduler) execute(r shotRequest) {
 	if c := m.fighters[r.shooter]; c != nil {
 		g.sendTo(c.shooter().device, map[string]any{"t": "fire_result", "text": text})
 	}
+	s.logShot(r, m, rec)
 	g.broadcast()
 }
 
@@ -335,19 +476,4 @@ func (s *irScheduler) collect(tanks []string, timeout time.Duration) map[string]
 		}
 	}
 	return got
-}
-
-func (s *irScheduler) fireResult(r shotRequest, text string) {
-	if r.probe {
-		return // probes that miss are silent
-	}
-	g := s.g
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.match == nil || g.match.gen != r.gen {
-		return
-	}
-	if c := g.match.fighters[r.shooter]; c != nil {
-		g.sendTo(c.shooter().device, map[string]any{"t": "fire_result", "text": text})
-	}
 }

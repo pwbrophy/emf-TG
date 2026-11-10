@@ -143,10 +143,10 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 | `flash_select` | — | Turn-based games: the player switched to this tank. Short "pip poop" on the buzzer; LEDs all white, then going out pair by pair from the ends in to uncover the AP/HP bar (300 ms). Firmware from 8 Nov 2026 |
 | `ir_emit_left` | — | Activate left IR barrel (GPIO39). Robot replies `ir_emit_ack` |
 | `ir_emit_right` | — | Activate right IR barrel (GPIO40). No ACK wait — sent simultaneously with `ir_listen_window` in phase 2 |
-| `ir_emit_stop` | — | IR LEDs off, carrier off |
+| `ir_emit_stop` | — | IR LEDs off, carrier off. Only the barrel (until 10 Nov 2026 it also switched the motors on, a leftover that woke them after a game ended or a tank was destroyed). A barrel also puts itself out 5 s after the last emit command if no stop comes (`IR_EMIT_MAX_MS`; counted in the heartbeat's `irto`) |
 | `ir_listen_window` | `ms` | Listen for IR for `ms` ms; robot replies `ir_window_result` with 8-bit receiver bitmask |
 | `set_name` | `name` | Save human-readable name to robot NVS (`tg_id`). Robot sends it back in future `hello` messages. |
-| `ping` | — | Connectivity test. Robot replies `pong` immediately. |
+| `ping` | — | Connectivity test. Robot replies `pong` immediately. The hub sends one to every tank every 5 s to time the command path there and back (`ping_ms` in the event log's `tank` lines; `Server/tankhealth.go`), except during the signal test, which waits for pongs of its own. |
 | `reboot` | — | Restart the tank (software restart, ~300 ms later; camera and stream stopped first). |
 
 **Robot → Server:**
@@ -155,7 +155,7 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 |---------|--------|---------|
 | `hello` | `id`, `tok`, `name`, `ip`, `hflip`, `vflip`, `inv_throttle`, `inv_steer`, `inv_turret`, `fps`, `fsize`, `fquality`, `rfid`, `rfid_recoveries` | Robot registers itself. `tok` is `WS_HELLO_TOKEN` from `secrets.h` — the server refuses the hello if it doesn't match `ws_token.txt` (auth gate for the tank WebSocket; disabled if it has no token file). `name` is the human-readable name saved in NVS (empty string if never set). `rfid` is 1/0 (RFID reader answering); `rfid_recoveries` counts reader re-inits since boot. Start-up report (firmware from 20 Oct 2026): `up` (ms since start), `rst` (reset reason), `wifi_ms`, `wifi_tries`, `ch`, `rssi0`, `bssid`, `cal` (`full`: the radio is fully calibrated every start-up), `crash` (summary of the last crash from the core dump in the coredump partition: task, pc, cause, backtrace; reported once, then erased; decode with `xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <addrs>` using the build that crashed), `fw` (build date). |
 | `cam_status` | `ok`, `tries`, `err` | Sent when the camera starts (on the first `stream_on`): `CameraController::start` tries up to 3 times. |
-| `hb` | `t`, `heap`, `maxblk`, `rssi`, `vf`, `vb`, `vsend`, `vmax`, `vmiss`, `temp` | Heartbeat every 2 s: millis, free heap and largest free block (memory health), Wi-Fi signal in dBm, video since the last heartbeat (frames sent, bytes, total and longest ms spent sending a frame, camera misses) and the chip's temperature in °C (`temperatureRead()`, firmware from 27 Oct 2026; tanks send worse for a few minutes after a cold start). The Go server logs these per tank in its video log (`chip_temp_c`). |
+| `hb` | `t`, `heap`, `maxblk`, `rssi`, `vf`, `vb`, `vsend`, `vmax`, `vmiss`, `temp`, `hmin`, `lmax`, `wsn`, `wfn`, `irto` | Heartbeat every 2 s: millis, free heap and largest free block (memory health), Wi-Fi signal in dBm, video since the last heartbeat (frames sent, bytes, total and longest ms spent sending a frame, camera misses) and the chip's temperature in °C (`temperatureRead()`, firmware from 27 Oct 2026; tanks send worse for a few minutes after a cold start). The Go server logs these per tank in its video log (`chip_temp_c`). Firmware from 10 Nov 2026 adds `hmin` (least free heap since start-up), `lmax` (longest hold-up of `loop()` since the last heartbeat, ms: the loop runs the motors' soft PWM and times the IR), `wsn` / `wfn` (server connections and Wi-Fi drops since start-up) and `irto` (times a barrel put itself out, should stay 0). The hub writes each tank's memory and these figures to its event log every 30 s (`tank` events, `Server/tankhealth.go`). |
 | `pong` | — | Reply to `ping`; used by the host's tank tools (`hosttools.go`) |
 | `ir_emit_ack` | — | Shooter acknowledges `ir_emit_left` or `ir_emit_right` |
 | `ir_window_result` | `mask` (uint8) | 8-bit bitmask of triggered IR receivers: bit 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW |
@@ -163,6 +163,20 @@ All messages are flat JSON with a `"cmd"` key. Binary WebSocket frames = raw JPE
 | `rfid_status` | `ok` (1/0), `recoveries` | RFID reader lost, re-initialised after a chip reset, or first found after boot. `RfidController` checks the reader every 2 s and re-applies its setup if a power dip / RST glitch reset it — before this, only a reboot recovered it. |
 
 **Directional damage:** `resolveCardinal` (`Server/combat.go`) turns the `mask` bits into one of N/W/S/E. `"S"` = rear hit → `RearMultiplier` (default 3×). E/W = side hit → `SideMultiplier` (default 1.5×). N → 1×. A hit requires both b1 (left LED) and b2 (right LED) masks to be non-zero for the same enemy.
+
+## Session logs: analysing a day of games
+
+The router's system log holds only 64 KB, so the hub keeps its own capped logs in the temp folder (RAM on the router; kept over a hub restart, lost on a router reboot; under 30 MB in all): the **event log** (`thundergeddon-events.jsonl`, `Server/sessionlog.go` + `gamelog.go` + `tankhealth.go`: games with who played which tank and the rules, every shot with its timings and what each tank saw, kills, tanks and phones connecting and dropping, and every 30 s each tank's memory and ping times, each playing phone's video and link to the hub (`play.html` times its 2 s keep-alive `ping` against the hub's `pong`), and the hub's memory / processor / goroutines), the **hub log** (`thundergeddon-server.log`, everything it prints) and the **video log** (`videolog.go`). A Go crash report is kept too (`.crash`). The hub's clock, shot and stabiliser loops run through `guard` (a panic is logged as a `panic` event and the hub carries on, rather than dropping every player).
+
+When the user asks for games to be analysed (e.g. in a break during a test session):
+
+```
+cd Server
+.\fetch-logs.ps1 -Label "<what just happened>"   # one download (/api/logs.zip) → Logs\<date_time>\ in the main project folder (gitignored)
+python logsummary.py                               # newest fetch: hub health, a line per game, each tank over the session, "worth a look"
+```
+
+Then read `events.jsonl` (and `video.csv`, `server.log`, `router-system-log.txt`) in that folder for whatever the summary points at. The events and a shot's `result` values are listed in `Server/README.md` ("Logs"). `Server/cmd/soak` plays many games in a row with bot players against a hub with `-fake-tanks` (never real tanks: the bots drive), for testing the hub itself.
 
 ## UDP Discovery Protocol
 

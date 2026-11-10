@@ -117,6 +117,18 @@ static int         g_wifiChannel     = 0;
 static int         g_wifiRssiConnect = 0; // signal (dBm) on connecting
 static String      g_wifiBssid;           // the access point joined
 static uint32_t    g_rebootAt        = 0; // millis() to restart at (server's reboot command); 0 = no
+
+// ---- Health figures (sent in the heartbeat) ----
+// For telling, after a long day of games, whether a tank was struggling:
+// g_loopMaxMs is the longest gap between two passes of loop() since the last
+// heartbeat. loop() drives the motors' speed control (1 ms ticks) and times
+// the infrared windows, so anything that holds it up for long shows as a jerk
+// or a missed shot. The counters are since start-up.
+static uint32_t    g_loopLastMs      = 0;
+static uint32_t    g_loopMaxMs       = 0;
+static uint16_t    g_wsConnects      = 0; // times the server connection opened
+static uint16_t    g_wifiDrops       = 0; // times Wi-Fi was found down
+static bool        g_wifiDown        = false;
 static String      g_crashInfo;           // summary of the last crash, if one was saved
 
 // A crash saves a core dump in flash (the coredump partition). Summarise it
@@ -1354,8 +1366,11 @@ static void handleWsText(const String& s)
     // ---- IR emit ----
 
     if (strcmp(cmd, "ir_emit_stop") == 0) {
+        // Only the barrel. This used to switch the motors on as well, left
+        // over from the old slot protocol (which switched them off to fire):
+        // a shot still in the air when a game ended, was paused, or after its
+        // tank was destroyed woke the motors the server had just switched off.
         ir.stopEmit();
-        motors.enable(true);
         Serial.println("[IR] emit_stop");
         return;
     }
@@ -1487,6 +1502,7 @@ static void connectWebSocket()
         if (e == WebsocketsEvent::ConnectionOpened) {
             g_wsOpen        = true;
             g_lastHeartbeat = 0; // trigger immediate heartbeat next tick
+            g_wsConnects++;
 
             // hello includes IP, name, and config so the server can sync its UI.
             // tok authenticates the robot: Unity drops hello messages with a
@@ -1701,6 +1717,10 @@ void loop()
 {
     const uint32_t now = millis();
 
+    // Longest hold-up of this loop since the last heartbeat (see g_loopMaxMs).
+    if (g_loopLastMs != 0 && now - g_loopLastMs > g_loopMaxMs) g_loopMaxMs = now - g_loopLastMs;
+    g_loopLastMs = now;
+
     // Skip normal work if OTA is in progress
     if (OtaSupport::active) {
         OtaSupport::handle();
@@ -1794,10 +1814,13 @@ void loop()
         g_lastWifiCheck = now;
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("[WIFI] dropped, reconnecting...");
+            if (!g_wifiDown) { g_wifiDown = true; g_wifiDrops++; }
             WiFi.reconnect();
             leds.setStatus(StatusPattern::SearchingFast);
             // Also close the WebSocket cleanly if it was open
             if (g_wsOpen) onWsClose();
+        } else {
+            g_wifiDown = false;
         }
     }
 
@@ -1829,16 +1852,25 @@ void loop()
             // temp = the chip's own temperature sensor (degrees C): tanks send
             // video worse for their first few minutes after a cold start
             // (27 October 2026), and this shows whether that follows heat.
+            // hmin = least free heap since start-up; lmax = longest hold-up of
+            // loop() since the last heartbeat (ms); wsn / wfn = server
+            // connections and Wi-Fi drops since start-up; irto = times a barrel
+            // was put out because no ir_emit_stop came (should stay 0).
             const MjpegServer::Stats vs = mjpeg.takeStats();
-            char hb[224];
+            const uint32_t loopMax = g_loopMaxMs;
+            g_loopMaxMs = 0;
+            char hb[320];
             snprintf(hb, sizeof(hb),
                      "{\"cmd\":\"hb\",\"t\":%lu,\"heap\":%u,\"maxblk\":%u,\"rssi\":%d,"
-                     "\"vf\":%u,\"vb\":%u,\"vsend\":%u,\"vmax\":%u,\"vmiss\":%u,\"temp\":%.1f}",
+                     "\"vf\":%u,\"vb\":%u,\"vsend\":%u,\"vmax\":%u,\"vmiss\":%u,\"temp\":%.1f,"
+                     "\"hmin\":%u,\"lmax\":%u,\"wsn\":%u,\"wfn\":%u,\"irto\":%u}",
                      (unsigned long)now, (unsigned)ESP.getFreeHeap(),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      (int)WiFi.RSSI(),
                      (unsigned)vs.frames, (unsigned)vs.bytes, (unsigned)vs.sendMsSum,
-                     (unsigned)vs.sendMsMax, (unsigned)vs.noFrame, (double)temperatureRead());
+                     (unsigned)vs.sendMsMax, (unsigned)vs.noFrame, (double)temperatureRead(),
+                     (unsigned)ESP.getMinFreeHeap(), (unsigned)loopMax,
+                     (unsigned)g_wsConnects, (unsigned)g_wifiDrops, (unsigned)ir.emitTimeouts());
             ws.send(hb);
         }
     } else {
