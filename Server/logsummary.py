@@ -18,6 +18,7 @@ import statistics
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta
 
 
 def newest_folder():
@@ -54,25 +55,49 @@ def read_events(folder):
     return out
 
 
-def read_video(folder):
-    """Video log rows of kind "tank", one per tank per sample (viewers kept)."""
+def read_video(folder, fetched):
+    """Video log rows of kind "tank", each with a full "at" datetime.
+
+    Since 11 November 2026 the time column carries the date. Older rows have
+    the time of day alone, and the log carries on over days, so their date is
+    worked out by walking back from the newest dated row (or the fetch time):
+    each time the clock jumps forward going backwards, it is the day before.
+    Rows whose day can't be placed that way may still be a day out when a
+    whole day had no rows; they are only used for games on the same date.
+    """
     rows = []
     for name in ("video.csv.1", "video.csv"):
         path = os.path.join(folder, name)
         if not os.path.exists(path):
             continue
         with open(path, encoding="utf-8", newline="") as f:
-            for r in csv.DictReader(f):
-                if r.get("kind") == "tank":
-                    rows.append(r)
-    return rows
+            rows.extend(csv.DictReader(f))
+    day = fetched.date()
+    later = None  # time of day of the row after this one
+    for r in reversed(rows):
+        t = r.get("time") or ""
+        if len(t) > 12:  # dated
+            try:
+                at = datetime.fromisoformat(t.replace(" ", "T"))
+            except ValueError:
+                continue
+            day, later = at.date(), at.time()
+            r["at"] = at
+            continue
+        try:
+            tt = datetime.strptime(t, "%H:%M:%S.%f").time()
+        except ValueError:
+            continue
+        if later is not None and tt > later:
+            day -= timedelta(days=1)
+        later = tt
+        r["at"] = datetime.combine(day, tt)
+    return [r for r in rows if r.get("kind") == "tank" and "at" in r]
 
 
-def tod(t):
-    """Seconds since midnight from "2026-11-15T14:03:05.123" or "14:03:05.1"."""
-    t = t[11:] if "T" in t else t
-    h, m, s = t.split(":")
-    return int(h) * 3600 + int(m) * 60 + float(s)
+def when(t):
+    """An event's time as a datetime."""
+    return datetime.fromisoformat(t)
 
 
 def num(v, default=None):
@@ -89,15 +114,18 @@ def first_last_low(values):
 def main():
     folder = sys.argv[1] if len(sys.argv) > 1 else newest_folder()
     events = read_events(folder)
-    video = read_video(folder)
     flags = []
     print(f"Logs: {folder}")
     info_path = os.path.join(folder, "info.json")
+    fetched = None
     if os.path.exists(info_path):
         info = json.load(open(info_path, encoding="utf-8"))
         print(f"Hub {info.get('version')} ({info.get('os')}/{info.get('arch')}), up {info.get('uptimeS', 0) // 60} min at fetch, hub clock {info.get('time')}")
+        if info.get("time"):
+            fetched = when(info["time"])
     if not events:
         sys.exit("No events (events.jsonl is missing or empty: is the hub older than the event log?)")
+    video = read_video(folder, fetched or when(events[-1]["t"]))
     print(f"Events {events[0]['t']} to {events[-1]['t']}: {len(events)}")
     if os.path.exists(os.path.join(folder, "events.jsonl.1")):
         print("  (the event log filled up and started afresh at least once: the oldest events may be gone)")
@@ -158,15 +186,29 @@ def main():
             cur["tank_backs"].append(e)
         elif ev == "phone_disconnect" and e.get("player") in cur["crew"] and e.get("pages", 0) == 0:
             cur["phone_drops"].append(e)
+        elif ev == "video_freeze" and e.get("tank") in cur["playing"]:
+            cur.setdefault("freezes", []).append(e)
         elif ev == "game_end":
             cur["end"] = e
 
-    by_time = defaultdict(dict)  # video: (tank) → list of (time of day, row), one per sample
+    by_time = defaultdict(dict)  # video: tank → {datetime: row}, one row per sample
     for r in video:
-        try:
-            by_time[r["tank"]][r["time"]] = r
-        except KeyError:
-            pass
+        by_time[r["tank"]].setdefault(r["at"], r)
+
+    # How long each dropped page took to come back. A page moving to the
+    # in-game screen says hello again within a second; a new page can even say
+    # hello just before the old one's goodbye arrives, so a connect up to 10 s
+    # before the drop counts too.
+    connects = defaultdict(list)
+    for e in events:
+        if e["ev"] == "phone_connect" and e.get("player"):
+            connects[e["player"]].append(when(e["t"]))
+    for g in games:
+        for d in g["phone_drops"]:
+            at = when(d["t"])
+            back = [(c - at).total_seconds() for c in connects[d["player"]] if c >= at - timedelta(seconds=10)]
+            if back:
+                d["back_after_s"] = max(0.0, min(back))
 
     print(f"\nGAMES: {len(games)}")
     if games:
@@ -184,7 +226,7 @@ def main():
         avg = f"{statistics.mean(totals):.0f}/{max(totals)}" if totals else "-"
         print(f" {i:2d}  {s['t'][11:19]}  {played}  {code:11s}  {winner:11s}  {len(real):5d} {res['hit']:3d} {res['miss']:4d} {res['one_barrel']:4d} "
               f"{res['no_ack'] + res['shooter_offline']:5d} {res['stale'] + res['queue_full']:5d} {res['too_soon']:4d} | {avg:>14s} | {sum(silent.values()):6d} | "
-              f"{len(g['tank_drops'])}/{len(g['phone_drops'])}")
+              f"{len(g['tank_drops'])}/{sum(1 for d in g['phone_drops'] if d.get('back_after_s', 999) > 10 or d.get('too_slow'))}")
         tag = f"game {i} ({s['t'][11:19]})"
         if g.get("cut_short"):
             flags.append(f"{tag}: the hub restarted during it")
@@ -210,13 +252,23 @@ def main():
         for d in g["tank_drops"]:
             flags.append(f"{tag}: {d['tank']} dropped off at {d['t'][11:19]} ({d.get('why')}; silent {d.get('silent_ms', 0)} ms)")
         for d in g["phone_drops"]:
-            flags.append(f"{tag}: {d['player']}'s phone dropped at {d['t'][11:19]}" + (" (couldn't keep up with the hub)" if d.get("too_slow") else ""))
+            back = d.get("back_after_s")
+            if back is not None and back <= 10 and not d.get("too_slow"):
+                continue  # the page changing screen, or a blip
+            away = f", back after {back:.0f} s" if back is not None else ", not back before the game ended"
+            flags.append(f"{tag}: {d['player']}'s page dropped at {d['t'][11:19]}{away}"
+                         + (" (couldn't keep up with the hub)" if d.get("too_slow") else " (page closed, phone asleep, or Wi-Fi)"))
+        for fz in g.get("freezes", []):
+            whole = fz.get("hb_quiet_ms", 0) >= 3000
+            flags.append(f"{tag}: {fz['tank']}'s picture froze for {fz['longest_wait_ms'] / 1000:.1f} s at about {fz['t'][11:19]}; "
+                         + ("its control link went quiet too (whole Wi-Fi link stalled)" if whole else "its control link kept going (only the video stalled)")
+                         + (f", signal {fz['rssi']} dBm" if "rssi" in fz else ""))
         # Video while the game was played.
         if end and "play" in g and by_time:
-            a, b = tod(g["play"]["t"]), tod(end["t"])
+            a, b = when(g["play"]["t"]) + timedelta(seconds=4), when(end["t"])
             per = {}
             for tank in g["playing"]:
-                rows = [r for t, r in by_time.get(tank, {}).items() if a + 4 <= tod(t) <= b]
+                rows = [r for t, r in by_time.get(tank, {}).items() if a <= t <= b]
                 fps = [num(r.get("fps_in")) for r in rows if num(r.get("fps_in")) is not None]
                 if fps:
                     gaps = [num(r.get("max_gap_ms"), 0) for r in rows]
@@ -225,6 +277,12 @@ def main():
                     per[tank] = (statistics.mean(fps), min(fps), max(gaps), statistics.mean(send) if send else None,
                                  statistics.mean(rssi) if rssi else None)
             if per:
+                stut = {}
+                for tank in per:
+                    gaps = [num(r.get("max_gap_ms"), 0) for t, r in sorted(by_time[tank].items()) if a <= t <= b]
+                    stut[tank] = sum(1 for x in gaps if 300 <= x < 1000)
+                print("       stutters (a 0.3-1 s wait between frames): "
+                      + ", ".join(f"{t} {n}" for t, n in sorted(stut.items()) if n) if any(stut.values()) else "       no stutters")
                 typical = statistics.median(v[0] for v in per.values())
                 line = "       video fps avg (lowest, longest gap ms): " + ", ".join(
                     f"{t} {v[0]:.0f} ({v[1]:.0f}, {v[2]:.0f})" for t, v in sorted(per.items()))
@@ -306,7 +364,7 @@ def main():
         if len(t["video_end"]) > 2:
             flags.append(f"{name}: its video stream broke and was reopened {len(t['video_end'])} times")
         if len(fw) > 1:
-            flags.append(f"{name} ran more than one firmware build: {sorted(fw)}")
+            print(f"      firmware updated during these logs; now {t['tank_connect'][-1].get('fw')}")
     # ── Phones ───────────────────────────────────────────────────────────────
     phones = defaultdict(list)
     for e in events:
@@ -329,9 +387,11 @@ def main():
         if shown and statistics.mean(shown) < 12:
             flags.append(f"{name}'s phone showed only {statistics.mean(shown):.0f} fps on average")
 
-    builds = Counter(c.get("fw") for e in events if e["ev"] == "tank_connect" for c in [e] if c.get("fw"))
+    now_on = {n: tanks[n]["tank_connect"][-1].get("fw") for n in tanks if tanks[n]["tank_connect"]}
+    builds = Counter(v for v in now_on.values() if v)
     if len(builds) > 1:
-        flags.append(f"the tanks aren't all on the same firmware: {dict(builds)}")
+        flags.append("the tanks aren't all on the same firmware now: "
+                     + "; ".join(f"{b}: {', '.join(sorted(n for n, v in now_on.items() if v == b))}" for b in builds))
 
     print("\nWORTH A LOOK:" if flags else "\nNothing out of the ordinary flagged.")
     for f in flags:

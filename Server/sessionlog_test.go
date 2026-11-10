@@ -303,3 +303,31 @@ func TestCameraWithNoFramesIsAskedAgain(t *testing.T) {
 		}
 	}
 }
+
+// A picture that stands still for a second or more gives one "video_freeze"
+// event, written when the frames come back, saying whether the tank's
+// heartbeats went quiet too.
+func TestVideoFreezeEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	rl := newRelay()
+	s := rl.get("a")
+	s.setTankHB(tankVideoHB{at: time.Now().Add(-3 * time.Second), rssi: -40})
+	ss := &statsSampler{rl: rl, events: openEventLog(path)}
+	now := time.Now()
+	ok := streamStats{ID: "a", Label: "Desert-01", Sources: 1, FPSIn: 25, MaxGapMs: 60}
+	frozen := ok
+	frozen.FPSIn, frozen.MaxGapMs = 0, 2000
+	frozen2 := frozen
+	frozen2.MaxGapMs = 4000
+	for _, st := range []streamStats{ok, frozen, frozen2, ok, ok} {
+		ss.freezes(now, []streamStats{st})
+	}
+	ss.events.close()
+	got := eventsOf(readEvents(t, path), "video_freeze")
+	if len(got) != 1 {
+		t.Fatalf("%d freeze events, want 1: %v", len(got), got)
+	}
+	if got[0]["tank"] != "Desert-01" || got[0]["longest_wait_ms"] != 4000.0 || got[0]["hb_quiet_ms"].(float64) < 2900 {
+		t.Fatalf("freeze event: %v", got[0])
+	}
+}

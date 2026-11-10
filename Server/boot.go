@@ -81,7 +81,7 @@ func (vl *videoLog) note(tank, kind, text string) {
 		return
 	}
 	row := make([]string, strings.Count(videoLogHeader, ","))
-	row[0], row[1], row[2] = time.Now().Format("15:04:05.0"), kind, tank
+	row[0], row[1], row[2] = time.Now().Format(videoLogTime), kind, tank
 	row = append(row, text)
 	vl.rows(row)
 }

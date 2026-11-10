@@ -173,7 +173,7 @@ capped and keeps one older file (`.1`), so all three together stay under
 |---|---|---|---|
 | `thundergeddon-events.jsonl` | One JSON line per thing that happened (below) | 4 MB × 2 | `/api/events` |
 | `thundergeddon-server.log` | Everything the hub printed | 3 MB × 2 | `/api/server-log` |
-| `thundergeddon-video.csv` | Every tank's video and Wi-Fi figures every 2 s (`videolog.go`) | 8 MB × 2 | `/api/video-log` |
+| `thundergeddon-video.csv` | Every tank's video and Wi-Fi figures every 2 s (`videolog.go`); the time column has the date from 11 Nov 2026 (older rows have the time of day only, and the log runs over several days) | 8 MB × 2 | `/api/video-log` |
 
 (`?old=1` on those addresses gives the older file.)
 
@@ -209,6 +209,7 @@ nothing is cleared.
 | `phone_connect` / `phone_disconnect` | A player's page | `too_slow` = dropped by the hub for not keeping up |
 | `phone` | Every 30 s from each phone in a game | `shown_fps`, `recv_fps`, `decode_ms`, `page_fps`, `rtt_ms` / `rtt_max_ms` (the phone's link to the hub, there and back), `device` |
 | `player_join` / `player_leave` | | |
+| `video_freeze` | A playing camera sent no frame for a second or more (written when it recovers) | `longest_wait_ms`, `hb_quiet_ms` (how long the tank's heartbeats went quiet too: about 2 s = only the video stalled, more = the whole Wi-Fi link stalled), `rssi`, `send_ms_max`, `cam_misses`, `drive_pct`, `turret_pct` |
 | `panic` | A step of the hub's clock, shot or stabiliser loop failed (it carries on; the stack is in the hub log) | `where`, `error` |
 
 A shot's `result`: `hit`; `miss` (no enemy saw the left barrel); `one_barrel`

@@ -44,17 +44,23 @@ type statsSnapshot struct {
 	System    *systemStats  `json:"system,omitempty"` // nil where /proc is unavailable (Windows)
 }
 
+// A wait between frames this long, from a camera that is connected, is a
+// freeze worth an event of its own (see statsSampler.freezes).
+const freezeMs = 1000
+
 type statsSampler struct {
 	rl     *relay
 	vlog   *videoLog
+	events *eventLog          // "video_freeze" events; nil = off
+	frozen map[string]*freeze // tanks whose picture is standing still now; only the sampler's loop touches it
 	link   *routerLink
 	health tankHistory // recent samples per tank for the check on Start; guarded by mu
 	mu     sync.Mutex
 	latest statsSnapshot
 }
 
-func startStats(rl *relay, vlog *videoLog, link *routerLink) *statsSampler {
-	ss := &statsSampler{rl: rl, vlog: vlog, link: link}
+func startStats(rl *relay, vlog *videoLog, link *routerLink, events *eventLog) *statsSampler {
+	ss := &statsSampler{rl: rl, vlog: vlog, link: link, events: events}
 	go ss.loop()
 	return ss
 }
@@ -123,6 +129,7 @@ func (ss *statsSampler) loop() {
 			}
 		}
 		ss.vlog.rows(rows...)
+		ss.freezes(last, snap.Streams)
 
 		// One summary line a minute in the router's log while video is flowing.
 		if len(snap.Streams) > 0 && time.Since(lastLog) >= time.Minute {
@@ -141,6 +148,51 @@ func (ss *statsSampler) snapshot() statsSnapshot {
 		snap.Streams = []streamStats{}
 	}
 	return snap
+}
+
+// freeze is one picture standing still: the longest wait between frames and
+// the longest the tank's heartbeats were quiet, so far.
+type freeze struct{ wait, hbQuiet time.Duration }
+
+// freezes writes one "video_freeze" event per freeze, when it ends: how long
+// the picture stood still, and the longest the tank's heartbeats (its control
+// connection) went quiet over it. Heartbeats still arriving = only the video
+// stalled; heartbeats stopping too = the tank's whole Wi-Fi link stalled.
+func (ss *statsSampler) freezes(now time.Time, streams []streamStats) {
+	if ss.events == nil {
+		return
+	}
+	if ss.frozen == nil {
+		ss.frozen = map[string]*freeze{}
+	}
+	hbQuiet := map[string]time.Duration{}
+	for _, s := range ss.rl.all() {
+		hbQuiet[s.id] = s.hbAge(now)
+	}
+	for _, st := range streams {
+		gap := time.Duration(st.MaxGapMs) * time.Millisecond
+		fr := ss.frozen[st.ID]
+		switch {
+		case st.Sources > 0 && gap >= freezeMs*time.Millisecond:
+			if fr == nil {
+				fr = &freeze{}
+				ss.frozen[st.ID] = fr
+			}
+			fr.wait, fr.hbQuiet = max(fr.wait, gap), max(fr.hbQuiet, hbQuiet[st.ID])
+		case fr != nil:
+			f := map[string]any{"tank": st.Label, "longest_wait_ms": fr.wait.Milliseconds(),
+				"hb_quiet_ms": fr.hbQuiet.Milliseconds(), "fps_after": round1(st.FPSIn),
+				"drive_pct": round1(st.DrivePct), "turret_pct": round1(st.TurretPct)}
+			if t := st.Tank; t != nil {
+				f["rssi"], f["send_ms_max"], f["cam_misses"] = t.RSSI, t.SendMsMax, t.CamMisses
+			}
+			if r := st.Router; r != nil {
+				f["router_rx_mbit_min"] = r.RxMbitMin
+			}
+			ss.events.add("video_freeze", f)
+			delete(ss.frozen, st.ID)
+		}
+	}
 }
 
 func (ss *statsSampler) handle(w http.ResponseWriter, r *http.Request) {

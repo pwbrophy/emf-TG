@@ -250,6 +250,16 @@ func (s *stream) takeMotors(now time.Time) (drive, turret time.Duration) {
 	return s.motors.drive.take(now), s.motors.turret.take(now)
 }
 
+// hbAge is how long ago the tank's last heartbeat arrived (0 = none yet).
+func (s *stream) hbAge(now time.Time) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastHBAt.IsZero() {
+		return 0
+	}
+	return now.Sub(s.lastHBAt)
+}
+
 // tankLink is the tank's latest heartbeat, or nil if it hasn't sent one lately.
 func (s *stream) tankLink() *tankLinkStats {
 	s.mu.Lock()

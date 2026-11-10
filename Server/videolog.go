@@ -43,6 +43,12 @@ import (
 
 const videoLogMaxBytes = 8 << 20
 
+// videoLogTime is the time column's format. It carries the date: the log
+// carries on over days (in the router's RAM until it reboots), and rows with
+// the time of day alone (before 11 November 2026) can't be told apart from
+// the same time on another evening.
+const videoLogTime = "2006-01-02 15:04:05.0"
+
 const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sent,tank_send_ms_avg,tank_send_ms_max,tank_cam_misses,drive_pct,turret_pct,max_gap_ms,chip_temp_c," +
 	"router_dbm,router_rx_mbit_avg,router_rx_mbit_min,router_rx_11b_pct,router_tx_mbit_min," +
 	"viewer,viewer_fps,viewer_dropped_per_s,phone_path,phone_shown_fps,phone_recv_fps,phone_decode_ms,phone_page_fps,device_or_note\n"
@@ -182,7 +188,7 @@ func (vl *videoLog) handle(w http.ResponseWriter, r *http.Request) {
 // streamRows turns one stats sample into log lines: one per viewer, or one
 // with the viewer columns empty when nobody is watching.
 func streamRows(now time.Time, s streamStats) [][]string {
-	ts := now.Format("15:04:05.0")
+	ts := now.Format(videoLogTime)
 	base := []string{ts, "tank", s.Label, "", f1(s.FPSIn), f1(s.KBPerFrame), "", "", "", "",
 		strconv.Itoa(int(s.DrivePct + 0.5)), strconv.Itoa(int(s.TurretPct + 0.5)), strconv.Itoa(s.MaxGapMs), "", "", "", "", "", ""}
 	if t := s.Tank; t != nil {
@@ -237,7 +243,7 @@ func (vl *videoLog) phone(tankLabel string, p phoneVideoStats) {
 	if vl == nil {
 		return
 	}
-	vl.rows([]string{time.Now().Format("15:04:05.0"), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+	vl.rows([]string{time.Now().Format(videoLogTime), "phone", tankLabel, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
 		viewerName(p.Name), "", "", p.Path, f1(p.ShownFps), f1(p.RecvFps), f1(p.DecodeMs), f1(p.PageFps), p.Device})
 }
 
