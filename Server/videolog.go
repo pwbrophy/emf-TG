@@ -41,7 +41,10 @@ import (
 	"time"
 )
 
-const videoLogMaxBytes = 8 << 20
+// 16 MB (×2 with the older file) holds about 8 hours of ten tanks streaming:
+// a whole day of games, lobbies included, without fetching the logs (11 Nov
+// 2026: a ten-tank game writes about 35 KB a minute).
+const videoLogMaxBytes = 16 << 20
 
 // videoLogTime is the time column's format. It carries the date: the log
 // carries on over days (in the router's RAM until it reboots), and rows with
