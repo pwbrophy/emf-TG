@@ -167,13 +167,14 @@ The router's own log holds only 64 KB (a few minutes of a game), so the hub
 keeps three logs of its own in the temp folder (`/tmp` on the router: RAM, so
 gone after the router reboots, but kept over a hub restart or deploy). Each is
 capped and keeps one older file (`.1`), so all three together stay under
-30 MB of the router's 240 MB.
+46 MB of the router's 240 MB: about a day of games (8 hours of ten tanks
+streaming, lobbies included) before the oldest video figures go.
 
 | File | What | Cap | Alone |
 |---|---|---|---|
 | `thundergeddon-events.jsonl` | One JSON line per thing that happened (below) | 4 MB × 2 | `/api/events` |
 | `thundergeddon-server.log` | Everything the hub printed | 3 MB × 2 | `/api/server-log` |
-| `thundergeddon-video.csv` | Every tank's video and Wi-Fi figures every 2 s (`videolog.go`); the time column has the date from 11 Nov 2026 (older rows have the time of day only, and the log runs over several days) | 8 MB × 2 | `/api/video-log` |
+| `thundergeddon-video.csv` | Every tank's video and Wi-Fi figures every 2 s (`videolog.go`); the time column has the date from 11 Nov 2026 (older rows have the time of day only, and the log runs over several days) | 16 MB × 2 | `/api/video-log` |
 
 (`?old=1` on those addresses gives the older file.)
 

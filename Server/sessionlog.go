@@ -16,7 +16,7 @@ package main
 //
 // All three live in the temp folder (RAM on the router: gone after a reboot,
 // kept over a hub restart or deploy). Each is capped (see the sizes below) and
-// keeps one older file, so together they can never pass about 30 MB of the
+// keeps one older file, so together they can never pass about 46 MB of the
 // router's 240 MB. GET /api/logs.zip hands over the lot in one download
 // (Server/fetch-logs.ps1 fetches and unpacks it).
 
