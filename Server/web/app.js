@@ -390,9 +390,9 @@ function armyCard() {
 }
 
 // armyAllianceCards (turn-based): each alliance with its armies and free tanks.
-function armyAllianceCards() {
+function armyAllianceCards(reversed) {
   const me = state.me;
-  const cards = state.alliances.map((a, i) => {
+  let cards = state.alliances.map((a, i) => {
     const tanks = state.tanks.filter((t) => t.online && t.allianceIndex === i);
     const free = tanks.filter((t) => !t.player).length;
     const armies = state.players.filter((p) => p.alliance === a.name && p.tanks && p.tanks.length).length;
@@ -403,24 +403,28 @@ function armyAllianceCards() {
       <span class="name">${esc(a.name)}</span>
       <span class="sub">${sub}</span>
       <span class="sub">${armies} ${armies === 1 ? 'army' : 'armies'}</span></button>`;
-  }).join('');
+  });
+  if (reversed) cards.reverse();
+  cards = cards.join('');
   return `<div class="alliance-grid">${cards}</div>`;
 }
 
-function lobbyBody() {
+// reversed: the alliance buttons in the opposite order (the host's own
+// "Server as player" card: the host stands on the other side of the arena).
+function lobbyBody(reversed) {
   if (turnBased()) {
-    return (state.me.tanks || []).length ? armyCard() + armyAllianceCards()
+    return (state.me.tanks || []).length ? armyCard() + armyAllianceCards(reversed)
       : `<div class="big-status"><div class="title">Choose your alliance</div>
-        <div class="detail">You command an army: you get one of its tanks and can claim more</div></div>${armyAllianceCards()}`;
+        <div class="detail">You command an army: you get one of its tanks and can claim more</div></div>${armyAllianceCards(reversed)}`;
   }
-  return myTankCard() + allianceCards();
+  return myTankCard() + allianceCards(reversed);
 }
 
 // allianceCards: players choose a side and are given one of its free tanks
 // (all tanks are the same).
-function allianceCards() {
+function allianceCards(reversed) {
   const me = state.me;
-  const cards = state.alliances.map((a, i) => {
+  let cards = state.alliances.map((a, i) => {
     const tanks = state.tanks.filter((t) => t.online && t.allianceIndex === i);
     const free = tanks.filter((t) => !t.player).length;
     const players = state.players.filter((p) => p.alliance === a.name).length;
@@ -431,7 +435,9 @@ function allianceCards() {
       <span class="name">${esc(a.name)}</span>
       <span class="sub">${sub}</span>
       <span class="sub">${players} ${players === 1 ? 'player' : 'players'}</span></button>`;
-  }).join('');
+  });
+  if (reversed) cards.reverse();
+  cards = cards.join('');
   return `<div class="alliance-grid">${cards}</div>${gunnerCards()}`;
 }
 
@@ -876,7 +882,7 @@ function hostPlayCard() {
   const me = state.me;
   const playing = !!me.status;
   const body = playing
-    ? (state.phase === 'lobby' ? lobbyBody() : `<p class="hint">Playing as <b>${esc(me.name)}</b>.</p>`)
+    ? (state.phase === 'lobby' ? lobbyBody(true) : `<p class="hint">Playing as <b>${esc(me.name)}</b>.</p>`)
     : `<label class="field">Your player name<input type="text" id="host-play-name" maxlength="16" value="${esc(store('tg_player_name') || '')}"></label>`;
   return `<div class="card">
     <div class="srow" style="padding:0 0 8px;border:0"><span>Server as player</span>

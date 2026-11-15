@@ -192,7 +192,11 @@
   #gameover-bg.active { opacity: 1; }
   #fireworks-canvas { position: fixed; inset: 0; z-index: 71; pointer-events: none; display: none; }
   #gameover-overlay { position: fixed; inset: 0; z-index: 72; pointer-events: none; }
-  .go-phase { position: absolute; inset: 0; display: flex; flex-direction: column;
+  /* The balance of power bar stays on show over the game-over screens, so
+     players can see the final score; the screens are centred in the space
+     under it (--go-top, set by showGameOver). */
+  body.go-active #teambar-wrap { position: relative; z-index: 73; }
+  .go-phase { position: absolute; inset: 0; top: var(--go-top, 0px); display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 20px;
     opacity: 0; transition: opacity 0.6s; }
   .go-phase.visible { opacity: 1; }
@@ -370,7 +374,7 @@
 </head>
 <body>
 
-<div id="version">display v14</div>
+<div id="version">display v15</div>
 <div id="app">
   <!-- Header -->
   <div id="header">
@@ -744,6 +748,8 @@ function showGameOver(winnerTeam, serverStats) {
 
   p1.classList.remove('visible'); p2.classList.remove('visible'); p3.classList.remove('visible');
   bg.classList.add('active');
+  document.body.classList.add('go-active');   // the balance of power bar stays on top
+  fitGameOver();
 
   // Phase 1: "GAME OVER" with scale-in animation
   _goDelay(() => {
@@ -765,13 +771,29 @@ function showGameOver(winnerTeam, serverStats) {
   _goDelay(() => {
     p2.classList.remove('visible');
     populateGoStats(serverStats);
+    fitGameOver();
     _goDelay(() => p3.classList.add('visible'), 300);
   }, 7000);
 }
 
+// The game-over screens sit under the balance of power bar; the stats table
+// is shrunk to fit the space that leaves on a small screen.
+function fitGameOver() {
+  if (!_gameOverActive) return;
+  const top = Math.ceil(document.getElementById('teambar-wrap').getBoundingClientRect().bottom);
+  document.documentElement.style.setProperty('--go-top', top + 'px');
+  const stats = document.getElementById('go-stats');
+  stats.style.transform = '';
+  const room = window.innerHeight - top - 24, roomW = window.innerWidth - 24;
+  const k = Math.min(1, room / stats.offsetHeight, roomW / stats.offsetWidth);
+  if (k > 0 && k < 1) stats.style.transform = `scale(${k})`;
+}
+window.addEventListener('resize', fitGameOver);
+
 function hideGameOver() {
   if (!_gameOverActive) return;
   _gameOverActive = false;
+  document.body.classList.remove('go-active');
   _goClearTimers();
   stopGoFireworks();
   const _fwCv = document.getElementById('fireworks-canvas');
@@ -950,7 +972,7 @@ conn.on('CountdownTick', (count, total) => {
   const numEl = document.getElementById('countdown-number');
   numEl.textContent = count;
   numEl.style.animation = 'none'; numEl.offsetHeight; numEl.style.animation = '';
-  speak(count.toString(), 'high', 1000);
+  speakNumber(count);
 });
 
 conn.on('GamePaused',  () => {
@@ -1916,7 +1938,7 @@ function checkTimerMilestones(prev, t) {
   for (let s = 10; s >= 1; s--) {
     if (!_spokenCountdownSecs.has(s) && prev > s && t <= s) {
       _spokenCountdownSecs.add(s);
-      speak(String(s), 'high', 1000);
+      speakNumber(s);
       break; // only one per update
     }
   }
@@ -1926,13 +1948,31 @@ function checkTimerMilestones(prev, t) {
 // each other off. Each one has a priority and a max age:
 //   low    — dropped outright if anything is playing or waiting (rear hits)
 //   normal — waits its turn; discarded if it has gone stale before its turn
-//   high   — jumps ahead of queued normal items (countdowns, game over)
-// Countdown numbers get a ~1 s max age, so a long announcement makes them drop
-// rather than play late and read out the wrong second.
+//   high   — jumps ahead of queued normal items (game over, "to battle")
+// Countdown numbers don't queue at all: see speakNumber.
 const SPEECH_PRI = { low: 0, normal: 1, high: 2 };
 const _speechQueue = [];       // { text, pri, expires }, sorted high → low, FIFO within a priority
 let _speechCurrent  = null;    // utterance playing now — kept referenced so Chrome can't GC it and drop onend
 let _speechWatchdog = null;
+let _speechIsNumber = false;   // the utterance playing now is a countdown number
+
+// Countdown numbers ("5, 4, 3...") are said the moment their number shows,
+// never late. They used to wait in the queue behind the number before
+// (speech + the breath between announcements took a little over a second),
+// so the voice fell further behind the screen with each number until one was
+// over a second old and was dropped. Now a number cuts off the number before
+// it if that is still being said; if a longer announcement is playing, the
+// number is skipped rather than said late.
+function speakNumber(n) {
+  if (_muted || !window.speechSynthesis) return;
+  if (_speechCurrent) {
+    if (!_speechIsNumber) return;          // an announcement is playing: skip this number
+    clearTimeout(_speechWatchdog);
+    _speechCurrent = null;                 // its onend/onerror now does nothing (see done)
+    speechSynthesis.cancel();
+  }
+  startUtterance(String(n), true);
+}
 
 function speak(text, pri = 'normal', maxAgeMs = 10000) {
   if (_muted || !window.speechSynthesis || !text) return;
@@ -1963,17 +2003,21 @@ function pumpSpeech() {
   while (_speechQueue.length && _speechQueue[0].expires < now) _speechQueue.shift();
   const item = _speechQueue.shift();
   if (!item) return;
+  startUtterance(item.text, false);
+}
 
-  const utt = new SpeechSynthesisUtterance(item.text);
-  utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
-  _speechCurrent = utt;
-  const started = now;
+function startUtterance(text, isNumber) {
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate = isNumber ? 1.15 : 0.95; utt.pitch = 1.0; utt.volume = 1.0;
+  _speechCurrent  = utt;
+  _speechIsNumber = isNumber;
+  const started = performance.now();
 
   const done = () => {
     if (_speechCurrent !== utt) return;
     _speechCurrent = null;
     clearTimeout(_speechWatchdog);
-    setTimeout(pumpSpeech, 150);   // short breath between announcements
+    setTimeout(pumpSpeech, isNumber ? 0 : 150);   // short breath between announcements
   };
   utt.onend = done;
   utt.onerror = done;
@@ -1989,7 +2033,7 @@ function pumpSpeech() {
     if (speechSynthesis.speaking) speechSynthesis.cancel();
     done();
   };
-  _speechWatchdog = setTimeout(check, 1500 + item.text.length * 110);
+  _speechWatchdog = setTimeout(check, 1500 + text.length * 110);
 
   speechSynthesis.resume();   // un-wedge Chrome if it was left paused
   speechSynthesis.speak(utt);
