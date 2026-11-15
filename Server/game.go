@@ -1487,9 +1487,10 @@ type snapshot struct {
 	Players          []playerView `json:"players"` // lobby and game
 	Queue            []playerView `json:"queue"`
 	Results          []result     `json:"results,omitempty"`
-	Settings         *Settings    `json:"settings,omitempty"` // host only
-	RfidTags         []tagView    `json:"rfidTags,omitempty"` // host only: every known tag
-	Presets          []string     `json:"presets,omitempty"`  // host only: saved tuning presets
+	Settings         *Settings    `json:"settings,omitempty"`  // host only
+	RfidTags         []tagView    `json:"rfidTags,omitempty"`  // host only: every known tag
+	Presets          []string     `json:"presets,omitempty"`   // host only: saved tuning presets
+	PlayerURL        string       `json:"playerUrl,omitempty"` // host only: the players' link base (playeraddr.go)
 
 	// Turn-based games only (turns.go); left out in realtime.
 	Mode      string         `json:"mode,omitempty"` // "turns"
@@ -1531,6 +1532,7 @@ func (g *game) snapshot(device string) snapshot {
 		s.Settings = &st
 		s.RfidTags = g.tagViews()
 		s.Presets = g.presetNames()
+		s.PlayerURL = players.url()
 	}
 	beacons := g.beacons.connected()
 	showOwners := g.match != nil && (g.phase == phasePlaying || g.phase == phaseEnded)
