@@ -517,6 +517,7 @@ select {
 }
 
 .hint { margin: 2px 0 8px; color: var(--muted); font-size: 0.8rem; }
+.text-link { color: var(--accent2); font-weight: 600; }
 
 /* Lists: players, tanks, queue */
 
