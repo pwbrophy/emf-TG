@@ -39,6 +39,7 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | `web/display.html` | The spectator display for a big screen (the Unity-era page with its connection swapped for the Go server's) |
 | `web/play.html` | The in-game screen: the Unity-era player page kept as it was (controls, HUD, effects, keyboard/gamepad), with `TGHub` standing in for its SignalR connection. Players are sent here when their game starts; after it, it shows the game over sequence (victory/defeat, then Match Stats with Play Again and Visit Thundergeddon.com). Play Again goes back to the main page, which queues them for the next game |
 | `web/streams.html` | Video test page |
+| `web/qr.html` | A4 sheet to print for the arena: a QR code for the hub's address (`http://192.168.8.1:8088/`), the address and what to do. The code is drawn in the page (no internet needed). `?url=...` for another address, `?wifi=...` for the Wi-Fi name (empty leaves that step out) |
 | `web/test-grid.html` | Test grid: six player pages on one screen (each its own pretend phone), with Connect All / Choose Tanks / New Names / Reload All. `?players=N` for 1-12 |
 | `cmd/loadtest` | Fake tanks and viewers for load tests |
 

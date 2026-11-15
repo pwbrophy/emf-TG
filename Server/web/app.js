@@ -686,7 +686,8 @@ function playersLinkCard() {
   const link = `${location.host}/join`;
   return `<div class="card"><h3>Players' link</h3>
     <p class="hint">Give players <b>http://${esc(link)}</b> (for example on a QR code): it goes straight to Name Entry.
-    The spectator display is at <b>http://${esc(location.host)}/display.html</b>.</p></div>`;
+    The spectator display is at <b>http://${esc(location.host)}/display.html</b>.</p>
+    <p class="hint"><a class="text-link" href="/qr.html?url=${encodeURIComponent('http://' + link)}">Print that link as a QR code</a></p></div>`;
 }
 
 // turnCard (turn-based): whose turn it is, each army's state, and End Turn
