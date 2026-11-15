@@ -22,8 +22,8 @@ package main
 // a low router_rx_mbit_min means the tank is taking airtime from the others,
 // and router_rx_11b_pct says how much of that was at an 802.11b rate.
 //
-// The file lives in the temp folder (RAM on the router, so it is gone after a
-// reboot) and is downloadable at GET /api/video-log. It is rotated at
+// The file lives in the log folder (the router's flash, so it survives a
+// restart; see sessionlog.go) and is downloadable at GET /api/video-log. It is rotated at
 // videoLogMaxBytes, keeping one older file. A server restart (a deploy)
 // carries on the same file; it used to start afresh and lost the game just
 // played.
@@ -35,6 +35,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,7 +48,7 @@ import (
 const videoLogMaxBytes = 16 << 20
 
 // videoLogTime is the time column's format. It carries the date: the log
-// carries on over days (in the router's RAM until it reboots), and rows with
+// carries on over days, and rows with
 // the time of day alone (before 11 November 2026) can't be told apart from
 // the same time on another evening.
 const videoLogTime = "2006-01-02 15:04:05.0"
@@ -57,11 +58,12 @@ const videoLogHeader = "time,kind,tank,rssi_dbm,fps_in,kb_per_frame,tank_fps_sen
 	"viewer,viewer_fps,viewer_dropped_per_s,phone_path,phone_shown_fps,phone_recv_fps,phone_decode_ms,phone_page_fps,device_or_note\n"
 
 type videoLog struct {
-	mu   sync.Mutex
-	path string
-	f    *os.File
-	w    *bufio.Writer
-	size int64
+	mu    sync.Mutex
+	path  string
+	f     *os.File
+	w     *bufio.Writer
+	size  int64
+	space spaceGuard // pauses writing while the disk is nearly full (sessionlog.go)
 }
 
 // openVideoLog carries on the log at path, or starts one if there is none
@@ -71,7 +73,7 @@ func openVideoLog(path string) *videoLog {
 	if path == "" {
 		return nil
 	}
-	vl := &videoLog{path: path}
+	vl := &videoLog{path: path, space: spaceGuard{dir: filepath.Dir(path)}}
 	if err := vl.reopen(); err != nil {
 		log.Printf("[VideoLog] can't write %s: %v", path, err)
 		return nil
@@ -118,7 +120,7 @@ func (vl *videoLog) rows(rows ...[]string) {
 	}
 	vl.mu.Lock()
 	defer vl.mu.Unlock()
-	if vl.f == nil {
+	if vl.f == nil || !vl.space.ok(time.Now()) {
 		return
 	}
 	for _, r := range rows {

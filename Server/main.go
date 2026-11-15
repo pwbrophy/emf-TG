@@ -45,24 +45,39 @@ func main() {
 	settingsFile := flag.String("settings", "settings.json", "where the host's settings are saved")
 	fakeTanks := flag.Int("fake-tanks", 0, "add this many pretend tanks (ids 1..N) for testing without hardware; feed them video with cmd/loadtest")
 	wifiIface := flag.String("wifi-iface", "ra0", "the router's 2.4 GHz Wi-Fi interface, for its view of each tank (iwinfo) and its airtime fairness (iwpriv); empty = off")
-	videoLogFile := flag.String("video-log", filepath.Join(os.TempDir(), "thundergeddon-video.csv"),
-		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); empty = off")
+	videoLogFile := flag.String("video-log", "",
+		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); default: in the log folder (-log-dir); \"off\" = none")
 	sigtestDir := flag.String("sigtest-dir", "", "where finished signal test runs are kept (default: a sigtest folder next to the settings file)")
 	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
-	logDir := flag.String("log-dir", "", "where the hub log and the event log are kept (default: the temp folder, RAM on the router); \"off\" = don't keep them")
+	logDir := flag.String("log-dir", "", "where the hub, event and video logs are kept (default: a logs folder next to the settings file, the router's flash, so they survive a restart); \"off\" = don't keep them")
 	flag.Parse()
 
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 
-	// Session logs (sessionlog.go): set up first, so everything below is in them.
+	// Session logs (sessionlog.go): set up first, so everything below is in
+	// them. They live on flash, next to the settings: in the temp folder (the
+	// router's RAM) a restart or power-off lost a whole day of games
+	// (15 November 2026).
+	if *logDir == "" {
+		*logDir = filepath.Join(filepath.Dir(*settingsFile), "logs")
+	}
 	var serverLog *rotFile
 	var events *eventLog
 	if *logDir != "off" {
+		if err := os.MkdirAll(*logDir, 0o755); err != nil {
+			log.Printf("[Logs] can't create %s: %v", *logDir, err)
+		}
 		serverPath, eventsPath := sessionLogPaths(*logDir)
 		serverLog = startServerLog(serverPath)
 		events = openEventLog(eventsPath)
 		defer serverLog.close()
 		defer events.close()
+	}
+	switch {
+	case *videoLogFile == "off":
+		*videoLogFile = ""
+	case *videoLogFile == "" && *logDir != "off":
+		*videoLogFile = filepath.Join(*logDir, "thundergeddon-video.csv")
 	}
 
 	web, err := fs.Sub(webFiles, "web")
@@ -100,7 +115,7 @@ func main() {
 		*sigtestDir = filepath.Join(filepath.Dir(*settingsFile), "sigtest")
 	}
 	// Runs used to be saved next to the video log (the router's RAM): keep them.
-	g.sigtest = newSignalTest(tanks, rl, *wifiIface, *sigtestDir, filepath.Dir(*videoLogFile))
+	g.sigtest = newSignalTest(tanks, rl, *wifiIface, *sigtestDir, os.TempDir())
 	tanks.fakeNoShots = g.sigtest.active
 	tanks.noPings = g.sigtest.active // the signal test waits for pongs of its own
 	g.sigtest.onDone = func() {
@@ -118,7 +133,7 @@ func main() {
 	go g.ir.run(ctx.Done())
 	go g.runStabiliser(ctx.Done())
 	go tanks.runHealth(ctx)
-	go runHubHealth(ctx, events, os.TempDir(), g.healthCounts)
+	go runHubHealth(ctx, events, *logDir, g.healthCounts)
 	for i := 1; i <= *fakeTanks; i++ {
 		team := "Desert"
 		if i%2 == 0 {

@@ -2,6 +2,7 @@ build/
 
 # Local test runs (soak test hub: settings and logs)
 /soak/
+/logs/
 *.exe
 
 # Shared tank hello token (must match WS_HELLO_TOKEN in firmware secrets.h)

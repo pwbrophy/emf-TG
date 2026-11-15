@@ -14,10 +14,13 @@ package main
 //     30 s each tank's memory and the hub's own memory and processor use.
 //   - The video log (videolog.go), as before.
 //
-// All three live in the temp folder (RAM on the router: gone after a reboot,
-// kept over a hub restart or deploy). Each is capped (see the sizes below) and
-// keeps one older file, so together they can never pass about 46 MB of the
-// router's 240 MB. GET /api/logs.zip hands over the lot in one download
+// All three live in a logs folder next to the settings file: the router's
+// flash (/etc/thundergeddon/logs), so they survive a restart or power-off.
+// (They used to be in the temp folder, the router's RAM, and a restart lost
+// a whole day of games on 15 November 2026.) Each is capped (see the sizes
+// below) and keeps one older file, so together they never pass about 46 MB;
+// and they stop writing while the flash has less than logMinFreeMB left
+// (spaceGuard), so they can never crowd out the settings. GET /api/logs.zip hands over the lot in one download
 // (Server/fetch-logs.ps1 fetches and unpacks it).
 
 import (
@@ -37,6 +40,47 @@ import (
 	"time"
 )
 
+// Logs stop writing while the disk they're on has less than this left, and
+// carry on when there's room again: on the router that disk is the flash,
+// which also holds the settings and the signal test runs.
+const logMinFreeMB = 40
+
+// diskFree reports the room left on the disk holding a path (sysstats_*.go);
+// a variable so tests can pretend the disk is full.
+var diskFree = diskFreeMB
+
+// spaceGuard says whether a log may write, checking the disk's free space at
+// most every 30 s. Not safe for concurrent use: each log calls it under its
+// own lock.
+type spaceGuard struct {
+	dir   string
+	last  time.Time
+	full  bool
+	notes int // times it has said so (on stderr: it can't use the hub log, which may be the one stopped)
+}
+
+func (sg *spaceGuard) ok(now time.Time) bool {
+	if sg == nil || sg.dir == "" {
+		return true
+	}
+	if now.Sub(sg.last) < 30*time.Second && !sg.last.IsZero() {
+		return !sg.full
+	}
+	sg.last = now
+	free, known := diskFree(sg.dir)
+	full := known && free < logMinFreeMB
+	if full != sg.full && sg.notes < 20 {
+		sg.notes++
+		if full {
+			fmt.Fprintf(os.Stderr, "[Logs] only %.0f MB left on the disk holding %s: logging paused until there is room\n", free, sg.dir)
+		} else {
+			fmt.Fprintf(os.Stderr, "[Logs] room on the disk holding %s again (%.0f MB): logging carries on\n", sg.dir, free)
+		}
+	}
+	sg.full = full
+	return !full
+}
+
 const (
 	serverLogMaxBytes = 3 << 20 // ×2 with the older file
 	eventLogMaxBytes  = 4 << 20 // ×2 with the older file
@@ -46,11 +90,12 @@ const (
 // rotFile is a file that is appended to and started afresh at maxBytes,
 // keeping one older file (path + ".1"). Safe on a nil *rotFile (logging off).
 type rotFile struct {
-	mu   sync.Mutex
-	path string
-	max  int64
-	f    *os.File
-	size int64
+	mu    sync.Mutex
+	path  string
+	max   int64
+	f     *os.File
+	size  int64
+	space spaceGuard
 }
 
 // openRotFile carries on the file at path. Returns nil if it can't be written
@@ -64,7 +109,7 @@ func openRotFile(path string, maxBytes int64) *rotFile {
 		log.Printf("[Logs] can't write %s: %v", path, err)
 		return nil
 	}
-	r := &rotFile{path: path, max: maxBytes, f: f}
+	r := &rotFile{path: path, max: maxBytes, f: f, space: spaceGuard{dir: filepath.Dir(path)}}
 	if st, err := f.Stat(); err == nil {
 		r.size = st.Size()
 	}
@@ -78,7 +123,7 @@ func (r *rotFile) Write(p []byte) (int, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.f == nil {
+	if r.f == nil || !r.space.ok(time.Now()) {
 		return len(p), nil
 	}
 	if r.size > 0 && r.size+int64(len(p)) > r.max {
@@ -220,9 +265,10 @@ func shortDevice(d string) string {
 // ── The hub's own health ─────────────────────────────────────────────────────
 
 // runHubHealth writes a "hub" event every 30 s: the hub's memory and
-// processor use and how much room the temp folder has left. A slow leak or a
-// filling disk over a day of games shows up here.
-func runHubHealth(ctx context.Context, events *eventLog, tmpDir string, extra func() map[string]any) {
+// processor use and how much room the temp folder (the router's RAM) and the
+// log folder (its flash) have left. A slow leak or a filling disk over a day
+// of games shows up here.
+func runHubHealth(ctx context.Context, events *eventLog, logDir string, extra func() map[string]any) {
 	if events == nil {
 		return
 	}
@@ -246,8 +292,11 @@ func runHubHealth(ctx context.Context, events *eventLog, tmpDir string, extra fu
 			f["rss_mb"], f["mem_avail_mb"] = st.RSSMB, st.MemAvailMB
 			f["cpu_pct"], f["softirq_pct"], f["hub_cpu_pct"], f["load1"] = st.CPUBusyPct, st.CPUSoftirqPct, st.ProcCPUPct, st.Load1
 		}
-		if free, ok := diskFreeMB(tmpDir); ok {
+		if free, ok := diskFreeMB(os.TempDir()); ok {
 			f["tmp_free_mb"] = free
+		}
+		if free, ok := diskFreeMB(logDir); ok {
+			f["log_disk_free_mb"] = free
 		}
 		if extra != nil {
 			for k, v := range extra() {
@@ -325,11 +374,7 @@ func (b *logBundle) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sessionLogPaths: where the hub and event logs go, next to the video log
-// (the temp folder), or dir if given.
+// sessionLogPaths: where the hub and event logs go in the log folder.
 func sessionLogPaths(dir string) (server, events string) {
-	if dir == "" {
-		dir = os.TempDir()
-	}
 	return filepath.Join(dir, "thundergeddon-server.log"), filepath.Join(dir, "thundergeddon-events.jsonl")
 }

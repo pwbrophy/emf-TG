@@ -165,11 +165,16 @@ ssh root@192.168.8.1 "/etc/init.d/thundergeddon stop"          # also: start, re
 ## Logs: looking back on a session of games
 
 The router's own log holds only 64 KB (a few minutes of a game), so the hub
-keeps three logs of its own in the temp folder (`/tmp` on the router: RAM, so
-gone after the router reboots, but kept over a hub restart or deploy). Each is
-capped and keeps one older file (`.1`), so all three together stay under
-46 MB of the router's 240 MB: about a day of games (8 hours of ten tanks
-streaming, lobbies included) before the oldest video figures go.
+keeps three logs of its own in a `logs` folder next to its settings: on the
+router that is its flash, `/etc/thundergeddon/logs`, so they survive a hub
+restart, a router restart and a power-off. (Until 15 Nov 2026 they were in the
+router's RAM, and a restart lost a whole day of games.) Each is capped and
+keeps one older file (`.1`), so all three together stay under 46 MB of the
+flash's 145 MB free: about a day of games (8 hours of ten tanks streaming,
+lobbies included) before the oldest video figures go. While the flash has less
+than 40 MB left they stop writing (the settings and signal test runs live there
+too) and carry on when there is room again. Running on a PC, the folder is
+`Server\logs`.
 
 | File | What | Cap | Alone |
 |---|---|---|---|

@@ -331,3 +331,39 @@ func TestVideoFreezeEvent(t *testing.T) {
 		t.Fatalf("freeze event: %v", got[0])
 	}
 }
+
+// Logs stop writing while their disk is nearly full (the router's flash also
+// holds the settings) and carry on once there is room again.
+func TestLogsPauseWhenTheDiskIsFull(t *testing.T) {
+	free := 500.0
+	old := diskFree
+	diskFree = func(string) (float64, bool) { return free, true }
+	defer func() { diskFree = old }()
+
+	dir := t.TempDir()
+	r := openRotFile(filepath.Join(dir, "x.log"), 1<<20)
+	vl := openVideoLog(filepath.Join(dir, "video.csv"))
+	defer vl.close()
+	now := time.Now()
+	write := func(s string) {
+		_, _ = r.Write([]byte(s + "\n"))
+		vl.rows([]string{s})
+	}
+	write("one")
+	free = 10 // nearly full
+	r.space.last, vl.space.last = now.Add(-time.Minute), now.Add(-time.Minute)
+	write("two")
+	free = 500
+	r.space.last, vl.space.last = now.Add(-time.Minute), now.Add(-time.Minute)
+	write("three")
+	r.close()
+	vl.flush()
+	got, _ := os.ReadFile(filepath.Join(dir, "x.log"))
+	if string(got) != "one\nthree\n" {
+		t.Errorf("log while the disk filled and emptied: %q", got)
+	}
+	csv, _ := os.ReadFile(filepath.Join(dir, "video.csv"))
+	if !strings.Contains(string(csv), "one") || strings.Contains(string(csv), "two") || !strings.Contains(string(csv), "three") {
+		t.Errorf("video log while the disk filled and emptied: %q", csv)
+	}
+}
