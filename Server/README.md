@@ -39,12 +39,20 @@ editing them you rebuild (`run.ps1` / `deploy.ps1` do that).
 | `web/display.html` | The spectator display for a big screen (the Unity-era page with its connection swapped for the Go server's) |
 | `web/play.html` | The in-game screen: the Unity-era player page kept as it was (controls, HUD, effects, keyboard/gamepad), with `TGHub` standing in for its SignalR connection. Players are sent here when their game starts; after it, it shows the game over sequence (victory/defeat, then Match Stats with Play Again and Visit Thundergeddon.com). Play Again goes back to the main page, which queues them for the next game |
 | `web/streams.html` | Video test page |
-| `web/qr.html` | A4 sheet to print for the arena: a QR code for the hub's address (`http://192.168.8.1:8088/`), the address and what to do. The code is drawn in the page (no internet needed). `?url=...` for another address, `?wifi=...` for the Wi-Fi name (empty leaves that step out) |
+| `web/qr.html` | A4 sheet to print for the arena: a QR code for the hub's players' address (`http://192.168.9.1:8088/` on the router, see below; else `http://192.168.8.1:8088/`), the address and what to do. The code is drawn in the page (no internet needed). `?url=...` for another address, `?wifi=...` for the Wi-Fi name (empty leaves that step out) |
 | `web/test-grid.html` | Test grid: six player pages on one screen (each its own pretend phone), with Connect All / Choose Tanks / New Names / Reload All. `?players=N` for 1-12 |
 | `cmd/loadtest` | Fake tanks and viewers for load tests |
 
 Players' link: `http://<hub>:8088/join` goes straight to Name Entry (no
 title or menu), e.g. from a QR code at a festival.
+
+On the router the hub also answers on a second address, `192.168.9.1`
+(`-player-addr`, `playeraddr.go`), and the players' link and QR sheet use it:
+`http://192.168.9.1:8088/join`. Android 17 blocks browsers from the phone's own
+Wi-Fi range (192.168.8.x) until the player allows that browser "Nearby
+devices"; an address outside that range, reached through the hub as the
+phone's gateway, isn't blocked. The hub puts it on `br-lan` as a /32 and checks
+it every minute. Tanks and the router's own pages stay on 192.168.8.1.
 
 In the Client Lobby players choose an alliance and are given one of its free
 tanks (all tanks are the same). Each tank with a player glows a colour of

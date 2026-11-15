@@ -240,9 +240,12 @@
 <script>
 'use strict';
 
-// What the sheet shows unless the link says otherwise: the hub's own address
-// and Wi-Fi. A phone has to be on that Wi-Fi for the address to work.
-const DEFAULT_URL  = 'http://192.168.8.1:8088/';
+// What the sheet shows unless the link says otherwise: the hub's players'
+// address (asked from the hub, /api/info's playerUrl; Server/playeraddr.go:
+// Android 17 phones can't open 192.168.8.1 without allowing Nearby devices),
+// else its own address, and its Wi-Fi. A phone has to be on that Wi-Fi for the
+// address to work.
+let DEFAULT_URL    = 'http://192.168.8.1:8088/';
 const DEFAULT_WIFI = 'Thundergeddon-5GHz';
 
 // ── QR code (ISO/IEC 18004): bytes, error correction level M ────────────
@@ -546,6 +549,13 @@ $('in-url').addEventListener('input', draw);
 $('in-wifi').addEventListener('input', draw);
 $('tools').addEventListener('submit', (e) => { e.preventDefault(); window.print(); });
 draw();
+// The hub's players' address, if it has one, becomes the default.
+fetch('/api/info', { cache: 'no-store' }).then(r => r.json()).then(info => {
+  if (!info.playerUrl || info.playerUrl === DEFAULT_URL) return;
+  const wasDefault = $('in-url').value.trim() === DEFAULT_URL;
+  DEFAULT_URL = info.playerUrl;
+  if (wasDefault && !params.has('url')) { $('in-url').value = DEFAULT_URL; draw(); }
+}).catch(() => {});
 </script>
 </body>
 </html>

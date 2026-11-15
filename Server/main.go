@@ -49,6 +49,8 @@ func main() {
 		"CSV log of every tank's video and Wi-Fi signal, for chasing choppy feeds (download: /api/video-log); default: in the log folder (-log-dir); \"off\" = none")
 	sigtestDir := flag.String("sigtest-dir", "", "where finished signal test runs are kept (default: a sigtest folder next to the settings file)")
 	webDir := flag.String("web-dir", "", "serve the pages from this folder instead of the built-in copy (for editing them without rebuilding)")
+	playerAddr := flag.String("player-addr", "", "a second address for the hub, outside the LAN's range, for players' pages (Android 17 phones can't reach the LAN's own range without the Nearby devices permission, see playeraddr.go); the router's init script sets 192.168.9.1; empty = none")
+	lanIface := flag.String("lan-iface", "br-lan", "the router's LAN bridge, where -player-addr goes")
 	logDir := flag.String("log-dir", "", "where the hub, event and video logs are kept (default: a logs folder next to the settings file, the router's flash, so they survive a restart); \"off\" = don't keep them")
 	flag.Parse()
 
@@ -93,6 +95,7 @@ func main() {
 		log.Fatalf("bad -addr %q: %v", *addr, err)
 	}
 	httpPort, _ := strconv.Atoi(portStr)
+	players = startPlayerAddr(*playerAddr, *lanIface, httpPort)
 
 	// procd (the router's service manager) stops services with SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -238,6 +241,9 @@ func infoNow() map[string]any {
 		"arch":     runtime.GOARCH,
 		"hostname": host,
 		"uptimeS":  int(time.Since(startedAt).Seconds()),
+		// The players' link (playeraddr.go), "" if the hub has no players'
+		// address: then players use the address they reached the hub on.
+		"playerUrl": players.url(),
 		// The hub's clock, which every log line uses: it can be wrong when
 		// the router has no internet to set it from.
 		"time": time.Now().Format("2006-01-02T15:04:05.000"),

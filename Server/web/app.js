@@ -688,12 +688,18 @@ function hostTabs(ph) {
   }
 }
 
+// The players' link uses the hub's players' address when it has one
+// (state.playerUrl, Server/playeraddr.go: outside the Wi-Fi's own range, which
+// Android 17 phones can't reach without allowing Nearby devices).
 function playersLinkCard() {
-  const link = `${location.host}/join`;
+  const base = state.playerUrl ? state.playerUrl.replace(/\/$/, '') : 'http://' + location.host;
+  const link = base + '/join';
+  const why = state.playerUrl
+    ? `<p class="hint">It uses the hub&rsquo;s second address: Android 17 phones can&rsquo;t open ${esc(location.host)} unless their browser is allowed &ldquo;Nearby devices&rdquo;.</p>` : '';
   return `<div class="card"><h3>Players' link</h3>
-    <p class="hint">Give players <b>http://${esc(link)}</b> (for example on a QR code): it goes straight to Name Entry.
-    The spectator display is at <b>http://${esc(location.host)}/display.html</b>.</p>
-    <p class="hint"><a class="text-link" href="/qr.html?url=${encodeURIComponent('http://' + link)}">Print that link as a QR code</a></p></div>`;
+    <p class="hint">Give players <b>${esc(link)}</b> (for example on a QR code): it goes straight to Name Entry.
+    The spectator display is at <b>http://${esc(location.host)}/display.html</b>.</p>${why}
+    <p class="hint"><a class="text-link" href="/qr.html?url=${encodeURIComponent(link)}">Print that link as a QR code</a></p></div>`;
 }
 
 // turnCard (turn-based): whose turn it is, each army's state, and End Turn
