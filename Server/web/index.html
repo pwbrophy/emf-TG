@@ -199,33 +199,55 @@
             <text class="tut-squad jungle" x="248" y="20">JUNGLE SQUAD</text>
             <g class="t1-side t1-desert">
               <ellipse cx="46" cy="99" rx="42" ry="6" fill="url(#tut-shadow)"/>
-              <image class="t1-tank" href="/tutorial/tank-desert.webp" x="4" y="36" width="84" height="64"/>
+              <g class="t1-tank"><g transform="translate(4 36) scale(0.175)"><image href="/tutorial/tank-desert.webp" width="480" height="365"/></g></g>
               <ellipse cx="98" cy="138" rx="42" ry="6" fill="url(#tut-shadow)"/>
-              <image class="t1-tank" href="/tutorial/tank-desert.webp" x="56" y="75" width="84" height="64"/>
+              <g class="t1-tank"><g transform="translate(56 75) scale(0.175)"><image href="/tutorial/tank-desert.webp" width="480" height="365"/></g></g>
               <ellipse cx="46" cy="177" rx="42" ry="6" fill="url(#tut-shadow)"/>
-              <image class="t1-tank" href="/tutorial/tank-desert.webp" x="4" y="114" width="84" height="64"/>
+              <g class="t1-tank"><g transform="translate(4 114) scale(0.175)"><image href="/tutorial/tank-desert.webp" width="480" height="365"/></g></g>
             </g>
             <g class="t1-side t1-jungle">
               <ellipse cx="274" cy="99" rx="42" ry="6" fill="url(#tut-shadow)"/>
-              <image class="t1-tank" href="/tutorial/tank-jungle.webp" x="232" y="43" width="84" height="57"/>
+              <g class="t1-tank"><g transform="translate(232 43) scale(0.175)"><image href="/tutorial/tank-jungle.webp" width="480" height="326"/></g></g>
               <ellipse cx="222" cy="138" rx="42" ry="6" fill="url(#tut-shadow)"/>
-              <image class="t1-tank" href="/tutorial/tank-jungle.webp" x="180" y="82" width="84" height="57"/>
+              <g class="t1-tank"><g transform="translate(180 82) scale(0.175)"><image href="/tutorial/tank-jungle.webp" width="480" height="326"/></g></g>
               <ellipse cx="274" cy="177" rx="42" ry="6" fill="url(#tut-shadow)"/>
-              <image class="t1-tank" href="/tutorial/tank-jungle.webp" x="232" y="121" width="84" height="57"/>
+              <g class="t1-tank"><g transform="translate(232 121) scale(0.175)"><image href="/tutorial/tank-jungle.webp" width="480" height="326"/></g></g>
             </g>
             <text class="t1-vs" x="160" y="118">VS</text>
           </svg>
         </div>
       </section>
 
-      <!-- 2. How to win -->
+      <!-- 2. Bases and capture points: what they look like -->
+      <section class="tut-page" aria-label="Bases and capture points">
+        <h2>Bases and capture points</h2>
+        <div class="tut-stage">
+          <svg class="tut-svg" viewBox="0 0 320 124" aria-hidden="true">
+            <g class="tb-pop tb-d0"><ellipse cx="32" cy="80" rx="30" ry="4.5" fill="url(#tut-shadow)"/><image href="/tutorial/base-desert.webp" x="5" y="44.75" width="54" height="35.25"/></g>
+            <g class="tb-pop tb-d1"><ellipse cx="96" cy="80" rx="30" ry="4.5" fill="url(#tut-shadow)"/><image href="/tutorial/point-neutral.webp" x="69" y="47" width="54" height="33"/></g>
+            <g class="tb-pop tb-d2"><ellipse cx="160" cy="80" rx="30" ry="4.5" fill="url(#tut-shadow)"/><image href="/tutorial/point-neutral.webp" x="133" y="47" width="54" height="33"/></g>
+            <g class="tb-pop tb-d3"><ellipse cx="224" cy="80" rx="30" ry="4.5" fill="url(#tut-shadow)"/><image href="/tutorial/point-neutral.webp" x="197" y="47" width="54" height="33"/></g>
+            <g class="tb-pop tb-d4"><ellipse cx="288" cy="80" rx="30" ry="4.5" fill="url(#tut-shadow)"/><image href="/tutorial/base-jungle.webp" x="261" y="40.55" width="54" height="39.45"/></g>
+            <g class="tb-labels">
+              <text class="tb-label desert" x="32" y="102">DESERT</text>
+              <text class="tb-label desert" x="32" y="115">BASE</text>
+              <path d="M70 90v4h180v-4" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="1.2"/>
+              <text class="tb-label" x="160" y="108">CAPTURE POINTS</text>
+              <text class="tb-label jungle" x="288" y="102">JUNGLE</text>
+              <text class="tb-label jungle" x="288" y="115">BASE</text>
+            </g>
+          </svg>
+        </div>
+      </section>
+
+      <!-- 3. How to win -->
       <section class="tut-page" aria-label="How to win">
         <h2>How to win</h2>
         <div class="tut-stage">
           <svg class="tut-svg" viewBox="0 0 320 175" aria-hidden="true">
             <g class="t2-target">
               <ellipse cx="75" cy="112" rx="52" ry="7" fill="url(#tut-shadow)"/>
-              <image class="t2-tank" href="/tutorial/tank-jungle.webp" x="20" y="38" width="110" height="75"/>
+              <g class="t2-tank"><g transform="translate(20 38) scale(0.229167)"><image href="/tutorial/tank-jungle.webp" width="480" height="326"/><g class="tut-leds" data-kind="jungle" data-led="hit"/></g></g>
               <circle class="t2-boom" cx="72" cy="74" r="34" fill="url(#tut-glow-red)"/>
               <g class="t2-cross" stroke="#ff3b30" stroke-width="2.4" fill="none" stroke-linecap="round">
                 <circle cx="72" cy="74" r="20"/>
@@ -250,7 +272,7 @@
         </div>
       </section>
 
-      <!-- 3. Controls: the arrows step through the parts of the game screen -->
+      <!-- 4. Controls: the arrows step through the parts of the game screen -->
       <section class="tut-page tut-controls" aria-label="Your controls">
         <h2>Your controls</h2>
         <div class="tut-stage">
@@ -265,8 +287,12 @@
                 <!-- The camera view: an enemy tank ahead -->
                 <rect width="216" height="100" fill="url(#tut-video)"/>
                 <g class="t3-view">
+                  <ellipse cx="-108" cy="55" rx="16" ry="2.5" fill="url(#tut-shadow)"/>
+                  <image href="/tutorial/tank-jungle.webp" x="-124" y="33" width="32" height="22"/>
                   <ellipse cx="108" cy="55" rx="16" ry="2.5" fill="url(#tut-shadow)"/>
                   <image href="/tutorial/tank-jungle.webp" x="92" y="33" width="32" height="22"/>
+                  <ellipse cx="324" cy="55" rx="16" ry="2.5" fill="url(#tut-shadow)"/>
+                  <image href="/tutorial/tank-jungle.webp" x="308" y="33" width="32" height="22"/>
                 </g>
                 <circle cx="108" cy="50" r="6" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width=".6"/>
                 <circle cx="108" cy="50" r=".9" fill="#fff" fill-opacity=".7"/>
@@ -338,23 +364,24 @@
         </div>
       </section>
 
-      <!-- 4. Capture points: all the way over -->
+      <!-- 5. Capture points: the RFID reader is at the back, so the tank has
+           to drive right over the point and past it -->
       <section class="tut-page" aria-label="Capturing a point">
         <h2>Capture points</h2>
         <div class="tut-stage">
-          <svg class="tut-svg" viewBox="0 0 320 165" aria-hidden="true">
-            <ellipse class="t4-glow" cx="160" cy="136" rx="95" ry="22" fill="url(#tut-glow-desert)"/>
-            <image href="/tutorial/point-neutral.webp" x="142.9" y="121" width="34.3" height="21"/>
-            <ellipse class="t4-tag" cx="160" cy="131" rx="25" ry="10" fill="none" stroke="#fff" stroke-width="1.4" stroke-dasharray="3 2.4"/>
+          <svg class="tut-svg" viewBox="0 -22 320 187" aria-hidden="true">
+            <ellipse class="t4-glow" cx="110" cy="136" rx="80" ry="20" fill="url(#tut-glow-desert)"/>
+            <image href="/tutorial/point-neutral.webp" x="92.9" y="121" width="34.3" height="21"/>
+            <ellipse class="t4-tag" cx="110" cy="131" rx="25" ry="10" fill="none" stroke="#fff" stroke-width="1.4" stroke-dasharray="3 2.4"/>
             <g class="t4-tank">
               <ellipse cx="67" cy="139" rx="64" ry="6" fill="url(#tut-shadow)"/>
-              <image href="/tutorial/tank-desert.webp" x="0" y="26" width="150" height="114"/>
+              <g transform="translate(0 26) scale(0.3125)"><image href="/tutorial/tank-desert.webp" width="480" height="365"/><g class="tut-leds" data-kind="desert" data-led="capture"/></g>
             </g>
-            <g class="tut-bubble t4-no" transform="translate(110 12)">
+            <g class="tut-bubble t4-no" transform="translate(110 -5)">
               <rect x="-50" y="-13" width="100" height="22" rx="11" fill="#ff4d4d"/>
               <path d="M-40 -6l7 7M-33 -6l-7 7" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><text x="6" y="2.5" font-size="10" font-weight="900" fill="#fff" text-anchor="middle">NOT YET!</text>
             </g>
-            <g class="tut-bubble t4-yes" transform="translate(160 12)">
+            <g class="tut-bubble t4-yes" transform="translate(191 -5)">
               <rect x="-54" y="-13" width="108" height="22" rx="11" fill="#3ccf6e"/>
               <path d="M-44 -4l3.5 4 6.5 -8" fill="none" stroke="#08240f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><text x="7" y="2.5" font-size="10" font-weight="900" fill="#08240f" text-anchor="middle">CAPTURED!</text>
             </g>
@@ -363,13 +390,13 @@
         <p class="tut-text">Drive <b>all the way over</b> the point</p>
       </section>
 
-      <!-- 5. Repair / respawn at your base -->
+      <!-- 6. Repair / respawn at your base: straight over it -->
       <section class="tut-page" aria-label="Damaged or destroyed">
         <h2>Damaged or destroyed?</h2>
         <div class="tut-stage">
-          <svg class="tut-svg" viewBox="0 0 320 170" aria-hidden="true">
-            <ellipse class="t5-glow" cx="210" cy="142" rx="95" ry="22" fill="url(#tut-glow-desert)"/>
-            <image href="/tutorial/base-desert.webp" x="192.9" y="127" width="34.3" height="22.4"/>
+          <svg class="tut-svg" viewBox="0 -16 320 186" aria-hidden="true">
+            <ellipse class="t5-glow" cx="160" cy="142" rx="80" ry="20" fill="url(#tut-glow-desert)"/>
+            <image href="/tutorial/base-desert.webp" x="142.9" y="127" width="34.3" height="22.4"/>
             <g class="t5-tank">
               <g class="t5-smoke" fill="#9a9aa8">
                 <circle cx="34" cy="60" r="8"/>
@@ -377,14 +404,9 @@
                 <circle cx="26" cy="54" r="7"/>
               </g>
               <ellipse cx="67" cy="145" rx="64" ry="6" fill="url(#tut-shadow)"/>
-              <image href="/tutorial/tank-desert.webp" x="0" y="32" width="150" height="114"/>
-              <g transform="translate(22 22)">
-                <rect width="90" height="9" rx="4.5" fill="#0a0a10" fill-opacity=".75"/>
-                <rect class="t5-hp" width="90" height="9" rx="4.5"/>
-                <rect width="90" height="9" rx="4.5" fill="none" stroke="#fff" stroke-width=".8"/>
-              </g>
+              <g transform="translate(0 32) scale(0.3125)"><image href="/tutorial/tank-desert.webp" width="480" height="365"/><g class="tut-leds" data-kind="desert" data-led="repair"/></g>
             </g>
-            <g class="tut-bubble t5-yes" transform="translate(210 8)">
+            <g class="tut-bubble t5-yes" transform="translate(243 -1)">
               <rect x="-50" y="-13" width="100" height="22" rx="11" fill="#3ccf6e"/>
               <path d="M-40 -4l3.5 4 6.5 -8" fill="none" stroke="#08240f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><text x="7" y="2.5" font-size="10" font-weight="900" fill="#08240f" text-anchor="middle">REPAIRED!</text>
             </g>
