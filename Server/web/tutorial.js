@@ -244,13 +244,14 @@
   const SCRIPTS = {
     // How to win: hit (red, 300 ms) when the explosion shows (58% of 2.6 s).
     hit: { loop: 2600, mover: '.t2-tank', at: (t) => (t < 1508 ? hpBar(4, t) : t < 1808 ? all(RED) : hpBar(3, t)) },
-    // Capturing: full HP; captures when fully past the point (52% of 9 s).
-    capture: { loop: 9000, mover: '.t4-tank', at: (t) => (t >= 4680 && t < 5330 ? capture(t - 4680) : hpBar(6, t)) },
+    // Capturing: full HP; captures as the back of the tank (the RFID reader)
+    // passes over the point's tag (48.3% of 9 s).
+    capture: { loop: 9000, mover: '.t4-tank', at: (t) => (t >= 4350 && t < 5000 ? capture(t - 4350) : hpBar(6, t)) },
     // Repair: one LED left (pulsing) until the reader at the back passes the
-    // base's tag (41.9% of 9 s), then the repair and 5 s of flicker.
+    // base's tag (38.2% of 9 s), then the repair and 5 s of flicker.
     // Its smoke stops when the repair starts (see frame()).
-    repair: { loop: 9000, mover: '.t5-tank', smoke: '.t5-smoke', repairAt: 3770, at: (t) => {
-      const dt = t - 3770;
+    repair: { loop: 9000, mover: '.t5-tank', smoke: '.t5-smoke', repairAt: 3440, at: (t) => {
+      const dt = t - 3440;
       if (dt < 0) return hpBar(1, t);
       if (dt < 1200) return heal(dt);
       return dt < 6200 ? invulnerable(dt - 1200, 6) : hpBar(6, t);
