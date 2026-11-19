@@ -219,12 +219,13 @@
     if (lit <= 1) return ['', '', '', '', '', Math.floor(t / 500) % 2 ? '' : BLUE];
     return [0, 1, 2, 3, 4, 5].map((i) => (i >= 6 - lit ? BLUE : ''));
   }
-  // Base repair: green fills back to front (750 ms), then white flashes
-  // (90 ms each), 1200 ms in all.
+  // Base repair: green fills up (750 ms), then white flashes (90 ms each),
+  // 1200 ms in all. The real strip fills back to front; here it fills from
+  // the bar's left, like the HP it's giving back.
   function heal(dt) {
     if (dt < 750) {
       const n = Math.floor(dt * 6 / 750);
-      return [0, 1, 2, 3, 4, 5].map((i) => (i < n ? GREEN : ''));
+      return [0, 1, 2, 3, 4, 5].map((i) => (i >= 6 - n ? GREEN : ''));
     }
     return (dt - 750) % 90 < 45 ? all(WHITE) : all('');
   }
