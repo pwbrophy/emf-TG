@@ -183,8 +183,14 @@ function currentScreen() {
 
 let shownScreen = '';
 
+let tutorialAfterJoin = false;
+
 function render() {
   const screen = currentScreen();
+  if (tutorialAfterJoin && state && (state.me.status === 'queued' || state.me.status === 'lobby')) {
+    tutorialAfterJoin = false;
+    openTutorial();
+  }
   if (screen === 'play') {
     goPlay(); // the game runs on its own page
     return;
@@ -317,6 +323,10 @@ $('form-join').addEventListener('submit', (e) => {
   if (!name) return;
   store('tg_player_name', name);
   send({ t: 'join', name, password: $('join-password').value });
+  // A new player sees the quickstart tutorial once, when the hub has let
+  // them in (render): not over a wrong-password error. Not in test tabs
+  // (?device=, e.g. the test grid).
+  tutorialAfterJoin = !tutorialSeen() && !new URLSearchParams(location.search).get('device');
 });
 
 // ── Wait for game / Queue ────────────────────────────────────────────────────
@@ -351,7 +361,8 @@ function renderWait() {
       ${pos}
       <div class="title" style="margin-top:14px">${esc(title)}</div>
       <div class="detail">${esc(detail)}</div>
-    </div>`);
+    </div>
+    <button class="link-btn" type="button" data-action="open-howto">How to play</button>`);
   $('wait-mid').innerHTML = `Playing as <b>${esc(me.name)}</b>`;
 }
 
@@ -1425,7 +1436,7 @@ document.addEventListener('click', (e) => {
       }
       break;
     case 'open-settings': openSheet('sheet-settings'); loadInfo(); break;
-    case 'open-howto': openSheet('sheet-howto'); break;
+    case 'open-howto': openTutorial(); break;
     case 'close-sheet': closeSheets(); break;
   }
 });
