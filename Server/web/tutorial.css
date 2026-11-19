@@ -120,23 +120,6 @@
 .tut-text .c-desert { color: var(--desert); }
 .tut-text .c-jungle { color: var(--jungle); }
 
-/* Phones on their side: picture on the left, words on the right. */
-@media (orientation: landscape) and (max-height: 520px) {
-  .tut-page {
-    display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-    grid-template-rows: auto 1fr;
-    grid-template-areas: "stage title" "stage text";
-    column-gap: 20px;
-    row-gap: 8px;
-    align-items: start;
-  }
-  .tut-page h2 { grid-area: title; align-self: end; text-align: left; font-size: 1.5rem; }
-  .tut-stage { grid-area: stage; height: 100%; }
-  .tut-stage .tut-svg { height: 100%; max-height: none; }
-  .tut-text { grid-area: text; text-align: left; font-size: 1rem; min-height: 0; }
-}
-
 /* ── Bottom: back arrow, dots, next arrow, in the middle ── */
 .tut-nav {
   flex: none;
@@ -308,4 +291,21 @@
 
 @media (prefers-reduced-motion: reduce) {
   .tut-page { transition: opacity 0.2s ease, visibility 0s linear 0.2s; transform: none !important; }
+}
+
+/* Phones on their side: title on top, the picture filling the height
+   that's left, everything a bit tighter. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .tut-head { padding-top: max(6px, env(safe-area-inset-top)); }
+  .tut-skip { min-height: 34px; padding: 5px 12px; }
+  .tut-page { gap: 4px; padding-top: 0; padding-bottom: 0; }
+  .tut-page h2 { margin: 0; font-size: 1.25rem; }
+  .tut-stage { flex: 1 1 0; height: auto; }
+  .tut-stage .tut-svg { height: 100%; max-height: none; }
+  .tut-text { font-size: 1rem; line-height: 1.3; }
+  .t3-caption { display: flex; align-items: baseline; justify-content: center; gap: 12px; }
+  .t3-title { font-size: 1.1em; margin: 0; }
+  .tut-nav { padding-top: 4px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .tut-arrow { width: 48px; height: 48px; }
+  .tut-arrow svg { width: 24px; height: 24px; }
 }
