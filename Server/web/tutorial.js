@@ -158,11 +158,11 @@
 
   // ── The tanks' LEDs ──────────────────────────────────────────────────────
   // Shown as a bar above each tank, coloured and flashing as the tank's
-  // strip of 6 LEDs does (LedController.h): the bar is six parts, 0 at the
-  // back to 5 at the front, so a fill "from the front" fills from the end the
-  // tank faces. Places are in the tank picture's own pixels (480 wide); the
-  // jungle tank faces the other way.
-  const BAR = { desert: { x: 84, back: 'left' }, jungle: { x: 118, back: 'right' } }; // centred over the hull
+  // strip of 6 LEDs does (LedController.h). The bar is six parts with LED 5
+  // (the front, where the HP bar is lit from) on the left, like the phone's
+  // HP bar, whichever way the tank faces. Places are in the tank picture's
+  // own pixels (480 wide).
+  const BAR = { desert: { x: 84 }, jungle: { x: 118 } }; // centred over the hull
   const BAR_W = 260;
   const BAR_H = 34;
   const BAR_Y = -52;
@@ -191,7 +191,7 @@
     g.appendChild(parts);
     const w = BAR_W / 6;
     const leds = [0, 1, 2, 3, 4, 5].map((i) => {
-      const slot = bar.back === 'left' ? i : 5 - i;
+      const slot = 5 - i;
       // a hair wider than its share, so no seams show between the parts
       const core = svgEl('rect', { x: bar.x + slot * w - 0.5, y: BAR_Y, width: w + 1, height: BAR_H, fill: OFF, 'fill-opacity': 0.8 });
       parts.appendChild(core);
