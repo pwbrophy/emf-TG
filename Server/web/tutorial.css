@@ -275,7 +275,6 @@
 .tut-page.play .t5-tank { animation: t5-drive 9s linear infinite !important; }
 .tut-page.play .t5-glow { animation: t5-glow 9s linear infinite !important; }
 .tut-page.play .t5-yes { animation: t5-yes 9s linear infinite !important; }
-.tut-page.play .t5-smoke { animation: t5-smoke-on 9s linear infinite !important; }
 .tut-page.play .t5-smoke circle { animation: t5-puff 1.2s ease-out infinite !important; }
 .tut-page.play .t5-smoke circle:nth-child(2) { animation-delay: -0.4s !important; }
 .tut-page.play .t5-smoke circle:nth-child(3) { animation-delay: -0.8s !important; }
@@ -286,7 +285,6 @@
 }
 @keyframes t5-glow { 0%, 41% { opacity: 0; } 45%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
 @keyframes t5-yes { 0%, 54% { opacity: 0; } 57%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
-@keyframes t5-smoke-on { 0%, 42% { opacity: 1; } 48%, 100% { opacity: 0; } }
 @keyframes t5-puff { from { transform: translateY(4px) scale(0.5); opacity: 0.9; } to { transform: translateY(-22px) scale(1.6); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
