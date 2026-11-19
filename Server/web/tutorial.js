@@ -1,13 +1,16 @@
 'use strict';
 
 // Quickstart tutorial for new players (the #tutorial overlay in index.html,
-// styled in tutorial.css). Five pages: the two squads, how to win, the
-// controls, capture points, repairing at your base. The arrows at the bottom
-// go forwards and backwards; on the controls page they first step through
+// styled in tutorial.css). Six pages: the two squads, the bases and capture
+// points, how to win, the controls, capturing a point, repairing at your
+// base. The arrows at the bottom go forwards and backwards; on the controls page they first step through
 // the parts of the game screen, one pointer at a time.
 //
 // app.js opens it once after a player first joins (remembered per browser as
 // tg_tutorial_seen) and from every "How to play" button: openTutorial().
+//
+// The tanks in the pictures light their 6-LED strips as the real ones do
+// (ESP32/thundergeddon/src/LedController.h): see the LED part below.
 
 (() => {
   const root = document.getElementById('tutorial');
@@ -83,6 +86,7 @@
       el.classList.remove('play');
       void el.getBoundingClientRect();
       el.classList.add('play');
+      el.playStart = performance.now();
     }
     if (page === CONTROLS) showStep();
     Array.from(dots.children).forEach((d, i) => d.classList.toggle('on', i === page));
@@ -113,12 +117,13 @@
     void root.getBoundingClientRect();
     root.classList.add('open');
     nextBtn.focus({ preventScroll: true });
+    startLeds();
   }
 
   function close() {
     root.classList.remove('open');
     pages.forEach((el) => el.classList.remove('play'));
-    closeTimer = setTimeout(() => { root.hidden = true; }, 260);
+    closeTimer = setTimeout(() => { root.hidden = true; ledsRunning = false; }, 260);
   }
 
   root.addEventListener('click', (e) => {
@@ -150,6 +155,132 @@
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) (dx < 0 ? next : prev)();
   });
   root.addEventListener('pointercancel', () => { swipe = null; });
+
+  // ── The tanks' LEDs ──────────────────────────────────────────────────────
+  // Shown as a bar above each tank, coloured and flashing as the tank's
+  // strip of 6 LEDs does (LedController.h): the bar is six parts, 0 at the
+  // back to 5 at the front, so a fill "from the front" fills from the end the
+  // tank faces. Places are in the tank picture's own pixels (480 wide); the
+  // jungle tank faces the other way.
+  const BAR = { desert: { x: 84, back: 'left' }, jungle: { x: 118, back: 'right' } }; // centred over the hull
+  const BAR_W = 260;
+  const BAR_H = 34;
+  const BAR_Y = -52;
+  const OFF = '#0a0a10';
+  const BLUE = '#3d7dff';     // the HP bar (dim blue on a real tank)
+  const WHITE = '#ffffff';
+  const DIM_WHITE = '#b9bdc9';
+  const RED = '#ff2a2a';
+  const GREEN = '#2ee05a';
+  const GOLD = '#ffa500';
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs).forEach((k) => el.setAttribute(k, attrs[k]));
+    return el;
+  }
+
+  const strips = Array.from(root.querySelectorAll('.tut-leds')).map((g, n) => {
+    const bar = BAR[g.dataset.kind];
+    const id = 'tut-bar-' + n;
+    const clip = svgEl('clipPath', { id });
+    clip.appendChild(svgEl('rect', { x: bar.x, y: BAR_Y, width: BAR_W, height: BAR_H, rx: BAR_H / 2 }));
+    g.appendChild(clip);
+    const parts = svgEl('g', { 'clip-path': `url(#${id})` });
+    g.appendChild(parts);
+    const w = BAR_W / 6;
+    const leds = [0, 1, 2, 3, 4, 5].map((i) => {
+      const slot = bar.back === 'left' ? i : 5 - i;
+      // a hair wider than its share, so no seams show between the parts
+      const core = svgEl('rect', { x: bar.x + slot * w - 0.5, y: BAR_Y, width: w + 1, height: BAR_H, fill: OFF, 'fill-opacity': 0.8 });
+      parts.appendChild(core);
+      return { core, colour: '' };
+    });
+    g.appendChild(svgEl('rect', { x: bar.x, y: BAR_Y, width: BAR_W, height: BAR_H, rx: BAR_H / 2,
+      fill: 'none', stroke: '#fff', 'stroke-opacity': 0.9, 'stroke-width': 3 }));
+    return { page: g.closest('.tut-page'), mode: g.dataset.led, leds };
+  });
+
+  function paint(strip, colours) {
+    strip.leds.forEach((led, i) => {
+      const c = colours[i] || '';
+      if (c === led.colour) return;
+      led.colour = c;
+      led.core.setAttribute('fill', c || OFF);
+      led.core.setAttribute('fill-opacity', c ? 1 : 0.8);
+    });
+  }
+
+  // The firmware's patterns: each returns six colours ('' = off).
+  const all = (c) => [c, c, c, c, c, c];
+  // HP bar: lit from the front; down to one LED, the front one pulses (0.5 s).
+  function hpBar(lit, t) {
+    if (lit <= 1) return ['', '', '', '', '', Math.floor(t / 500) % 2 ? '' : BLUE];
+    return [0, 1, 2, 3, 4, 5].map((i) => (i >= 6 - lit ? BLUE : ''));
+  }
+  // Base repair: green fills back to front (750 ms), then white flashes
+  // (90 ms each), 1200 ms in all.
+  function heal(dt) {
+    if (dt < 750) {
+      const n = Math.floor(dt * 6 / 750);
+      return [0, 1, 2, 3, 4, 5].map((i) => (i < n ? GREEN : ''));
+    }
+    return (dt - 750) % 90 < 45 ? all(WHITE) : all('');
+  }
+  // Can't be hurt (5 s after a repair): dim white and the HP bar, 4 times a second.
+  function invulnerable(dt, lit) {
+    return Math.floor(dt / 125) % 2 ? hpBar(lit, dt) : all(DIM_WHITE);
+  }
+  // Capture: gold pairs from the ends in, 150 ms each, then all gold to 650 ms.
+  function capture(dt) {
+    if (dt >= 450) return all(GOLD);
+    const pairs = Math.floor(dt / 150) + 1;
+    return [0, 1, 2, 3, 4, 5].map((i) => (i < pairs || i >= 6 - pairs ? GOLD : ''));
+  }
+
+  // What each tank shows over its picture's loop (t = ms into the loop; the
+  // times match the CSS keyframes in tutorial.css).
+  const SCRIPTS = {
+    // How to win: hit (red, 300 ms) when the explosion shows (58% of 2.6 s).
+    hit: { loop: 2600, mover: '.t2-tank', at: (t) => (t < 1508 ? hpBar(4, t) : t < 1808 ? all(RED) : hpBar(3, t)) },
+    // Capturing: full HP; captures when fully past the point (52% of 9 s).
+    capture: { loop: 9000, mover: '.t4-tank', at: (t) => (t >= 4680 && t < 5330 ? capture(t - 4680) : hpBar(6, t)) },
+    // Repair: one LED left (pulsing) until the reader at the back passes the
+    // base's tag (41.9% of 9 s), then the repair and 5 s of flicker.
+    repair: { loop: 9000, mover: '.t5-tank', at: (t) => {
+      const dt = t - 3770;
+      if (dt < 0) return hpBar(1, t);
+      if (dt < 1200) return heal(dt);
+      return dt < 6200 ? invulnerable(dt - 1200, 6) : hpBar(6, t);
+    } },
+  };
+
+  // Each page's loop time comes from its own CSS animation, so the lights
+  // stay in step with the pictures.
+  function loopTime(strip, script, now) {
+    if (!script.loop) return now;
+    const mover = strip.page.querySelector(script.mover);
+    const a = mover && mover.getAnimations ? mover.getAnimations()[0] : null;
+    const t = a && a.currentTime != null ? a.currentTime : now - (strip.page.playStart || 0);
+    return ((t % script.loop) + script.loop) % script.loop;
+  }
+
+  let ledsRunning = false;
+  function frame(now) {
+    if (!ledsRunning) return;
+    strips.forEach((strip) => {
+      if (!strip.page.classList.contains('active')) return;
+      const script = SCRIPTS[strip.mode];
+      if (script) paint(strip, script.at(loopTime(strip, script, now)));
+    });
+    requestAnimationFrame(frame);
+  }
+  function startLeds() {
+    if (ledsRunning || !strips.length) return;
+    ledsRunning = true;
+    requestAnimationFrame(frame);
+  }
 
   window.openTutorial = open;
   window.tutorialSeen = () => {

@@ -187,7 +187,7 @@
 .tut-svg text { font-family: inherit; }
 .tut-bubble { opacity: 0; }
 
-/* ── 1. Two squads ── */
+/* ── Two squads ── */
 .tut-squad { font-size: 13px; font-weight: 900; letter-spacing: 0.12em; text-anchor: middle; }
 .tut-squad.desert { fill: var(--desert); }
 .tut-squad.jungle { fill: var(--jungle); }
@@ -202,7 +202,21 @@
 @keyframes t1-vs { from { transform: scale(0); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes tut-rumble { 0%, 100% { transform: none; } 50% { transform: translateY(-0.6px); } }
 
-/* ── 2. How to win ── */
+/* ── Bases and capture points ── */
+.tb-label { font-size: 10px; font-weight: 900; letter-spacing: 0.08em; fill: #fff; text-anchor: middle; }
+.tb-label.desert { fill: var(--desert); }
+.tb-label.jungle { fill: var(--jungle); }
+.tb-pop { transform-box: fill-box; transform-origin: 50% 100%; }
+.play .tb-pop { animation: tb-pop 0.45s cubic-bezier(.3,1.6,.5,1) both !important; }
+.play .tb-d1 { animation-delay: 0.12s !important; }
+.play .tb-d2 { animation-delay: 0.24s !important; }
+.play .tb-d3 { animation-delay: 0.36s !important; }
+.play .tb-d4 { animation-delay: 0.48s !important; }
+.play .tb-labels { animation: tb-fade 0.4s 0.6s both !important; }
+@keyframes tb-pop { from { transform: scale(0); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes tb-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── How to win ── */
 .t2-label { font-size: 12px; font-weight: 900; letter-spacing: 0.08em; fill: #fff; text-anchor: middle; }
 .t2-or { font-size: 18px; font-weight: 900; fill: var(--muted); text-anchor: middle; }
 .t2-boom, .t2-cross { transform-box: fill-box; transform-origin: center; }
@@ -218,7 +232,7 @@
 @keyframes t2-glow { 0%, 25% { opacity: 0; } 50%, 85% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes t2-flag { 0%, 20% { transform: translateY(32px); opacity: 0; } 45%, 88% { transform: none; opacity: 1; } 100% { transform: none; opacity: 0; } }
 
-/* ── 3. Controls ── */
+/* ── Controls ── */
 .t3-phone { fill: #050508; stroke: #3a3a5a; stroke-width: 1; }
 .t3-txt { fill: #fff; font-weight: 800; text-anchor: middle; }
 .t3-zone { font-size: 3.4px; fill-opacity: 0.8; }
@@ -235,64 +249,61 @@
 .tut-controls.play .t3-mock[data-step="turn"] .t3-thumb { animation: t3-leftright 2s ease-in-out infinite !important; }
 .tut-controls.play .t3-mock[data-step="fire"] .t3-fire { animation: t3-press 1.4s ease-in-out infinite !important; }
 .tut-controls.play .t3-mock[data-step="fire"] .t3-ring { animation: t3-ring 1.4s ease-out infinite !important; }
-.tut-controls.play .t3-mock[data-step="turret"] .t3-tthumb { animation: t3-slide 3s ease-in-out infinite !important; }
-.tut-controls.play .t3-mock[data-step="turret"] .t3-view { animation: t3-pan 3s ease-in-out infinite !important; }
+.tut-controls.play .t3-mock[data-step="turret"] .t3-tthumb { animation: t3-slide 6s ease-in-out infinite !important; }
+.tut-controls.play .t3-mock[data-step="turret"] .t3-view { animation: t3-pan 6s linear infinite !important; }
 .tut-controls.play .t3-mock[data-step="hp"] .t3-hpfill { animation: t3-hp 3s ease-in-out infinite !important; }
 @keyframes t3-bob { 0%, 100% { transform: translateX(-4px); } 50% { transform: none; } }
 @keyframes t3-updown { 0%, 100% { transform: none; } 25% { transform: translateY(-17px); } 50% { transform: none; } 75% { transform: translateY(17px); } }
 @keyframes t3-leftright { 0%, 100% { transform: none; } 25% { transform: translateX(-17px); } 50% { transform: none; } 75% { transform: translateX(17px); } }
 @keyframes t3-press { 0%, 30%, 60%, 100% { transform: none; } 40% { transform: scale(0.86); } }
 @keyframes t3-ring { 0%, 40% { opacity: 0; transform: none; } 45% { opacity: 1; } 100% { opacity: 0; transform: scale(2); } }
-@keyframes t3-slide { 0%, 100% { transform: none; } 25% { transform: translateX(-30px); } 50% { transform: none; } 75% { transform: translateX(30px); } }
-@keyframes t3-pan { 0%, 100% { transform: none; } 25% { transform: translateX(60px); } 50% { transform: none; } 75% { transform: translateX(-60px); } }
+@keyframes t3-slide { 0%, 50%, 100% { transform: none; } 5%, 45% { transform: translateX(-30px); } 55%, 95% { transform: translateX(30px); } }
+@keyframes t3-pan { 0%, 5% { transform: none; } 45%, 55% { transform: translateX(216px); } 95%, 100% { transform: none; } }
 @keyframes t3-hp { 0%, 15% { transform: none; fill: #1E90FF; } 28% { transform: scaleX(0.7); fill: #1E90FF; } 50% { transform: scaleX(0.45); fill: #ff8c00; } 72%, 85% { transform: scaleX(0.18); fill: #ff2828; } 100% { transform: none; fill: #1E90FF; } }
 
 .t3-step { color: var(--muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
 .t3-title { color: #ffd23c; font-size: 1.25em; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; margin: 2px 0; }
 
-/* ── 4. Capture points: drive all the way over ── */
+/* ── Capture points: drive all the way over ── */
 .t4-glow { opacity: 0; }
-.tut-page.play .t4-tank { animation: t4-drive 8s ease-in-out infinite !important; }
-.tut-page.play .t4-no { animation: t4-no 8s linear infinite !important; }
-.tut-page.play .t4-yes { animation: t4-yes 8s linear infinite !important; }
-.tut-page.play .t4-glow { animation: t4-glow 8s linear infinite !important; }
+.tut-page.play .t4-tank { animation: t4-drive 9s linear infinite !important; }
+.tut-page.play .t4-no { animation: t4-no 9s linear infinite !important; }
+.tut-page.play .t4-yes { animation: t4-yes 9s linear infinite !important; }
+.tut-page.play .t4-glow { animation: t4-glow 9s linear infinite !important; }
 .tut-page.play .t4-tag { animation: tut-blink 1s ease-in-out infinite !important; }
 .t4-tag { transform-box: fill-box; transform-origin: center; }
+/* Tanks run at full speed or not at all, so: linear, sudden stops. The RFID
+   reader is at the back: sitting on the point (20-38%) isn't enough; it
+   captures once the tank is fully past (52%, tutorial.js's capture LEDs). */
 @keyframes t4-drive {
   0% { transform: translateX(-160px); }
-  22%, 40% { transform: translateX(40px); }
-  55%, 82% { transform: translateX(93px); }
+  20%, 38% { transform: translateX(43px); }
+  52%, 85% { transform: translateX(124px); }
   100% { transform: translateX(340px); }
 }
-@keyframes t4-no { 0%, 23% { opacity: 0; } 26%, 38% { opacity: 1; } 41%, 100% { opacity: 0; } }
-@keyframes t4-yes { 0%, 56% { opacity: 0; } 59%, 88% { opacity: 1; } 91%, 100% { opacity: 0; } }
-@keyframes t4-glow { 0%, 55% { opacity: 0; } 60%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes t4-no { 0%, 21% { opacity: 0; } 23%, 36% { opacity: 1; } 38%, 100% { opacity: 0; } }
+@keyframes t4-yes { 0%, 52% { opacity: 0; } 54%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
+@keyframes t4-glow { 0%, 51% { opacity: 0; } 55%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
 @keyframes tut-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-/* ── 5. Damaged or destroyed: back to base ── */
+/* ── Damaged or destroyed: back to base ── */
 .t5-glow { opacity: 0; }
-.t5-hp { fill: #ff2828; transform: scaleX(0.15); }
 .t5-smoke circle { transform-box: fill-box; transform-origin: center; }
-.tut-page.play .t5-tank { animation: t5-drive 8s ease-in-out infinite !important; }
-.tut-page.play .t5-hp { animation: t5-hp 8s linear infinite !important; }
-.tut-page.play .t5-glow { animation: t5-glow 8s linear infinite !important; }
-.tut-page.play .t5-yes { animation: t5-yes 8s linear infinite !important; }
-.tut-page.play .t5-smoke { animation: t5-smoke-on 8s linear infinite !important; }
+.tut-page.play .t5-tank { animation: t5-drive 9s linear infinite !important; }
+.tut-page.play .t5-glow { animation: t5-glow 9s linear infinite !important; }
+.tut-page.play .t5-yes { animation: t5-yes 9s linear infinite !important; }
+.tut-page.play .t5-smoke { animation: t5-smoke-on 9s linear infinite !important; }
 .tut-page.play .t5-smoke circle { animation: t5-puff 1.2s ease-out infinite !important; }
-.tut-page.play .t5-smoke circle:nth-child(2) { animation-delay: -0.4s; }
-.tut-page.play .t5-smoke circle:nth-child(3) { animation-delay: -0.8s; }
+.tut-page.play .t5-smoke circle:nth-child(2) { animation-delay: -0.4s !important; }
+.tut-page.play .t5-smoke circle:nth-child(3) { animation-delay: -0.8s !important; }
 @keyframes t5-drive {
   0% { transform: translateX(-160px); }
-  35%, 85% { transform: translateX(143px); }
+  45%, 85% { transform: translateX(176px); }
   100% { transform: translateX(340px); }
 }
-@keyframes t5-hp {
-  0%, 38% { transform: scaleX(0.15); fill: #ff2828; }
-  55%, 100% { transform: none; fill: #1E90FF; }
-}
-@keyframes t5-glow { 0%, 35% { opacity: 0; } 40%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes t5-glow { 0%, 41% { opacity: 0; } 45%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
 @keyframes t5-yes { 0%, 54% { opacity: 0; } 57%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
-@keyframes t5-smoke-on { 0%, 38% { opacity: 1; } 48%, 100% { opacity: 0; } }
+@keyframes t5-smoke-on { 0%, 42% { opacity: 1; } 48%, 100% { opacity: 0; } }
 @keyframes t5-puff { from { transform: translateY(4px) scale(0.5); opacity: 0.9; } to { transform: translateY(-22px) scale(1.6); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
