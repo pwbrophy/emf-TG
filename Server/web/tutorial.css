@@ -255,19 +255,24 @@
 .tut-page.play .t4-glow { animation: t4-glow 9s linear infinite !important; }
 .tut-page.play .t4-tag { animation: tut-blink 1s ease-in-out infinite !important; }
 .t4-tag { transform-box: fill-box; transform-origin: center; }
-/* Tanks run at full speed or not at all, so: linear, sudden stops. The RFID
+/* Tanks run at full speed or not at all: steady speed, with a 0.2 s ease
+   into each stop and out of each start. The RFID
    reader is at the back: sitting on the point (20-38%) isn't enough; it
-   captures as the back of the tank passes over its tag (48.3%: tutorial.js's
+   captures as the back of the tank passes over its tag (47.8%: tutorial.js's
    capture colours), and stops just past it (52%). */
 @keyframes t4-drive {
-  0% { transform: translateX(-160px); }
-  20%, 38% { transform: translateX(43px); }
-  52%, 85% { transform: translateX(124px); }
+  0% { transform: translateX(-160px); animation-timing-function: linear; }
+  17.778% { transform: translateX(31.06px); animation-timing-function: cubic-bezier(0, 0, .5, 1); }
+  20%, 38% { transform: translateX(43px); animation-timing-function: cubic-bezier(.5, 0, 1, 1); }
+  40.222% { transform: translateX(50.64px); animation-timing-function: linear; }
+  49.778% { transform: translateX(116.36px); animation-timing-function: cubic-bezier(0, 0, .5, 1); }
+  52%, 85% { transform: translateX(124px); animation-timing-function: cubic-bezier(.5, 0, 1, 1); }
+  87.222% { transform: translateX(141.28px); animation-timing-function: linear; }
   100% { transform: translateX(340px); }
 }
 @keyframes t4-no { 0%, 21% { opacity: 0; } 23%, 36% { opacity: 1; } 38%, 100% { opacity: 0; } }
-@keyframes t4-yes { 0%, 48.3% { opacity: 0; } 50%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
-@keyframes t4-glow { 0%, 48.3% { opacity: 0; } 51%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes t4-yes { 0%, 47.8% { opacity: 0; } 49.5%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
+@keyframes t4-glow { 0%, 47.8% { opacity: 0; } 50.5%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
 @keyframes tut-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ── Damaged or destroyed: back to base ── */
@@ -280,12 +285,14 @@
 .tut-page.play .t5-smoke circle:nth-child(2) { animation-delay: -0.4s !important; }
 .tut-page.play .t5-smoke circle:nth-child(3) { animation-delay: -0.8s !important; }
 @keyframes t5-drive {
-  0% { transform: translateX(-160px); }
-  45%, 85% { transform: translateX(146px); }
+  0% { transform: translateX(-160px); animation-timing-function: linear; }
+  42.778% { transform: translateX(138.25px); animation-timing-function: cubic-bezier(0, 0, .5, 1); }
+  45%, 85% { transform: translateX(146px); animation-timing-function: cubic-bezier(.5, 0, 1, 1); }
+  87.222% { transform: translateX(161.52px); animation-timing-function: linear; }
   100% { transform: translateX(340px); }
 }
-@keyframes t5-glow { 0%, 38.2% { opacity: 0; } 41%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
-@keyframes t5-yes { 0%, 51.6% { opacity: 0; } 54%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
+@keyframes t5-glow { 0%, 37.3% { opacity: 0; } 40.1%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes t5-yes { 0%, 50.6% { opacity: 0; } 53.0%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
 @keyframes t5-puff { from { transform: translateY(4px) scale(0.5); opacity: 0.9; } to { transform: translateY(-22px) scale(1.6); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
