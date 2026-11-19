@@ -20,27 +20,49 @@
   const pointer = document.getElementById('tut-pointer');
   const CONTROLS = pages.findIndex((p) => p.classList.contains('tut-controls'));
 
-  // The controls page: what each pointer shows. x, y = where the arrow's tip
-  // sits on the mock game screen (its 216 × 100 units, see index.html); a =
-  // the way it points, in degrees (0 = right, 90 = down).
+  // The controls page, one step per control. On the mock game screen (its
+  // 216 x 100 units; the phone around it reaches 8 units further out):
+  // tip = where the arrow points, from = where it starts, outside the phone,
+  // so it's plainly not part of the game; hole = the part left lit while the
+  // rest of the screen is darkened (a circle [x, y, r] or a rounded box
+  // [x, y, w, h, r]).
   const STEPS = [
-    { key: 'drive', x: 63, y: 38, a: 135, title: 'Drive forward / backward' },
-    { key: 'turn', x: 63, y: 38, a: 135, title: 'Turn left / right' },
-    { key: 'fire', x: 158, y: 54.6, a: 0, title: 'Fire' },
-    { key: 'turret', x: 124, y: 69.5, a: 60, title: 'Turn turret' },
-    { key: 'hp', x: 95, y: 12.5, a: -90, title: 'Hit points' },
+    { key: 'drive', tip: [19, 82], from: [-22, 123], hole: [40.3, 60.5, 32], title: 'Drive forward / backward' },
+    { key: 'turn', tip: [19, 82], from: [-22, 123], hole: [40.3, 60.5, 32], title: 'Turn left / right' },
+    { key: 'fire', tip: [186, 54.6], from: [246, 54.6], hole: [172, 54.6, 14.5], title: 'Fire' },
+    { key: 'turret', tip: [148.3, 91.5], from: [148.3, 128], hole: [99.7, 68.8, 97.2, 23.7, 11.8], title: 'Turn turret' },
+    { key: 'hp', tip: [108, 2.6], from: [108, -30], hole: [30, 0.7, 156, 13, 6.5], title: 'Hit points' },
   ];
+  const shade = document.getElementById('tut-shade');
+  const shape = document.getElementById('tut-pointer-shape');
+
+  function holePath(h) {
+    if (h.length === 3) {
+      const [x, y, r] = h;
+      return `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`;
+    }
+    const [x, y, w, hh, r] = h;
+    return `M${x + r} ${y}H${x + w - r}a${r} ${r} 0 0 1 ${r} ${r}V${y + hh - r}a${r} ${r} 0 0 1 ${-r} ${r}` +
+      `H${x + r}a${r} ${r} 0 0 1 ${-r} ${-r}V${y + r}a${r} ${r} 0 0 1 ${r} ${-r}Z`;
+  }
 
   let page = 0;
   let step = 0;
 
   dots.innerHTML = pages.map(() => '<span></span>').join('');
 
-  function showStep(jump) {
+  function showStep() {
     const s = STEPS[step];
     mock.setAttribute('data-step', s.key);
-    pointer.classList.toggle('jump', !!jump);
-    pointer.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.a}deg)`;
+    shade.setAttribute('d', 'M-10 -10H226V110H-10Z' + holePath(s.hole));
+    const dx = s.tip[0] - s.from[0];
+    const dy = s.tip[1] - s.from[1];
+    const len = Math.hypot(dx, dy);
+    shape.setAttribute('d', `M0 0L-10 -8V-3.4H${-len}V3.4H-10V8Z`);
+    pointer.setAttribute('transform', `translate(${s.tip[0]} ${s.tip[1]}) rotate(${Math.atan2(dy, dx) * 180 / Math.PI})`);
+    pointer.classList.remove('enter');
+    void pointer.getBoundingClientRect();
+    pointer.classList.add('enter');
     document.getElementById('tut-step-n').textContent = step + 1;
     document.getElementById('tut-step-title').textContent = s.title;
   }
@@ -62,7 +84,7 @@
       void el.getBoundingClientRect();
       el.classList.add('play');
     }
-    if (page === CONTROLS) showStep(changed);
+    if (page === CONTROLS) showStep();
     Array.from(dots.children).forEach((d, i) => d.classList.toggle('on', i === page));
     prevBtn.disabled = page === 0;
     const last = page === pages.length - 1;

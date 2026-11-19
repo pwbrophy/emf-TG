@@ -222,19 +222,14 @@
 .t3-phone { fill: #050508; stroke: #3a3a5a; stroke-width: 1; }
 .t3-txt { fill: #fff; font-weight: 800; text-anchor: middle; }
 .t3-zone { font-size: 3.4px; fill-opacity: 0.8; }
-.t3-mock [data-part] { opacity: 0.3; transition: opacity 0.3s ease; }
-.t3-mock[data-step="drive"] [data-part="stick"],
-.t3-mock[data-step="turn"] [data-part="stick"],
-.t3-mock[data-step="fire"] [data-part="fire"],
-.t3-mock[data-step="turret"] [data-part="turret"],
-.t3-mock[data-step="hp"] [data-part="hp"] { opacity: 1; }
+.t3-shade { fill: #000; fill-opacity: 0.68; }
 .t3-dir { opacity: 0; transition: opacity 0.3s ease; }
 .t3-mock[data-step="drive"] .t3-dir-v,
 .t3-mock[data-step="turn"] .t3-dir-h { opacity: 1; }
 .t3-ring { opacity: 0; transform-box: fill-box; transform-origin: center; }
 .t3-fire { transform-box: fill-box; transform-origin: center; }
-.t3-pointer { transition: transform 0.45s cubic-bezier(.4,0,.2,1); }
-.t3-pointer.jump { transition: none; }
+.t3-pointer.enter { animation: t3-enter 0.35s ease-out !important; }
+@keyframes t3-enter { from { opacity: 0; } to { opacity: 1; } }
 .t3-pointer-bob { animation: t3-bob 0.8s ease-in-out infinite !important; }
 .tut-controls.play .t3-mock[data-step="drive"] .t3-thumb { animation: t3-updown 2s ease-in-out infinite !important; }
 .tut-controls.play .t3-mock[data-step="turn"] .t3-thumb { animation: t3-leftright 2s ease-in-out infinite !important; }
@@ -262,10 +257,11 @@
 .tut-page.play .t4-yes { animation: t4-yes 8s linear infinite !important; }
 .tut-page.play .t4-glow { animation: t4-glow 8s linear infinite !important; }
 .tut-page.play .t4-tag { animation: tut-blink 1s ease-in-out infinite !important; }
+.t4-tag { transform-box: fill-box; transform-origin: center; }
 @keyframes t4-drive {
-  0% { transform: translateX(-130px); }
-  22%, 40% { transform: translateX(28px); }
-  55%, 82% { transform: translateX(105px); }
+  0% { transform: translateX(-160px); }
+  22%, 40% { transform: translateX(40px); }
+  55%, 82% { transform: translateX(93px); }
   100% { transform: translateX(340px); }
 }
 @keyframes t4-no { 0%, 23% { opacity: 0; } 26%, 38% { opacity: 1; } 41%, 100% { opacity: 0; } }
@@ -274,7 +270,6 @@
 @keyframes tut-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ── 5. Damaged or destroyed: back to base ── */
-.t5-label { font-size: 11px; font-weight: 900; letter-spacing: 0.1em; fill: var(--desert); text-anchor: middle; }
 .t5-glow { opacity: 0; }
 .t5-hp { fill: #ff2828; transform: scaleX(0.15); }
 .t5-smoke circle { transform-box: fill-box; transform-origin: center; }
@@ -287,8 +282,8 @@
 .tut-page.play .t5-smoke circle:nth-child(2) { animation-delay: -0.4s; }
 .tut-page.play .t5-smoke circle:nth-child(3) { animation-delay: -0.8s; }
 @keyframes t5-drive {
-  0% { transform: translateX(-130px); }
-  35%, 85% { transform: translateX(155px); }
+  0% { transform: translateX(-160px); }
+  35%, 85% { transform: translateX(143px); }
   100% { transform: translateX(340px); }
 }
 @keyframes t5-hp {
