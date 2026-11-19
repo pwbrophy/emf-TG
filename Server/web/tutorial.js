@@ -248,7 +248,8 @@
     capture: { loop: 9000, mover: '.t4-tank', at: (t) => (t >= 4680 && t < 5330 ? capture(t - 4680) : hpBar(6, t)) },
     // Repair: one LED left (pulsing) until the reader at the back passes the
     // base's tag (41.9% of 9 s), then the repair and 5 s of flicker.
-    repair: { loop: 9000, mover: '.t5-tank', at: (t) => {
+    // Its smoke stops when the repair starts (see frame()).
+    repair: { loop: 9000, mover: '.t5-tank', smoke: '.t5-smoke', repairAt: 3770, at: (t) => {
       const dt = t - 3770;
       if (dt < 0) return hpBar(1, t);
       if (dt < 1200) return heal(dt);
@@ -272,7 +273,15 @@
     strips.forEach((strip) => {
       if (!strip.page.classList.contains('active')) return;
       const script = SCRIPTS[strip.mode];
-      if (script) paint(strip, script.at(loopTime(strip, script, now)));
+      if (!script) return;
+      const t = loopTime(strip, script, now);
+      paint(strip, script.at(t));
+      if (script.smoke) {
+        // Smoke while damaged; gone within 0.3 s of the repair starting.
+        const smoke = strip.page.querySelector(script.smoke);
+        const o = t < script.repairAt ? 1 : Math.max(0, 1 - (t - script.repairAt) / 300);
+        if (smoke && smoke.getAttribute('opacity') !== String(o)) smoke.setAttribute('opacity', o);
+      }
     });
     requestAnimationFrame(frame);
   }
