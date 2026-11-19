@@ -257,7 +257,8 @@
 .t4-tag { transform-box: fill-box; transform-origin: center; }
 /* Tanks run at full speed or not at all, so: linear, sudden stops. The RFID
    reader is at the back: sitting on the point (20-38%) isn't enough; it
-   captures once the tank is fully past (52%, tutorial.js's capture LEDs). */
+   captures as the back of the tank passes over its tag (48.3%: tutorial.js's
+   capture colours), and stops just past it (52%). */
 @keyframes t4-drive {
   0% { transform: translateX(-160px); }
   20%, 38% { transform: translateX(43px); }
@@ -265,8 +266,8 @@
   100% { transform: translateX(340px); }
 }
 @keyframes t4-no { 0%, 21% { opacity: 0; } 23%, 36% { opacity: 1; } 38%, 100% { opacity: 0; } }
-@keyframes t4-yes { 0%, 52% { opacity: 0; } 54%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
-@keyframes t4-glow { 0%, 51% { opacity: 0; } 55%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes t4-yes { 0%, 48.3% { opacity: 0; } 50%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
+@keyframes t4-glow { 0%, 48.3% { opacity: 0; } 51%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
 @keyframes tut-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ── Damaged or destroyed: back to base ── */
@@ -280,11 +281,11 @@
 .tut-page.play .t5-smoke circle:nth-child(3) { animation-delay: -0.8s !important; }
 @keyframes t5-drive {
   0% { transform: translateX(-160px); }
-  45%, 85% { transform: translateX(176px); }
+  45%, 85% { transform: translateX(146px); }
   100% { transform: translateX(340px); }
 }
-@keyframes t5-glow { 0%, 41% { opacity: 0; } 45%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
-@keyframes t5-yes { 0%, 54% { opacity: 0; } 57%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
+@keyframes t5-glow { 0%, 38.2% { opacity: 0; } 41%, 88% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes t5-yes { 0%, 51.6% { opacity: 0; } 54%, 86% { opacity: 1; } 89%, 100% { opacity: 0; } }
 @keyframes t5-puff { from { transform: translateY(4px) scale(0.5); opacity: 0.9; } to { transform: translateY(-22px) scale(1.6); opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
